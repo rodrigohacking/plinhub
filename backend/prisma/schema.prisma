@@ -1,0 +1,110 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model Company {
+  id          Int       @id @default(autoincrement())
+  name        String
+  cnpj        String?
+  logo        String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  integrations Integration[]
+  metrics      Metric[]
+  syncLogs     SyncLog[]
+}
+
+model Integration {
+  id          Int       @id @default(autoincrement())
+  companyId   Int
+  company     Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  
+  type        String    // 'pipefy' | 'meta_ads'
+  
+  // Pipefy Fields
+  pipefyOrgId     String?
+  pipefyPipeId    String?
+  pipefyToken     String?  // Encrypted
+  
+  // Meta Ads Fields
+  metaAdAccountId String?
+  metaAccessToken String?  // Encrypted
+  metaBusinessId  String?
+  metaAccountName String?
+  metaTokenExpiry DateTime?
+  metaStatus      String?  // 'active' | 'restricted' | 'disabled'
+  
+  isActive    Boolean   @default(true)
+  lastSync    DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  @@unique([companyId, type])
+  @@index([companyId])
+}
+
+model Metric {
+  id          Int       @id @default(autoincrement())
+  companyId   Int
+  company     Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  
+  source      String    // 'meta_ads' | 'pipefy'
+  date        DateTime
+  
+  // Meta Ads Metrics
+  spend           Float?
+  impressions     Int?
+  clicks          Int?
+  conversions     Int?
+  roas            Float?
+  cpc             Float?
+  cpm             Float?
+  ctr             Float?
+  reach           Int?
+  frequency       Float?
+  
+  // Pipefy Metrics
+  cardsCreated    Int?
+  cardsQualified  Int?
+  cardsConverted  Int?
+  cardsLost       Int?
+  avgCycleTime    Float?  // in hours
+  conversionRate  Float?  // percentage
+  cardsByPhase    String?   // JSON string: { "phase_name": count }
+  
+  // Additional metadata
+  label       String    @default("all")
+  metadata    String?  // JSON string
+  createdAt   DateTime  @default(now())
+  
+  @@unique([companyId, date, source, label])
+  @@index([companyId, date])
+  @@index([source])
+}
+
+model SyncLog {
+  id          Int       @id @default(autoincrement())
+  companyId   Int
+  company     Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  
+  source      String    // 'meta_ads' | 'pipefy'
+  status      String    // 'success' | 'error' | 'partial'
+  message     String?
+  errorDetails String?
+  duration    Int?      // milliseconds
+  recordsProcessed Int?
+  
+  createdAt   DateTime  @default(now())
+  
+  @@index([companyId, createdAt])
+  @@index([status])
+}
