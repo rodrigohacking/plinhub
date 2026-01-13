@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Camera, Save, User, Mail, Lock, Building, Loader2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../lib/supabase';
 import { toast } from 'sonner';
 
 export function UserProfile({ data, onSave }) {
@@ -8,20 +9,15 @@ export function UserProfile({ data, onSave }) {
     const fileInputRef = React.useRef(null);
     const [isSaving, setIsSaving] = useState(false);
     const [formData, setFormData] = useState(() => {
-        const saved = localStorage.getItem('plin_user_profile');
-        let localData = {};
-        if (saved) {
-            try { localData = JSON.parse(saved); } catch (e) { }
-        }
-
+        // Init from User Context (managed by AuthContext which handles persistence)
         return {
-            name: localData.name || user?.user_metadata?.name || user?.name || 'Usuário Admin',
-            email: localData.email || user?.email || 'admin@grupoplin.com',
-            role: localData.role || user?.user_metadata?.role || user?.role || 'Administrador Global',
-            bio: localData.bio || user?.user_metadata?.bio || user?.bio || 'Gerente de Vendas e Marketing.',
+            name: user?.user_metadata?.name || user?.name || '',
+            email: user?.email || '',
+            role: user?.user_metadata?.role || user?.role || '',
+            bio: user?.user_metadata?.bio || user?.bio || '',
             password: '',
             confirmPassword: '',
-            photoUrl: localData.photoUrl || user?.user_metadata?.photoUrl || user?.photoUrl || ''
+            photoUrl: user?.user_metadata?.photoUrl || user?.photoUrl || ''
         };
     });
 
@@ -99,20 +95,42 @@ export function UserProfile({ data, onSave }) {
             // Simulate a brief delay for UX
             await new Promise(resolve => setTimeout(resolve, 800));
 
-            // Remove passwords from storage data
-            const { password, confirmPassword, ...profileData } = formData;
+            // 1. Update Password if provided
+            if (formData.password) {
+                const { error: passwordError } = await supabase.auth.updateUser({
+                    password: formData.password
+                });
 
+                if (passwordError) {
+                    console.error("Password update error:", passwordError);
+                    toast.error('Erro ao atualizar senha', {
+                        description: passwordError.message === 'weak_password'
+                            ? 'A senha deve ter pelo menos 6 caracteres.'
+                            : 'Não foi possível alterar sua senha.'
+                    });
+                    setIsSaving(false);
+                    return;
+                }
+
+                toast.success('Senha atualizada com sucesso!');
+            }
+
+            // 2. Update Profile Data
+            const { password, confirmPassword, ...profileData } = formData;
             updateProfile(profileData);
 
             toast.success('Perfil atualizado com sucesso!', {
                 description: 'Suas informações foram salvas.'
             });
 
+            // Clear password fields
+            setFormData(prev => ({ ...prev, password: '', confirmPassword: '' }));
+
             if (onSave) onSave();
         } catch (err) {
             console.error("Profile save error:", err);
             toast.error('Erro ao salvar perfil.', {
-                description: 'Tente usar uma foto menor ou verifique os dados.'
+                description: 'Verifique os dados e tente novamente.'
             });
         } finally {
             setIsSaving(false);
@@ -225,10 +243,14 @@ export function UserProfile({ data, onSave }) {
                                 <input
                                     type="email"
                                     name="email"
-                                    value={formData.email}
-                                    onChange={handleChange}
-                                    className="w-full pl-10 p-3 bg-gray-50 dark:bg-[#1a1a1a] border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white focus:ring-2 focus:ring-[#FD295E] outline-none transition-all"
+                                    value={user?.email || formData.email} // Prefer auth email directly
+                                    readOnly // User cannot change auth email
+                                    disabled
+                                    className="w-full pl-10 p-3 bg-gray-100 dark:bg-[#222] border border-gray-200 dark:border-white/5 rounded-xl text-gray-500 dark:text-gray-400 cursor-not-allowed opacity-75 outline-none transition-all"
                                 />
+                                <span className="absolute right-3 top-3.5 text-xs text-gray-400 flex items-center gap-1">
+                                    <Lock className="w-3 h-3" /> Sistema
+                                </span>
                             </div>
                         </div>
 

@@ -6,6 +6,12 @@ const morgan = require('morgan');
 const session = require('express-session');
 const passport = require('passport');
 
+// Patch BigInt serialization
+BigInt.prototype.toJSON = function () {
+    const int = Number.parseInt(this.toString());
+    return Number.isSafeInteger(int) ? int : this.toString();
+};
+
 // Routes
 const authRoutes = require('./routes/auth');
 const integrationRoutes = require('./routes/integrations');
@@ -50,10 +56,41 @@ app.use('/api/integrations', integrationRoutes);
 app.use('/api/metrics', metricsRoutes);
 app.use('/api/sync', syncRoutes);
 app.use('/api/companies', companyRoutes);
+app.use('/api/invites', require('./routes/invite'));
 
 // Health check
 app.get('/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Proxy Route for Pipefy (Bypassing CORS)
+const axios = require('axios');
+app.post('/api/pipefy', async (req, res) => {
+    try {
+        const { query } = req.body;
+        const authHeader = req.headers.authorization;
+
+        if (!authHeader) {
+            return res.status(401).json({ error: 'Missing Authorization header' });
+        }
+
+        const response = await axios.post('https://api.pipefy.com/graphql',
+            { query },
+            {
+                headers: {
+                    'Authorization': authHeader,
+                    'Content-Type': 'application/json'
+                }
+            }
+        );
+
+        res.json(response.data);
+    } catch (error) {
+        console.error('Pipefy Proxy Error:', error.response?.data || error.message);
+        res.status(error.response?.status || 500).json({
+            error: error.response?.data || { message: error.message }
+        });
+    }
 });
 
 // Error handling

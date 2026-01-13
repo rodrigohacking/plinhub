@@ -42,33 +42,40 @@ export function SidebarNew({ currentView, onNavigate, company }) {
 
     if (!company) return null;
 
+    const handleNav = (view) => {
+        onNavigate(view);
+        if (typeof window !== 'undefined' && window.innerWidth < 768) {
+            setOpen(false);
+        }
+    };
+
     const links = [
         {
             label: "Dashboard Vendas",
-            onClick: () => onNavigate('sales'),
+            onClick: () => handleNav('sales'),
             current: currentView === 'sales',
             icon: <BarChart3 className={cn("h-5 w-5 flex-shrink-0", currentView === 'sales' ? "text-[#FD295E]" : "text-neutral-700 dark:text-neutral-200")} />,
         },
         {
             label: "Dashboard Marketing",
-            onClick: () => onNavigate('marketing'),
+            onClick: () => handleNav('marketing'),
             current: currentView === 'marketing',
             icon: <Megaphone className={cn("h-5 w-5 flex-shrink-0", currentView === 'marketing' ? "text-[#FD295E]" : "text-neutral-700 dark:text-neutral-200")} />,
         },
         {
-            label: "Configurações",
-            onClick: () => onNavigate('settings'),
-            current: currentView === 'settings',
-            icon: <Settings className={cn("h-5 w-5 flex-shrink-0", currentView === 'settings' ? "text-[#FD295E]" : "text-neutral-700 dark:text-neutral-200")} />,
+            label: "Definir Metas",
+            onClick: () => handleNav('set-goals'),
+            current: currentView === 'set-goals',
+            icon: <Target className={cn("h-5 w-5 flex-shrink-0", currentView === 'set-goals' ? "text-[#FD295E]" : "text-neutral-700 dark:text-neutral-200")} />,
         }
     ];
 
     const actions = [
         {
-            label: "Definir Metas",
-            onClick: () => onNavigate('set-goals'),
-            current: currentView === 'set-goals',
-            icon: <Target className={cn("h-5 w-5 flex-shrink-0", currentView === 'set-goals' ? "text-[#FD295E]" : "text-neutral-700 dark:text-neutral-200")} />,
+            label: "Configurações",
+            onClick: () => handleNav('settings'),
+            current: currentView === 'settings',
+            icon: <Settings className={cn("h-5 w-5 flex-shrink-0", currentView === 'settings' ? "text-[#FD295E]" : "text-neutral-700 dark:text-neutral-200")} />,
         }
     ];
 

@@ -12,7 +12,32 @@ import { DateRangeFilter, filterByDateRange } from './DateRangeFilter';
 
 export function DashboardSales({ company, data }) {
     const [dateRange, setDateRange] = useState('this-month');
-    const [activeTab, setActiveTab] = useState('geral'); // geral, sdr, metas
+
+    // DEBUG: Inspect Apolar Data
+    const debugApolar = data.sales.filter(s => s.companyId === company.id).slice(0, 5);
+
+    // Initialize tab from URL or default to 'geral'
+    const [activeTab, setActiveTab] = useState(() => {
+        if (typeof window !== 'undefined') {
+            const params = new URLSearchParams(window.location.search);
+            return params.get('tab') || 'geral';
+        }
+        return 'geral';
+    });
+
+    // Helper to change tab and update URL
+    const handleTabChange = (tab) => {
+        setActiveTab(tab);
+        const url = new URL(window.location);
+
+        if (tab === 'geral') {
+            url.searchParams.delete('tab');
+        } else {
+            url.searchParams.set('tab', tab);
+        }
+
+        window.history.pushState({}, '', url);
+    };
     const [currentPage, setCurrentPage] = useState(1);
     const [itemsPerPage, setItemsPerPage] = useState(10);
     const [sortOption, setSortOption] = useState('date-desc'); // date-desc, date-asc, value-desc, value-asc
@@ -50,8 +75,8 @@ export function DashboardSales({ company, data }) {
 
         // 4. Vendas Fechadas
         // Definition: Phase "Fechamento - Ganho" (ID 338889923) or "Apólice Fechada" (ID 338889934)
-        // CHANGED: Use `createdDeals` (Cohort View) to match user expectation of "Sales from this Month's Leads"
-        const wonDeals = createdDeals.filter(d => ['338889923', '338889934'].includes(String(d.phaseId)) || d.status === 'won');
+        // CHANGED: Use `relevantDeals` (Activity View) to match user request: "All deals that reached Won status in this period", regardless of creation date.
+        const wonDeals = relevantDeals.filter(d => ['338889923', '338889934'].includes(String(d.phaseId)) || d.status === 'won');
         const wonCount = wonDeals.length;
 
         // Goals Logic
@@ -105,22 +130,37 @@ export function DashboardSales({ company, data }) {
     // SDR Agreggations
     const sdrStats = useMemo(() => {
         const map = {};
-        createdDeals.forEach(d => {
-            if (!map[d.seller]) map[d.seller] = {
-                name: d.seller,
-                total: 0,
-                won: 0,
-                wonValue: 0,
+
+        // 1. Pass: Helper to init seller
+        const initSeller = (name) => {
+            if (!map[name]) map[name] = {
+                name: name,
+                total: 0,       // Leads Generated (Created in period)
+                won: 0,         // Deals Won (Won in period)
+                wonValue: 0,    // Revenue (Won in period)
                 daysSum: 0,
                 lostReasons: {}
             };
+        };
+
+        // 2. Pass: Count Leads (from createdDeals)
+        createdDeals.forEach(d => {
+            initSeller(d.seller);
             map[d.seller].total++;
-            if (d.status === 'won') {
+        });
+
+        // 3. Pass: Count Sales/Revenue (from relevantDeals - filtering for WON)
+        // We use relevantDeals because it matches the timeframe for "Activity/Result"
+        relevantDeals.forEach(d => {
+            if (d.status === 'won' || ['338889923', '338889934'].includes(String(d.phaseId))) {
+                initSeller(d.seller);
                 map[d.seller].won++;
                 map[d.seller].wonValue += d.amount;
                 map[d.seller].daysSum += (d.daysToClose || 0);
             }
+            // Optional: Track Lost Reasons from relevantDeals too (Deals lost IN this period)
             if (d.status === 'lost') {
+                initSeller(d.seller);
                 const reason = d.lossReason || 'Outros';
                 map[d.seller].lostReasons[reason] = (map[d.seller].lostReasons[reason] || 0) + 1;
             }
@@ -128,11 +168,11 @@ export function DashboardSales({ company, data }) {
 
         return Object.values(map).map(s => ({
             ...s,
-            conversion: s.total ? (s.won / s.total) * 100 : 0,
+            conversion: s.total ? (s.won / s.total) * 100 : 0, // Sales / Leads
             avgTime: s.won ? s.daysSum / s.won : 0
         })).sort((a, b) => b.wonValue - a.wonValue);
 
-    }, [createdDeals]);
+    }, [createdDeals, relevantDeals]);
 
     // Common Colors
     const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
@@ -157,6 +197,8 @@ export function DashboardSales({ company, data }) {
             exit="exit"
             className="space-y-8"
         >
+
+
             {/* 1. Hero Banner (Premium - Geral) */}
             <div className="bg-gradient-to-r from-blue-600 to-indigo-900 rounded-3xl p-10 text-white shadow-2xl relative overflow-hidden">
                 <div className="absolute top-0 right-0 w-96 h-96 bg-white/10 rounded-full -mr-32 -mt-32 blur-3xl"></div>
@@ -276,8 +318,11 @@ export function DashboardSales({ company, data }) {
 
             {/* Section 3: Charts */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="bg-white dark:bg-[#111] p-6 rounded-xl border border-gray-100 dark:border-white/5 shadow-sm h-[350px]">
-                    <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-4 flex items-center gap-2">Perdidos ❌</h3>
+                <div className="bg-white dark:bg-[#111] p-6 rounded-3xl border border-gray-100 dark:border-white/5 shadow-xl h-[400px]">
+                    <div className="mb-6">
+                        <h3 className="text-xl font-bold text-gray-900 dark:text-white">Motivos de Perda</h3>
+                        <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">Análise de churn por motivo</p>
+                    </div>
                     <ResponsiveContainer width="100%" height={260}>
                         {filteredDeals.filter(d => d.status === 'lost').length > 0 ? (
                             <BarChart data={(() => {
@@ -304,8 +349,11 @@ export function DashboardSales({ company, data }) {
                     </ResponsiveContainer>
                 </div>
 
-                <div className="bg-white dark:bg-[#111] p-6 rounded-xl border border-gray-100 dark:border-white/5 shadow-sm h-[350px]">
-                    <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-4 flex items-center gap-2">Origens 📊</h3>
+                <div className="bg-white dark:bg-[#111] p-6 rounded-3xl border border-gray-100 dark:border-white/5 shadow-xl h-[400px]">
+                    <div className="mb-6">
+                        <h3 className="text-xl font-bold text-gray-900 dark:text-white">Origem das Vendas</h3>
+                        <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">Distribuição por canal de aquisição</p>
+                    </div>
                     <ResponsiveContainer width="100%" height={260}>
                         <PieChart>
                             <Pie
@@ -347,11 +395,12 @@ export function DashboardSales({ company, data }) {
             </div>
 
             {/* Section 4: Últimas Vendas ("Recent Sales" Table) */}
-            <div className="bg-white dark:bg-[#111] rounded-xl border border-gray-100 dark:border-white/5 shadow-sm overflow-hidden">
-                <div className="p-6 border-b border-gray-100 dark:border-white/5 flex flex-col md:flex-row justify-between items-center gap-4">
-                    <h3 className="text-lg font-bold text-gray-800 dark:text-white flex items-center gap-2">
-                        Últimas Vendas 📋
-                    </h3>
+            <div className="bg-white dark:bg-[#111] rounded-3xl border border-gray-100 dark:border-white/5 shadow-xl overflow-hidden">
+                <div className="p-8 border-b border-gray-100 dark:border-white/5 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                    <div>
+                        <h3 className="text-xl font-bold text-gray-900 dark:text-white">Histórico de Vendas</h3>
+                        <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">Registro detalhado de fechamentos</p>
+                    </div>
 
                     {/* Filter and Sort Controls */}
                     <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
@@ -538,9 +587,9 @@ export function DashboardSales({ company, data }) {
         </motion.div>
     );
 
-    const renderSDR = () => (
+    const renderSDRView = () => (
         <motion.div
-            key="sdr"
+            key="sdr-view-v2"
             variants={tabVariants}
             initial="initial"
             animate="animate"
@@ -697,17 +746,26 @@ export function DashboardSales({ company, data }) {
 
             {/* 3. Section: Performance Individual */}
             <div className="bg-white dark:bg-[#111] p-8 rounded-3xl shadow-xl border border-gray-100 dark:border-white/5">
-                <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-8 flex items-center gap-2">
-                    Performance Individual dos SDR's 📊
-                </h2>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-8 h-[350px]">
+                <div className="mb-8">
+                    <h3 className="text-xl font-bold text-gray-900 dark:text-white">Performance Individual dos SDR's</h3>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">Análise detalhada por representante</p>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-8 h-auto md:h-[350px]">
                     {/* Conversion by SDR */}
-                    <div className="p-4 rounded-2xl bg-gray-50 dark:bg-white/5 border border-gray-100 dark:border-white/5">
+                    <div className="p-4 rounded-2xl bg-gray-50 dark:bg-white/5 border border-gray-100 dark:border-white/5 h-[300px] md:h-full">
                         <h3 className="text-xs font-bold uppercase text-gray-400 mb-6">Taxa de Conversão</h3>
                         <ResponsiveContainer width="100%" height="85%">
-                            <BarChart data={sdrStats.sort((a, b) => b.conversion - a.conversion)}>
+                            <BarChart data={sdrStats.sort((a, b) => b.conversion - a.conversion)} margin={{ bottom: 20 }}>
                                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                                <XAxis dataKey="name" axisLine={false} tickLine={false} fontSize={11} tick={{ fill: '#64748b' }} interval={0} />
+                                <XAxis
+                                    dataKey="name"
+                                    axisLine={false}
+                                    tickLine={false}
+                                    fontSize={10}
+                                    tick={{ fill: '#64748b', angle: -20, textAnchor: 'end' }}
+                                    interval={0}
+                                    height={40}
+                                />
                                 <YAxis hide />
                                 <Tooltip
                                     formatter={(value) => [`${value.toFixed(1)}%`, 'Conversão']}
@@ -720,13 +778,13 @@ export function DashboardSales({ company, data }) {
                     </div>
 
                     {/* Avg Time by SDR */}
-                    <div className="p-4 rounded-2xl bg-gray-50 dark:bg-white/5 border border-gray-100 dark:border-white/5">
+                    <div className="p-4 rounded-2xl bg-gray-50 dark:bg-white/5 border border-gray-100 dark:border-white/5 h-[300px] md:h-full">
                         <h3 className="text-xs font-bold uppercase text-gray-400 mb-6">Tempo Médio (Dias)</h3>
                         <ResponsiveContainer width="100%" height="85%">
-                            <BarChart data={sdrStats.sort((a, b) => a.avgTime - b.avgTime)} layout="vertical">
+                            <BarChart data={sdrStats.sort((a, b) => a.avgTime - b.avgTime)} layout="vertical" margin={{ left: 10 }}>
                                 <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#e2e8f0" />
                                 <XAxis type="number" hide />
-                                <YAxis dataKey="name" type="category" width={80} axisLine={false} tickLine={false} fontSize={11} tick={{ fill: '#64748b' }} />
+                                <YAxis dataKey="name" type="category" width={80} axisLine={false} tickLine={false} fontSize={10} tick={{ fill: '#64748b' }} />
                                 <Tooltip
                                     cursor={{ fill: '#f1f5f9' }}
                                     formatter={(value) => [`${value.toFixed(1)} dias`, 'Tempo Médio']}
@@ -738,12 +796,20 @@ export function DashboardSales({ company, data }) {
                     </div>
 
                     {/* Sales Value by SDR */}
-                    <div className="p-4 rounded-2xl bg-gray-50 dark:bg-white/5 border border-gray-100 dark:border-white/5">
+                    <div className="p-4 rounded-2xl bg-gray-50 dark:bg-white/5 border border-gray-100 dark:border-white/5 h-[300px] md:h-full">
                         <h3 className="text-xs font-bold uppercase text-gray-400 mb-6">Valor de Vendas</h3>
                         <ResponsiveContainer width="100%" height="85%">
-                            <BarChart data={sdrStats}>
+                            <BarChart data={sdrStats} margin={{ bottom: 20 }}>
                                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                                <XAxis dataKey="name" axisLine={false} tickLine={false} fontSize={11} tick={{ fill: '#64748b' }} interval={0} />
+                                <XAxis
+                                    dataKey="name"
+                                    axisLine={false}
+                                    tickLine={false}
+                                    fontSize={10}
+                                    tick={{ fill: '#64748b', angle: -20, textAnchor: 'end' }}
+                                    interval={0}
+                                    height={40}
+                                />
                                 <YAxis hide />
                                 <Tooltip
                                     formatter={(value) => [formatCurrency(value), 'Vendas']}
@@ -759,9 +825,10 @@ export function DashboardSales({ company, data }) {
 
             {/* 4. Section: Funnel Gauges */}
             <div>
-                <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-2 px-2">
-                    Conversão entre Etapas 🔄
-                </h2>
+                <div className="mb-6 px-2">
+                    <h3 className="text-xl font-bold text-gray-900 dark:text-white">Conversão entre Etapas</h3>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">Eficiência do funil de vendas</p>
+                </div>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     {[
                         { label: 'Lead Novo → Qualificado', val: 100 * (metrics.qualifiedCount / (metrics.leadsCreatedCount || 1)), color: '#3b82f6' },
@@ -795,9 +862,10 @@ export function DashboardSales({ company, data }) {
 
             {/* 5. Section: Motivos de Perda */}
             <div className="bg-white dark:bg-[#111] p-8 rounded-3xl shadow-xl border border-gray-100 dark:border-white/5 h-[450px] flex flex-col">
-                <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-6 flex items-center gap-2">
-                    Motivos de Perda (Detalhado) ❌
-                </h2>
+                <div className="mb-6">
+                    <h3 className="text-xl font-bold text-gray-900 dark:text-white">Motivos de Perda (Detalhado)</h3>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">Principais razões de churn</p>
+                </div>
                 <div className="flex-1 w-full">
                     <ResponsiveContainer width="100%" height="100%">
                         <BarChart data={sdrStats}>
@@ -809,10 +877,27 @@ export function DashboardSales({ company, data }) {
                                 cursor={{ fill: '#f1f5f9' }}
                             />
                             <Legend wrapperStyle={{ paddingTop: '20px' }} />
-                            <Bar dataKey="lostReasons.Preço alto" name="Preço Alto" stackId="a" fill="#ef4444" radius={[0, 0, 4, 4]} />
-                            <Bar dataKey="lostReasons.Concorrente" name="Concorrente" stackId="a" fill="#f87171" />
-                            <Bar dataKey="lostReasons.Sem contato" name="Sem contato" stackId="a" fill="#fca5a5" />
-                            <Bar dataKey="lostReasons.Desistência" name="Desistência" stackId="a" fill="#fee2e2" radius={[4, 4, 0, 0]} />
+                            {(() => {
+                                // Extract unique reasons dynamically
+                                const allReasons = new Set();
+                                sdrStats.forEach(s => {
+                                    Object.keys(s.lostReasons || {}).forEach(r => allReasons.add(r));
+                                });
+                                const reasonsList = Array.from(allReasons);
+                                // Palette for dynamic reasons
+                                const REASON_COLORS = ['#ef4444', '#f59e0b', '#3b82f6', '#8b5cf6', '#ec4899', '#6366f1'];
+
+                                return reasonsList.map((reason, idx) => (
+                                    <Bar
+                                        key={reason}
+                                        dataKey={`lostReasons.${reason}`}
+                                        name={reason}
+                                        stackId="a"
+                                        fill={REASON_COLORS[idx % REASON_COLORS.length]}
+                                        radius={idx === reasonsList.length - 1 ? [4, 4, 0, 0] : [0, 0, 0, 0]}
+                                    />
+                                ));
+                            })()}
                         </BarChart>
                     </ResponsiveContainer>
                 </div>
@@ -829,19 +914,19 @@ export function DashboardSales({ company, data }) {
                     <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Vendas</h1>
                     <div className="flex gap-6 text-sm mt-4">
                         <button
-                            onClick={() => setActiveTab('geral')}
+                            onClick={() => handleTabChange('geral')}
                             className={`font-semibold pb-4 px-1 border-b-2 transition-colors ${activeTab === 'geral' ? 'text-[#FD295E] border-[#FD295E]' : 'text-gray-500 dark:text-gray-400 border-transparent hover:text-gray-800 dark:hover:text-gray-200'}`}
                         >
                             Geral
                         </button>
                         <button
-                            onClick={() => setActiveTab('sdr')}
+                            onClick={() => handleTabChange('sdr')}
                             className={`font-semibold pb-4 px-1 border-b-2 transition-colors ${activeTab === 'sdr' ? 'text-[#FD295E] border-[#FD295E]' : 'text-gray-500 dark:text-gray-400 border-transparent hover:text-gray-800 dark:hover:text-gray-200'}`}
                         >
                             SDR
                         </button>
                         <button
-                            onClick={() => setActiveTab('metas')}
+                            onClick={() => handleTabChange('metas')}
                             className={`font-semibold pb-4 px-1 border-b-2 transition-colors ${activeTab === 'metas' ? 'text-[#FD295E] border-[#FD295E]' : 'text-gray-500 dark:text-gray-400 border-transparent hover:text-gray-800 dark:hover:text-gray-200'}`}
                         >
                             Metas
@@ -855,7 +940,7 @@ export function DashboardSales({ company, data }) {
 
             <AnimatePresence mode="wait">
                 {activeTab === 'geral' && renderGeral()}
-                {activeTab === 'sdr' && renderSDR()}
+                {activeTab === 'sdr' && renderSDRView()}
                 {activeTab === 'metas' && (
                     <motion.div
                         key="metas"
@@ -1048,7 +1133,7 @@ export function DashboardSales({ company, data }) {
                         <div className="bg-white dark:bg-[#111] p-8 rounded-3xl shadow-xl border border-gray-100 dark:border-white/5">
                             <div className="flex justify-between items-center mb-8">
                                 <h3 className="text-xl font-bold text-gray-900 dark:text-white">Performance do Time vs Meta</h3>
-                                <button onClick={() => setActiveTab('sdr')} className="text-sm font-bold text-[#FD295E] hover:text-[#e11d48]">Ver Detalhes</button>
+                                <button onClick={() => handleTabChange('sdr')} className="text-sm font-bold text-[#FD295E] hover:text-[#e11d48]">Ver Detalhes</button>
                             </div>
 
                             <div className="space-y-6">

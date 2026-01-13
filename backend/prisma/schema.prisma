@@ -10,8 +10,9 @@ datasource db {
   url      = "file:./dev.db"
 }
 
+
 model Company {
-  id          Int       @id @default(autoincrement())
+  id          BigInt    @id @default(autoincrement())
   name        String
   cnpj        String?
   logo        String?
@@ -21,11 +22,12 @@ model Company {
   integrations Integration[]
   metrics      Metric[]
   syncLogs     SyncLog[]
+  users        CompanyUser[]
 }
 
 model Integration {
   id          Int       @id @default(autoincrement())
-  companyId   Int
+  companyId   BigInt
   company     Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
   
   type        String    // 'pipefy' | 'meta_ads'
@@ -44,6 +46,7 @@ model Integration {
   metaStatus      String?  // 'active' | 'restricted' | 'disabled'
   
   isActive    Boolean   @default(true)
+  settings    String?   // JSON string for advanced config (wonPhase, valueField, etc.)
   lastSync    DateTime?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
@@ -54,7 +57,7 @@ model Integration {
 
 model Metric {
   id          Int       @id @default(autoincrement())
-  companyId   Int
+  companyId   BigInt
   company     Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
   
   source      String    // 'meta_ads' | 'pipefy'
@@ -93,7 +96,7 @@ model Metric {
 
 model SyncLog {
   id          Int       @id @default(autoincrement())
-  companyId   Int
+  companyId   BigInt
   company     Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
   
   source      String    // 'meta_ads' | 'pipefy'
@@ -106,5 +109,37 @@ model SyncLog {
   createdAt   DateTime  @default(now())
   
   @@index([companyId, createdAt])
+
   @@index([status])
+}
+
+model User {
+  id        String   @id // Supabase UID
+  email     String   @unique
+  name      String?
+  photo     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  companyAccess CompanyUser[]
+}
+
+model CompanyUser {
+  id        Int      @id @default(autoincrement())
+  companyId BigInt
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  
+  userId    String?  // Optional: Link to User if they exist
+  user      User?    @relation(fields: [userId], references: [id])
+  
+  email     String   // Always store email (for invites or shadow accounts)
+  role      String   // 'admin', 'editor', 'viewer'
+  status    String   @default("pending") // 'pending', 'active'
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, email]) // One role per email per company
+  @@index([companyId])
+  @@index([userId])
 }

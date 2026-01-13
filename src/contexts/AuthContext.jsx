@@ -12,19 +12,22 @@ export const AuthProvider = ({ children }) => {
     useEffect(() => {
         // Helper to merge local profile
         const mergeLocalProfile = (sessionUser) => {
-            const savedProfile = localStorage.getItem('plin_user_profile');
+            if (!sessionUser) return null;
+
+            // SCOPED KEY: Use user ID to prevent data bleeding between accounts
+            const storageKey = `plin_user_profile_${sessionUser.id}`;
+            const savedProfile = localStorage.getItem(storageKey);
+
             let profile = {};
 
             if (savedProfile) {
                 try {
                     profile = JSON.parse(savedProfile);
-                    console.log("Restoring local profile data:", profile.name);
+                    // console.log("Restoring local profile data for:", sessionUser.email);
                 } catch (e) {
                     console.error("Error parsing local profile:", e);
                 }
             }
-
-            if (!sessionUser) return null;
 
             // Deep merge to ensure local changes override server/session defaults
             return {
@@ -80,10 +83,24 @@ export const AuthProvider = ({ children }) => {
             if (error) throw error;
 
             // Restore profile from local storage if exists
-            const savedProfile = localStorage.getItem('plin_user_profile');
-            if (savedProfile && data.user) {
-                const profile = JSON.parse(savedProfile);
-                data.user = { ...data.user, ...profile };
+            if (data.user) {
+                const storageKey = `plin_user_profile_${data.user.id}`;
+                const savedProfile = localStorage.getItem(storageKey);
+                if (savedProfile) {
+                    try {
+                        const profile = JSON.parse(savedProfile);
+                        data.user = {
+                            ...data.user,
+                            ...profile,
+                            user_metadata: {
+                                ...(data.user.user_metadata || {}),
+                                ...profile
+                            }
+                        };
+                    } catch (e) {
+                        console.error("Error restoring profile on login:", e);
+                    }
+                }
             }
 
             return data;
@@ -110,15 +127,15 @@ export const AuthProvider = ({ children }) => {
         setUser(updatedUser);
 
         // Persist to local storage (for demo/hybrid mode)
-        // Persist to local storage (for demo/hybrid mode)
+        const storageKey = `plin_user_profile_${user.id}`;
         try {
-            localStorage.setItem('plin_user_profile', JSON.stringify(data));
+            localStorage.setItem(storageKey, JSON.stringify(data));
         } catch (e) {
             console.warn("LocalStorage save failed (likely quota exceeded). Retrying without photo.", e);
             try {
                 // Retry without photoUrl if it's too big
                 const { photoUrl, ...dataWithoutPhoto } = data;
-                localStorage.setItem('plin_user_profile', JSON.stringify(dataWithoutPhoto));
+                localStorage.setItem(storageKey, JSON.stringify(dataWithoutPhoto));
                 console.log("Saved profile without photo as fallback.");
             } catch (retryErr) {
                 console.error("Fallback save also failed:", retryErr);
@@ -133,8 +150,16 @@ export const AuthProvider = ({ children }) => {
     };
 
     const signOut = async () => {
-        const { error } = await supabase.auth.signOut();
-        if (error) throw error;
+        try {
+            await supabase.auth.signOut();
+        } catch (error) {
+            console.error("SignOut Error (non-blocking):", error);
+        } finally {
+            // Force state clear to ensure UI updates even if event doesn't fire (e.g. Demo mode)
+            setUser(null);
+            // Optional: Clear admin auth if used elsewhere
+            sessionStorage.removeItem('plin_admin_auth');
+        }
     };
 
     const value = {

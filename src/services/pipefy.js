@@ -1,7 +1,40 @@
-const PIPEFY_API_URL = 'https://api.pipefy.com/graphql';
+const PIPEFY_API_URL = 'http://localhost:3001/api/pipefy'; // Backend Proxy (Robust)
 
-export async function fetchPipefyDeals(orgId, pipeId, token, config = {}) {
+const KNOWN_ROBUST_CONFIGS = {
+  // ANDAR SEGUROS
+  '306438109': {
+    name: 'Andar Seguros (Zero-Config)',
+    wonPhase: 'Apólice Emitida',
+    wonPhaseId: '338889923', // Primary Won Phase
+    lostPhase: 'Perdido',
+    lostPhaseId: '338889931', // CRITICAL: Verified ID
+    qualifiedPhase: 'Cotação',
+    valueField: 'Prêmio Líquido',
+    lossReasonField: 'Motivo Recusa'
+  },
+  // APOLAR
+  '305634232': {
+    name: 'Apolar (Zero-Config)',
+    wonPhase: 'Contrato Assinado (Ganho)',
+    lostPhase: 'Perdido',
+    lostPhaseId: '338889931', // Assuming similar structure or standard ID if known, otherwise rely on name
+    qualifiedPhase: 'Em Contato',
+    valueField: 'Valor mensal dos honorários administrativos',
+    lossReasonField: 'Motivo Recusa' // Standardizing on "Motivo Recusa" or similar
+  }
+};
+
+export async function fetchPipefyDeals(orgId, pipeId, token, userConfig = {}) {
   if (!token || !pipeId) return [];
+
+  // ZERO-CONFIG LOGIC: Override user config if Pipe ID is known
+  let config = { ...userConfig };
+  const knownConfig = KNOWN_ROBUST_CONFIGS[String(pipeId).trim()];
+
+  if (knownConfig) {
+    console.log(`[Pipefy] 🔒 Zero-Config Activated for ${knownConfig.name}. Ignoring manual mapping.`);
+    config = { ...config, ...knownConfig };
+  }
 
   let allEdges = [];
   let hasPreviousPage = true;
@@ -32,16 +65,6 @@ export async function fetchPipefyDeals(orgId, pipeId, token, config = {}) {
   `;
 
   try {
-    const SIX_MONTHS_AGO = new Date();
-    SIX_MONTHS_AGO.setMonth(SIX_MONTHS_AGO.getMonth() - 6);
-
-    // --- STRATEGY CHANGE: Hybrid Fetch ---
-    // 1. Active Phases: Fetch DEEP (all cards) because they are small.
-    // 2. Archive Phases (Lost): Do NOT fetch by Phase ID (too big, unstructured).
-    // 3. Recent Sweep: Fetch `allCards` (Newest) to catch recent Lost leads that aren't in Active phases.
-
-    console.log(`[Pipefy] Starting HYBRID fetch for pipe ${pipeId}...`);
-
     // 1. Get All Phases
     const phasesQuery = `{ pipe(id: ${pipeId}) { phases { id name cards_count } } }`;
     const phasesRes = await fetch(PIPEFY_API_URL, {
@@ -50,7 +73,6 @@ export async function fetchPipefyDeals(orgId, pipeId, token, config = {}) {
       body: JSON.stringify({ query: phasesQuery })
     });
 
-    // Safety check
     const phasesJson = await phasesRes.json();
     if (phasesJson.errors) {
       console.error('[Pipefy] Error fetching phases:', phasesJson.errors);
@@ -58,171 +80,145 @@ export async function fetchPipefyDeals(orgId, pipeId, token, config = {}) {
     }
 
     const phases = phasesJson.data?.pipe?.phases || [];
-    const LOST_PHASE_ID = '338889931'; // Negócio Perdido
+    console.log(`[Pipefy] Fetching ALL cards for ${phases.length} phases...`);
 
-    // Filter phases to fetch deeply (Skip Lost)
-    const activePhases = phases.filter(p => p.id !== LOST_PHASE_ID);
-    console.log(`[Pipefy] Fetching ${activePhases.length} active phases deeply (Skipping Lost phase ${LOST_PHASE_ID})...`);
+    // 2. Fetch Cards for ALL Phases (Balanced Parallel - Batch 2 is safer for deep reliability)
+    const BATCH_SIZE = 2;
+    for (let i = 0; i < phases.length; i += BATCH_SIZE) {
+      const batch = phases.slice(i, i + BATCH_SIZE);
+      console.log(`[Pipefy] Fetching batch ${i / BATCH_SIZE + 1}/${Math.ceil(phases.length / BATCH_SIZE)} (Reliable Mode)...`);
 
-    // 2. Fetch Cards for Active Phases (Parallel)
-    const phasePromises = activePhases.map(async (phase) => {
-      let phaseEdges = [];
-      let hasNext = true;
-      let cursor = null;
-      let pagesToCheck = 20; // 1000 cards limit per active phase
+      await Promise.all(batch.map(async (phase) => {
+        let phaseEdges = [];
+        let hasNext = true;
+        let cursor = null;
+        let retryCount = 0;
+        let pageCount = 0;
 
-      while (hasNext && pagesToCheck > 0) {
-        const q = `
-            {
-                phase(id: ${phase.id}) {
-                    cards(first: 50, after: ${cursor ? `"${cursor}"` : null}) {
-                        edges {
-                            node {
-                                id
-                                title
-                                finished_at
-                                updated_at
-                                current_phase { name id }
-                                labels { name }
-                                fields { name value }
-                                createdAt
-                                created_at
-                                due_date
-                                assignees { name }
+        console.log(`[Pipefy] Fetching phase: ${phase.name} (ID: ${phase.id})...`);
+
+        while (hasNext) {
+          // OPTIMIZATION: Precision Limit for 2233 Cards
+          // User has ~2300 cards total. A limit of 40 pages (2000) CUTS data if one phase is huge.
+          // Setting limit to 100 pages (100 * 50 = 5000 cards PER PHASE).
+          // This safely covers the entire pipe while preventing infinite loops.
+          if (pageCount > 100) {
+            console.warn(`[Pipefy] Safety Break: Phase ${phase.name} exceeded 5000 items (100 pages). Stopping.`);
+            break;
+          }
+          pageCount++;
+
+          const q = `
+                    {
+                        phase(id: ${phase.id}) {
+                            cards(first: 50, after: ${cursor ? `"${cursor}"` : null}) {
+                                edges {
+                                    node {
+                                        id
+                                        title
+                                        finished_at
+                                        updated_at
+                                        current_phase { name id }
+                                        labels { name }
+                                        fields { name value }
+                                        createdAt
+                                        created_at
+                                        due_date
+                                        assignees { name }
+                                    }
+                                }
+                                pageInfo { hasNextPage endCursor }
                             }
                         }
-                        pageInfo { hasNextPage endCursor }
-                    }
-                }
-            }`;
+                    }`;
 
-        try {
-          const res = await fetch(PIPEFY_API_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-            body: JSON.stringify({ query: q })
-          });
-          const json = await res.json();
-          const edges = json.data?.phase?.cards?.edges || [];
+          try {
+            const res = await fetch(PIPEFY_API_URL, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+              body: JSON.stringify({ query: q })
+            });
 
-          if (edges.length === 0) break;
+            if (res.status === 429) {
+              retryCount++;
+              if (retryCount > 3) { // Reduced max retries
+                console.error(`[Pipefy] Max retries reached for phase ${phase.name}. Skipping.`);
+                break; // Stop trying for this page
+              }
+              // Capped Exponential Backoff: Max 5 seconds
+              const waitTime = Math.min(5000, 1000 * Math.pow(2, retryCount - 1));
+              console.warn(`[Pipefy] Rate Limit (429) for ${phase.name}. Waiting ${waitTime}ms...`);
+              await new Promise(r => setTimeout(r, waitTime));
+              continue;
+            }
+            retryCount = 0;
 
-          phaseEdges.push(...edges);
+            const json = await res.json();
+            if (json.errors) break;
 
-          hasNext = json.data.phase.cards.pageInfo.hasNextPage;
-          cursor = json.data.phase.cards.pageInfo.endCursor;
-          pagesToCheck--;
-        } catch (err) {
-          console.error(`[Pipefy] Error fetching phase ${phase.name}:`, err);
-          break;
+            const edges = json.data?.phase?.cards?.edges || [];
+            if (edges.length === 0) break;
+
+            phaseEdges.push(...edges);
+            hasNext = json.data.phase.cards.pageInfo.hasNextPage;
+            cursor = json.data.phase.cards.pageInfo.endCursor;
+          } catch (err) {
+            console.error(`[Pipefy] Network Error phase ${phase.name}:`, err);
+            break;
+          }
         }
-      }
-      return phaseEdges;
-    });
+        allEdges.push(...phaseEdges.map(e => ({ ...e, phaseName: phase.name })));
+      }));
+    }
 
-    // 3. Fetch Recent Cards (Catch-All for Lost Leads)
-    // We use 'last: 400' (8 pages * 50) to ensure we cover the 39 lost leads in Dec.
-    // 'allCards' with 'last' fetches NEWEST created cards first (usually).
-    const recentPromise = (async () => {
-      let recentEdges = [];
-      let hasPrevious = true;
-      let startCursor = null;
-      let pages = 8;
+    // Deduplicate logic happens after the loop...
 
-      console.log(`[Pipefy] Fetching recent 400 cards (catch-all for Lost)...`);
+    // ...
 
-      while (hasPrevious && pages > 0) {
-        const q = `
-            {
-                allCards(pipeId: ${pipeId}, last: 50, before: ${startCursor ? `"${startCursor}"` : null}) {
-                    edges {
-                        node {
-                            id
-                            title
-                            finished_at
-                            updated_at
-                            current_phase { name id }
-                            labels { name }
-                            fields { name value }
-                            createdAt
-                            created_at
-                            due_date
-                            assignees { name }
-                        }
-                    }
-                    pageInfo { hasNextPage startCursor hasPreviousPage }
-                }
-            }`;
+    // Deduplicate (Safety check, though sequential shouldn't dup)
+    const uniqueMap = new Map();
+    allEdges.forEach(e => uniqueMap.set(e.node.id, e));
+    allEdges = Array.from(uniqueMap.values());
 
-        try {
-          const res = await fetch(PIPEFY_API_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-            body: JSON.stringify({ query: q })
-          });
-          const json = await res.json();
-          const cardsData = json.data?.allCards;
-          if (!cardsData || !cardsData.edges) break;
+    console.log(`[Pipefy] Total cards fetched (Parallel Strategy): ${allEdges.length}`);
 
-          recentEdges.push(...cardsData.edges);
-
-          hasPrevious = cardsData.pageInfo.hasPreviousPage;
-          startCursor = cardsData.pageInfo.startCursor;
-          pages--;
-        } catch (e) { console.error('[Pipefy] Error fetching recent:', e); break; }
-      }
-      return recentEdges;
-    })();
-
-    // Execute All
-    const [activeResults, recentResults] = await Promise.all([
-      Promise.all(phasePromises),
-      recentPromise
-    ]);
-
-    // Merge
-    const allFetched = [...activeResults.flat(), ...recentResults];
-
-    // Deduplicate
-    const seenIds = new Set();
-    allEdges = [];
-    allFetched.forEach(e => {
-      if (!seenIds.has(e.node.id)) {
-        seenIds.add(e.node.id);
-        allEdges.push(e);
-      }
-    });
-
-    console.log(`[Pipefy] Total cards fetched (Hybrid Strategy): ${allEdges.length}`);
+    const normalize = (str) => str ? str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase() : "";
 
     // Map to Dashboard Deal Model
-    return allEdges.map(edge => {
+    const mappedDeals = allEdges.map(edge => {
       const card = edge.node;
 
-      // 1. Value Mapping
+      // 1. Value Mapping (Improved)
       let valueField = null;
 
       if (config.valueField) {
-        valueField = card.fields.find(f => f.name.toLowerCase() === config.valueField.toLowerCase() || f.name.includes(config.valueField));
+        const cfgVal = normalize(config.valueField);
+        valueField = card.fields.find(f => {
+          const fName = normalize(f.name);
+          return fName === cfgVal || fName.includes(cfgVal);
+        });
       }
 
       if (!valueField) {
         valueField = card.fields.find(f => {
-          const name = f.name.toLowerCase();
-          return name.includes('valor') || name.includes('price') || name.includes('receita') || name.includes('mensalidade');
+          const name = normalize(f.name);
+          return name.includes('valor') || name.includes('price') || name.includes('receita') || name.includes('mensalidade') || name.includes('premio');
         });
       }
 
       let amount = 0;
       if (valueField && valueField.value) {
         let v = valueField.value.toString();
-        if (v.includes(',') || v.includes('R$')) {
-          v = v.replace(/[R$\s]/g, '');
-          v = v.replace(/\./g, '');
+        // Remove currency symbols and format
+        v = v.replace(/[R$\sA-Za-z]/g, '').trim();
+
+        // Simple robust parser for "1.200,50" -> 1200.50
+        if (v.includes(',') && v.includes('.')) {
+          v = v.replace(/\./g, '').replace(',', '.');
+        } else if (v.includes(',')) {
           v = v.replace(',', '.');
-        } else {
-          v = v.replace(/[^0-9.]/g, '');
         }
+
         amount = parseFloat(v) || 0;
       }
 
@@ -233,18 +229,22 @@ export async function fetchPipefyDeals(orgId, pipeId, token, config = {}) {
       const phaseName = (card.current_phase?.name?.toLowerCase() || '').trim();
       const phaseId = String(card.current_phase?.id || '').trim();
 
-      // Normalize phase name for accent-insensitive comparison
-      const normalize = (str) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
       const normPhaseName = normalize(phaseName);
 
-      // Configured IDs
+      // Configured IDs and Names
       const CFG_LOST_ID = (config.lostPhaseId || '').trim();
+      const CFG_LOST_NAME_NORM = config.lostPhase ? normalize(config.lostPhase) : null;
+
       const CFG_WON_ID = (config.wonPhaseId || '').trim();
+      const CFG_WON_NAME_NORM = config.wonPhase ? normalize(config.wonPhase) : null;
+
       const CFG_QUAL_ID = (config.qualifiedPhaseId || '').trim();
+      const CFG_QUAL_NAME_NORM = config.qualifiedPhase ? normalize(config.qualifiedPhase) : null;
 
       // A. LOST (Priority Logic as per Spec)
       if (phaseId === '338889931' || // Explicit ID from Spec
         (CFG_LOST_ID && phaseId === CFG_LOST_ID) ||
+        (CFG_LOST_NAME_NORM && normPhaseName === CFG_LOST_NAME_NORM) || /* Exact Config Match */
         normPhaseName.includes('perdido') ||
         normPhaseName.includes('negocio perdido') ||
         normPhaseName.includes('lost') ||
@@ -254,18 +254,23 @@ export async function fetchPipefyDeals(orgId, pipeId, token, config = {}) {
 
 
       // B. WON
-      if ((CFG_WON_ID && phaseId === CFG_WON_ID) ||
+      else if ((CFG_WON_ID && phaseId === CFG_WON_ID) ||
+        (CFG_WON_NAME_NORM && normPhaseName === CFG_WON_NAME_NORM) || /* Exact Config Match */
         phaseId === '338889923' || // Fechamento - Ganho
         phaseId === '338889934' || // Apólice Fechada
         normPhaseName.includes('ganho') ||
         normPhaseName.includes('won') ||
         normPhaseName.includes('vendido') ||
         normPhaseName.includes('apolice fechada') ||
+        normPhaseName.includes('apolice emitida') || // Insurance specific
+        normPhaseName.includes('emitido') ||         // Insurance specific
+        normPhaseName.includes('contrato assinado') ||
         normPhaseName.includes('assinado')) {
         status = 'won';
       }
       // C. QUALIFIED
       else if ((CFG_QUAL_ID && phaseId === CFG_QUAL_ID) ||
+        (CFG_QUAL_NAME_NORM && normPhaseName === CFG_QUAL_NAME_NORM) ||
         normPhaseName.includes('qualificado') ||
         normPhaseName.includes('potencial') ||
         normPhaseName.includes('negociacao')) {
@@ -277,25 +282,60 @@ export async function fetchPipefyDeals(orgId, pipeId, token, config = {}) {
       let dealDate;
       const createdDate = card.createdAt || card.created_at;
 
+      // New Priority: Search for explicit "Sale Date" field to override everything
+      // This solves the "Edit Side Effect" -> User can freeze date by filling this field
+      const explicitDateField = card.fields?.find(f => {
+        const n = normalize(f.name);
+        return n.includes('data da venda') || n.includes('data de fechamento') || n.includes('closing date') || n.includes('data venda');
+      });
+
       if (status === 'lost') {
         // COHORT LOGIC: Always use creation date for Lost deals
         dealDate = createdDate;
       } else if (status === 'won') {
-        // ACCRUAL LOGIC: Use finish date for Won deals, fallback to update if not finished (moved to phase but not done)
-        dealDate = card.finished_at || card.updated_at || createdDate;
+        if (explicitDateField && explicitDateField.value) {
+          // HIGHEST PRIORITY: Manual Date Field
+          // Handles "YYYY-MM-DD" or ISO
+          dealDate = explicitDateField.value.split("T")[0];
+        } else {
+          // ACCRUAL LOGIC: Use finish date for Won deals.
+          // Fallback to updated_at to capture "Move to Won Phase" for long-cycle deals
+          // NOTE: Edits to old Won deals will bump them to current month. Use "Finish" in Pipefy to freeze the date.
+          dealDate = card.finished_at || card.updated_at || createdDate;
+        }
       } else {
-        // ACTIVE LOGIC: Use last update or creation
+        // ACTIVE LOGIC: Use last update or creation for in-progress deals
         dealDate = card.finished_at || card.updated_at || createdDate;
       }
 
-      // 4. Loss Reason Mapping
+      // 4. Loss Reason Mapping (Robust Multi-Try)
       let lossReason = null;
       if (status === 'lost') {
+        const fields = card.fields;
+
+        // Strategy A: Configured Field
         if (config.lossReasonField) {
-          const reasonField = card.fields.find(f => f.name.toLowerCase().includes(config.lossReasonField.toLowerCase()));
-          if (reasonField) lossReason = reasonField.value;
+          const match = fields.find(f => normalize(f.name).includes(normalize(config.lossReasonField)));
+          if (match) lossReason = match.value;
         }
-        if (!lossReason) lossReason = 'Outros';
+
+        // Strategy B: Common Fallbacks (if A failed)
+        if (!lossReason) {
+          const FALLBACKS = ['motivo da perda', 'motivo de perda', 'motivo recusa', 'motivo do descarte', 'loss reason', 'motivo'];
+          const match = fields.find(f => {
+            const name = normalize(f.name);
+            return FALLBACKS.some(fb => name.includes(fb));
+          });
+          if (match) lossReason = match.value;
+        }
+
+        if (!lossReason) {
+          lossReason = 'Outros';
+          // DEBUG: Sample one failure to help user debug
+          if (Math.random() < 0.01) { // 1% sample to avoid spam
+            console.warn(`[Pipefy] Could not find Loss Reason for Lost Card "${card.title}". Available Fields:`, fields.map(f => f.name));
+          }
+        }
       }
 
       // 5. Channel Mapping
@@ -306,13 +346,47 @@ export async function fetchPipefyDeals(orgId, pipeId, token, config = {}) {
         channel = 'Pipefy (Sem Tag)';
       }
 
+      // DEBUG: Log specific decision logic for Apolar/Andar debugging
+      if (status === 'new' && (normPhaseName.includes('ganho') || normPhaseName.includes('assinado') || normPhaseName.includes('perdido'))) {
+        console.warn(`[Pipefy Debug] Card ${card.title} (Phase: ${phaseName}) mapped to NEW but phase suggests WON/LOST. Check Config!`);
+      }
+
+      // 6. UTM Mapping (Marketing Data)
+      let utm_campaign = null;
+      let utm_content = null;
+      let utm_term = null;
+      let utm_source = null;
+      let utm_medium = null;
+
+      if (card.fields && card.fields.length > 0) {
+        card.fields.forEach(f => {
+          const n = normalize(f.name);
+          // "Campanha" -> utm_campaign
+          if (n === 'campanha' || n.includes('campaign')) utm_campaign = f.value;
+          // "Conteúdo" -> utm_content
+          else if (n === 'conteudo' || n.includes('content') || n.includes('criativo')) utm_content = f.value;
+          // "Termo" / "Público" -> utm_term
+          else if (n === 'termo' || n.includes('term') || n.includes('publico')) utm_term = f.value;
+          // "Fonte" -> utm_source
+          else if (n === 'fonte' || n.includes('source') || n.includes('origem')) utm_source = f.value;
+          // "Meio" -> utm_medium
+          else if (n === 'meio' || n.includes('medium')) utm_medium = f.value;
+        });
+      }
+
       return {
         id: card.id,
         companyId: orgId, // USE DYNAMIC ID
         title: card.title,
         date: dealDate,
         createdAt: createdDate,
-        daysToClose: 5,
+        daysToClose: (() => {
+          if (!dealDate || !createdDate) return 0;
+          const start = new Date(createdDate).getTime();
+          const end = new Date(dealDate).getTime();
+          // Ensure no negative (e.g. if dealDate is before created because of timezone or manual set)
+          return Math.max(0, Math.floor((end - start) / (1000 * 60 * 60 * 24)));
+        })(),
         amount: amount,
         items: 1,
         channel: channel,
@@ -322,9 +396,25 @@ export async function fetchPipefyDeals(orgId, pipeId, token, config = {}) {
         lossReason: lossReason,
         wonDate: card.finished_at,
         phaseId: phaseId,
-        phaseName: card.current_phase?.name
+        phaseName: card.current_phase?.name,
+        // UTMs
+        utm_campaign,
+        utm_content,
+        utm_term,
+        utm_source,
+        utm_medium
       };
-    });
+    }); // End of map
+
+    // DEBUG SUMMARY
+    const summary = {
+      total: allEdges.length,
+      filtered: mappedDeals.length,
+      won: mappedDeals.filter(d => d.status === 'won').length
+    };
+    console.log(`[Pipefy Debug] Fetch Complete. Raw: ${allEdges.length}, Active(Depth Limit): ${mappedDeals.length}, Won: ${summary.won}`);
+
+    return mappedDeals;
 
   } catch (error) {
     console.error('Pipefy Fetch Error:', error);

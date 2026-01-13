@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Building2, ArrowRight, Plus, Edit, Trash2, Save, X, Upload } from 'lucide-react';
+import { toast } from 'sonner';
+import { Building2, ArrowRight, Plus, Edit, Trash2, Save, X, Upload, Lock, Loader2 } from 'lucide-react';
 import { Background3D } from './ui/Background3D';
-import { getCompaniesConfig, saveCompanyConfig, deleteCompanyConfig, checkAdminPin, getAdminPin } from '../lib/storage';
+import { getCompaniesConfig, saveCompanyConfig, deleteCompanyConfig, checkAdminPin, getAdminPin, setAdminPin } from '../lib/storage';
 
 export function CompanySelection({ data, onSelect }) {
     console.log("COMPANY_SELECTION: Rendering full version", data);
@@ -12,6 +13,7 @@ export function CompanySelection({ data, onSelect }) {
     const [showPinModal, setShowPinModal] = useState(false);
     const [pin, setPin] = useState('');
     const [pendingAction, setPendingAction] = useState(null);
+    const [isLoading, setIsLoading] = useState(false);
 
     const [formData, setFormData] = useState({
         id: null,
@@ -24,6 +26,11 @@ export function CompanySelection({ data, onSelect }) {
         metaAdAccountId: '',
         metaToken: ''
     });
+
+    // Force Reset PIN to 4565 (User Request)
+    useEffect(() => {
+        setAdminPin('4565');
+    }, []);
 
     useEffect(() => {
         if (data && data.companies) {
@@ -39,19 +46,12 @@ export function CompanySelection({ data, onSelect }) {
 
     const loadCompanies = () => {
         try {
-            const customCompanies = getCompaniesConfig();
+            // Fix: Trust the data provided by App.jsx (via getData) which already handles:
+            // 1. Fetching from DB
+            // 2. Merging with Local Storage
+            // 3. Deduplicating by Name/ID
+            // We just need to filter out the dummy IDs (1 and 2) if they still exist.
             const allCompanies = [...(data.companies || [])].filter(c => c.id !== 1 && c.id !== 2);
-
-            customCompanies.forEach(custom => {
-                if (custom.id === 1 || custom.id === 2) return;
-                const existingIndex = allCompanies.findIndex(c => c.id === custom.id);
-                if (existingIndex >= 0) {
-                    allCompanies[existingIndex] = { ...allCompanies[existingIndex], ...custom };
-                } else {
-                    allCompanies.push(custom);
-                }
-            });
-
             setCompanies(allCompanies);
         } catch (error) {
             console.error("Error loading companies:", error);
@@ -71,12 +71,11 @@ export function CompanySelection({ data, onSelect }) {
     const executeAction = (action) => {
         if (action.type === 'new') handleNewCompany();
         if (action.type === 'edit') handleEditCompany(action.payload);
-        if (action.type === 'delete') handleDeleteCompany(action.payload);
+        if (action.type === 'delete') handleDeleteClick(action.payload);
     };
 
     const verifyPin = () => {
         const storedPin = getAdminPin();
-        // Default PIN '0000' if not set for initial setup ease
         const valid = storedPin ? checkAdminPin(pin) : (pin === '0000');
 
         if (valid) {
@@ -86,7 +85,8 @@ export function CompanySelection({ data, onSelect }) {
             if (pendingAction) executeAction(pendingAction);
             setPendingAction(null);
         } else {
-            alert('PIN Incorreto');
+            toast.error('PIN Incorreto. Tente novamente.');
+            setPin(''); // Clear input on error for better UX
         }
     };
 
@@ -125,223 +125,321 @@ export function CompanySelection({ data, onSelect }) {
         setShowForm(true);
     };
 
-    const handleDeleteCompany = async (companyId) => {
-        if (confirm('Tem certeza que deseja excluir esta empresa e todos os seus dados?')) {
-            try {
-                const response = await fetch(`http://localhost:3001/api/companies/${companyId}`, {
-                    method: 'DELETE'
-                });
-                if (!response.ok) throw new Error('Falha ao excluir no servidor');
-            } catch (err) {
-                console.warn('Servidor indisponível ou erro na exclusão remota:', err);
+    const [companyToDelete, setCompanyToDelete] = useState(null);
+
+    // ... state
+
+    // ...
+
+    const handleDeleteClick = (companyId) => {
+        setCompanyToDelete(companyId);
+    };
+
+    const confirmDelete = async () => {
+        if (!companyToDelete) return;
+
+        const companyId = companyToDelete;
+        try {
+            const response = await fetch(`http://localhost:3001/api/companies/${companyId}`, {
+                method: 'DELETE'
+            });
+
+            if (!response.ok) {
+                throw new Error('Falha ao excluir no servidor');
             }
+
+            setCompanies(prev => prev.filter(c => String(c.id) !== String(companyId)));
+            toast.success('Empresa excluída com sucesso.');
             deleteCompanyConfig(companyId);
-            loadCompanies();
+        } catch (err) {
+            console.error('Erro na exclusão:', err);
+            toast.error('Erro ao excluir empresa.');
+        } finally {
+            setCompanyToDelete(null);
         }
     };
 
-    const handleChange = (e) => {
-        const { name, value } = e.target;
-        setFormData(prev => ({ ...prev, [name]: value }));
+    // Replace old handleDeleteCompany with executeAction logic update below
+
+    // ...
+
+
+
+    // ...
+
+    const handleCompanyClick = (company) => {
+        // Optimistic Click: Don't await. Trigger selection and let data load in background on Dashboard.
+        onSelect(company);
     };
 
-    const handleFileChange = (e) => {
+    const fileInputRef = React.useRef(null);
+
+    const handleLogoUpload = (e) => {
         const file = e.target.files[0];
         if (file) {
             const reader = new FileReader();
-            reader.onloadend = () => {
-                setFormData(prev => ({ ...prev, logo: reader.result }));
+            reader.onload = (event) => {
+                const img = new Image();
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    let width = img.width;
+                    let height = img.height;
+                    const MAX_SIZE = 250; // Resize to ensure it fits in DB/Storage
+
+                    if (width > height) {
+                        if (width > MAX_SIZE) {
+                            height *= MAX_SIZE / width;
+                            width = MAX_SIZE;
+                        }
+                    } else {
+                        if (height > MAX_SIZE) {
+                            width *= MAX_SIZE / height;
+                            height = MAX_SIZE;
+                        }
+                    }
+
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height);
+
+                    const compressedBase64 = canvas.toDataURL('image/png'); // Use PNG for transparency if logo has it
+                    setFormData(prev => ({ ...prev, logo: compressedBase64 }));
+                };
+                img.src = event.target.result;
             };
             reader.readAsDataURL(file);
         }
     };
 
-    const handleSaveCompany = () => {
-        if (!formData.name) {
-            alert('Por favor, preencha o nome da empresa.');
-            return;
-        }
-
-        saveCompanyConfig(formData);
-        setShowForm(false);
-        loadCompanies();
-        window.location.reload();
-    };
-
-    const handleCancelForm = () => {
-        setShowForm(false);
-        setEditingCompany(null);
-    };
-
-    if (showPinModal) {
-        return (
-            <div className="min-h-screen bg-black/80 backdrop-blur-sm flex items-center justify-center p-6 fixed inset-0 z-[60]">
-                <div className="bg-[#121212] border border-white/10 rounded-2xl shadow-2xl p-8 w-full max-w-sm relative overflow-hidden">
-                    <div className="absolute top-0 right-0 w-32 h-32 bg-[#FD295E]/10 blur-[50px] rounded-full pointer-events-none"></div>
-
-                    <h2 className="text-xl font-bold text-white mb-6 text-center">Permissão Necessária</h2>
-                    <p className="text-gray-400 text-sm mb-4 text-center">Digite o PIN de administrador para continuar.</p>
-
-                    <div className="space-y-4">
-                        <input
-                            type="password"
-                            value={pin}
-                            onChange={(e) => setPin(e.target.value)}
-                            className="w-full text-center text-2xl tracking-[0.5em] p-3 bg-white/5 border border-white/10 rounded-lg focus:ring-2 focus:ring-[#FD295E] outline-none text-white font-mono"
-                            placeholder="••••"
-                            maxLength={4}
-                            autoFocus
-                        />
-                        <div className="flex gap-3">
-                            <button onClick={() => { setShowPinModal(false); setPin(''); }} className="flex-1 py-3 border border-white/10 rounded-lg text-gray-400 hover:bg-white/5 transition-colors">
-                                Cancelar
-                            </button>
-                            <button onClick={verifyPin} className="flex-1 py-3 bg-[#FD295E] text-white rounded-lg hover:bg-[#e02451] font-medium shadow-lg shadow-[#FD295E]/20">
-                                Confirmar
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        );
-    }
-
-    if (showForm) {
-        return (
-            <div className="min-h-screen bg-black/80 backdrop-blur-sm flex items-center justify-center p-6 fixed inset-0 z-50">
-                <div className="bg-[#121212] border border-white/10 rounded-2xl shadow-2xl w-full max-w-2xl p-8 relative overflow-hidden">
-                    {/* Glow effect */}
-                    <div className="absolute top-0 right-0 w-64 h-64 bg-[#FD295E]/5 blur-[100px] rounded-full pointer-events-none"></div>
-
-                    <div className="flex justify-between items-center mb-6 relative z-10">
-                        <h2 className="text-2xl font-bold text-white">
-                            {editingCompany ? 'Editar Empresa' : 'Nova Empresa'}
-                        </h2>
-                        <button onClick={handleCancelForm} className="p-2 hover:bg-white/10 rounded-lg text-gray-400 hover:text-white transition-colors">
-                            <X className="w-5 h-5" />
-                        </button>
-                    </div>
-
-                    <div className="space-y-6 relative z-10">
-                        <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-2">
-                                <label className="text-sm font-medium text-gray-400">Nome da Empresa *</label>
-                                <input
-                                    type="text"
-                                    name="name"
-                                    value={formData.name}
-                                    onChange={handleChange}
-                                    placeholder="Ex: Apolar Condomínios"
-                                    className="w-full p-3 bg-white/5 border border-white/10 rounded-lg focus:ring-2 focus:ring-[#FD295E] focus:border-transparent outline-none text-white placeholder-gray-600 transition-all"
-                                />
-                            </div>
-                            <div className="space-y-2">
-                                <label className="text-sm font-medium text-gray-400">CNPJ</label>
-                                <input
-                                    type="text"
-                                    name="cnpj"
-                                    value={formData.cnpj}
-                                    onChange={handleChange}
-                                    placeholder="00.000.000/0001-00"
-                                    className="w-full p-3 bg-white/5 border border-white/10 rounded-lg focus:ring-2 focus:ring-[#FD295E] focus:border-transparent outline-none text-white placeholder-gray-600 transition-all"
-                                />
-                            </div>
-                        </div>
-
-                        <div className="space-y-2">
-                            <label className="text-sm font-medium text-gray-400">Logo</label>
-                            <div className="flex items-center gap-4">
-                                {formData.logo && (
-                                    <div className="w-16 h-16 rounded-lg border border-white/10 p-1 bg-white/5 flex items-center justify-center">
-                                        <img src={formData.logo} alt="Logo" className="max-w-full max-h-full object-contain rounded" />
-                                    </div>
-                                )}
-                                <label className="flex-1 cursor-pointer">
-                                    <input
-                                        type="file"
-                                        accept="image/*"
-                                        onChange={handleFileChange}
-                                        className="hidden"
-                                    />
-                                    <div className="w-full p-3 bg-white/5 border border-white/10 border-dashed rounded-lg text-sm text-gray-400 hover:bg-white/10 hover:border-[#FD295E]/50 hover:text-[#FD295E] transition-all flex items-center justify-center gap-2">
-                                        <Upload className="w-4 h-4" />
-                                        <span>{formData.logo ? 'Alterar logo' : 'Escolher logo'}</span>
-                                    </div>
-                                </label>
-                            </div>
-                        </div>
-
-                        <details className="group border border-white/10 rounded-lg bg-white/[0.02] open:bg-white/[0.04] transition-all">
-                            <summary className="font-medium text-gray-300 cursor-pointer p-4 select-none flex items-center justify-between">
-                                <span>Integrações (Opcional)</span>
-                                <Plus className="w-4 h-4 text-gray-500 group-open:rotate-45 transition-transform" />
-                            </summary>
-                            <div className="p-4 pt-0 space-y-4 border-t border-white/5 mt-2">
-                                <div className="space-y-2">
-                                    <label className="text-sm font-medium text-gray-400">Pipefy - Pipe ID</label>
-                                    <input type="text" name="pipefyPipeId" value={formData.pipefyPipeId} onChange={handleChange} className="w-full p-2 bg-white/5 border border-white/10 rounded-lg focus:ring-2 focus:ring-[#FD295E] outline-none text-white transition-all" />
-                                </div>
-                                <div className="space-y-2">
-                                    <label className="text-sm font-medium text-gray-400">Pipefy - Token</label>
-                                    <input type="password" name="pipefyToken" value={formData.pipefyToken} onChange={handleChange} className="w-full p-2 bg-white/5 border border-white/10 rounded-lg focus:ring-2 focus:ring-[#FD295E] outline-none text-white transition-all" />
-                                </div>
-                                <div className="space-y-2">
-                                    <label className="text-sm font-medium text-gray-400">Meta Ads - Account ID</label>
-                                    <input type="text" name="metaAdAccountId" value={formData.metaAdAccountId} onChange={handleChange} className="w-full p-2 bg-white/5 border border-white/10 rounded-lg focus:ring-2 focus:ring-[#FD295E] outline-none text-white transition-all" />
-                                </div>
-                                <div className="space-y-2">
-                                    <label className="text-sm font-medium text-gray-400">Meta Ads - Token</label>
-                                    <input type="password" name="metaToken" value={formData.metaToken} onChange={handleChange} className="w-full p-2 bg-white/5 border border-white/10 rounded-lg focus:ring-2 focus:ring-[#FD295E] outline-none text-white transition-all" />
-                                </div>
-
-                                <div className="pt-4 border-t border-white/10">
-                                    <h4 className="text-sm font-semibold text-gray-200 mb-3">Mapeamento de Métricas (Pipefy)</h4>
-                                    <div className="space-y-3">
-                                        <div className="space-y-1">
-                                            <label className="text-xs font-medium text-gray-500">Fase de Venda Ganha</label>
-                                            <input
-                                                type="text"
-                                                name="pipefyWonPhase"
-                                                value={formData.pipefyWonPhase || ''}
-                                                onChange={handleChange}
-                                                placeholder="Ex: Fechamento - Ganho"
-                                                className="w-full p-2 bg-white/5 border border-white/10 rounded-lg focus:ring-2 focus:ring-[#FD295E] outline-none text-white text-sm transition-all"
-                                            />
-                                        </div>
-                                        <div className="space-y-1">
-                                            <label className="text-xs font-medium text-gray-500">Fase de Venda Perdida</label>
-                                            <input
-                                                type="text"
-                                                name="pipefyLostPhase"
-                                                value={formData.pipefyLostPhase || ''}
-                                                onChange={handleChange}
-                                                placeholder="Ex: Fechamento - Perdido"
-                                                className="w-full p-2 bg-white/5 border border-white/10 rounded-lg focus:ring-2 focus:ring-[#FD295E] outline-none text-white text-sm transition-all"
-                                            />
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </details>
-
-                        <div className="flex justify-end gap-3 pt-4 border-t border-white/10">
-                            <button onClick={handleCancelForm} className="px-6 py-3 border border-white/10 rounded-lg hover:bg-white/5 font-medium text-gray-300 transition-colors">
-                                Cancelar
-                            </button>
-                            <button onClick={handleSaveCompany} className="px-6 py-3 bg-[#FD295E] text-white rounded-lg hover:bg-[#e02451] font-medium flex items-center gap-2 shadow-lg shadow-[#FD295E]/20 hover:shadow-[#FD295E]/40 transition-all hover:-translate-y-0.5">
-                                <Save className="w-5 h-5" /> Salvar
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        );
-    }
-
-    // 
-    // ...
     return (
         <Background3D>
+
+
+            {/* PIN Protection Modal */}
+            {showPinModal && (
+                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[80] flex items-center justify-center p-4 animate-in fade-in duration-200">
+                    <div className="bg-[#121212] border border-white/10 rounded-2xl shadow-2xl p-8 max-w-sm w-full relative overflow-hidden ring-1 ring-[#FD295E]/20">
+                        <div className="absolute top-0 right-0 w-32 h-32 bg-[#FD295E]/10 blur-[50px] rounded-full pointer-events-none"></div>
+
+                        <div className="relative z-10 text-center mb-6">
+                            <div className="w-16 h-16 bg-[#FD295E]/10 rounded-full flex items-center justify-center mx-auto mb-4 border border-[#FD295E]/20">
+                                <Lock className="w-8 h-8 text-[#FD295E]" />
+                            </div>
+                            <h3 className="text-xl font-bold text-white mb-2">Acesso Restrito</h3>
+                            <p className="text-gray-400 text-sm">
+                                Digite o PIN de administrador para continuar.
+                            </p>
+                        </div>
+
+                        <div className="relative z-10 space-y-4">
+                            <input
+                                type="password"
+                                value={pin}
+                                onChange={(e) => setPin(e.target.value)}
+                                placeholder="PIN"
+                                className="w-full text-center text-2xl tracking-[0.5em] bg-black/50 border border-white/10 rounded-xl p-3 text-white focus:ring-2 focus:ring-[#FD295E] outline-none transition-all placeholder:tracking-normal placeholder:text-sm placeholder:text-gray-600"
+                                maxLength={4}
+                                autoFocus
+                            />
+
+                            <div className="flex gap-3">
+                                <button
+                                    onClick={() => {
+                                        setShowPinModal(false);
+                                        setPin('');
+                                        setPendingAction(null);
+                                    }}
+                                    className="flex-1 py-3 border border-white/10 rounded-lg text-gray-300 hover:bg-white/5 transition-colors font-medium text-sm"
+                                >
+                                    Cancelar
+                                </button>
+                                <button
+                                    onClick={verifyPin}
+                                    className="flex-1 py-3 bg-[#FD295E] hover:bg-[#e02451] text-white rounded-lg font-bold shadow-lg shadow-[#FD295E]/20 transition-all hover:scale-[1.02] text-sm"
+                                >
+                                    Confirmar
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Company Form Modal */}
+            {showForm && (
+                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[90] flex items-center justify-center p-4 animate-in fade-in duration-200">
+                    <div className="bg-[#121212] border border-white/10 rounded-2xl shadow-2xl p-8 max-w-2xl w-full relative overflow-y-auto max-h-[90vh] ring-1 ring-[#FD295E]/20 custom-scrollbar">
+                        <div className="flex justify-between items-center mb-6 border-b border-white/5 pb-4">
+                            <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                                {editingCompany ? <Edit className="w-5 h-5 text-[#FD295E]" /> : <Plus className="w-5 h-5 text-[#FD295E]" />}
+                                {editingCompany ? 'Editar Empresa' : 'Nova Empresa'}
+                            </h3>
+                            <button onClick={() => setShowForm(false)} className="text-gray-400 hover:text-white transition-colors">
+                                <X className="w-6 h-6" />
+                            </button>
+                        </div>
+
+                        <div className="space-y-6">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-400 mb-2">Nome da Empresa</label>
+                                    <input
+                                        type="text"
+                                        value={formData.name}
+                                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                                        className="w-full bg-black/50 border border-white/10 rounded-xl p-3 text-white focus:ring-2 focus:ring-[#FD295E] outline-none"
+                                        placeholder="Ex: Minha Construtora"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-400 mb-2">CNPJ</label>
+                                    <input
+                                        type="text"
+                                        value={formData.cnpj}
+                                        onChange={(e) => setFormData({ ...formData, cnpj: e.target.value })}
+                                        className="w-full bg-black/50 border border-white/10 rounded-xl p-3 text-white focus:ring-2 focus:ring-[#FD295E] outline-none"
+                                        placeholder="00.000.000/0000-00"
+                                    />
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-400 mb-2">Logo da Empresa</label>
+                                <input
+                                    type="file"
+                                    ref={fileInputRef}
+                                    onChange={handleLogoUpload}
+                                    className="hidden"
+                                    accept="image/*"
+                                />
+                                <div
+                                    onClick={() => fileInputRef.current?.click()}
+                                    className="w-full h-32 border-2 border-dashed border-white/10 rounded-xl bg-black/30 hover:bg-white/5 transition-all cursor-pointer flex flex-col items-center justify-center gap-3 group"
+                                >
+                                    {formData.logo ? (
+                                        <div className="relative w-full h-full p-2">
+                                            <img src={formData.logo} alt="Preview" className="w-full h-full object-contain" />
+                                            <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-lg">
+                                                <span className="text-white text-sm font-medium">Alterar Logo</span>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <>
+                                            <div className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center group-hover:scale-110 transition-transform">
+                                                <Upload className="w-6 h-6 text-gray-400 group-hover:text-[#FD295E]" />
+                                            </div>
+                                            <span className="text-sm text-gray-400">Clique para enviar uma imagem</span>
+                                        </>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="border-t border-white/5 pt-6">
+                                <h4 className="text-sm font-bold text-[#FD295E] mb-4 uppercase tracking-wider">Integração Pipefy</h4>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-xs text-gray-500 mb-1">Organization ID</label>
+                                        <input
+                                            type="text"
+                                            value={formData.pipefyOrgId}
+                                            onChange={(e) => setFormData({ ...formData, pipefyOrgId: e.target.value })}
+                                            className="w-full bg-black/30 border border-white/5 rounded-lg p-2.5 text-sm text-gray-300 focus:border-[#FD295E]/50 outline-none"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs text-gray-500 mb-1">Pipe ID (Vendas)</label>
+                                        <input
+                                            type="text"
+                                            value={formData.pipefyPipeId}
+                                            onChange={(e) => setFormData({ ...formData, pipefyPipeId: e.target.value })}
+                                            className="w-full bg-black/30 border border-white/5 rounded-lg p-2.5 text-sm text-gray-300 focus:border-[#FD295E]/50 outline-none"
+                                        />
+                                    </div>
+                                    <div className="md:col-span-2">
+                                        <label className="block text-xs text-gray-500 mb-1">Personal Access Token</label>
+                                        <input
+                                            type="password"
+                                            value={formData.pipefyToken}
+                                            onChange={(e) => setFormData({ ...formData, pipefyToken: e.target.value })}
+                                            className="w-full bg-black/30 border border-white/5 rounded-lg p-2.5 text-sm text-gray-300 focus:border-[#FD295E]/50 outline-none"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="flex justify-end gap-3 pt-6 border-t border-white/5">
+                                <button
+                                    onClick={() => setShowForm(false)}
+                                    className="px-6 py-3 border border-white/10 rounded-xl text-gray-300 hover:bg-white/5 transition-colors font-medium"
+                                >
+                                    Cancelar
+                                </button>
+                                <button
+                                    onClick={async () => {
+                                        if (!formData.name) return toast.error('Nome é obrigatório');
+
+                                        setIsLoading(true);
+                                        try {
+                                            await saveCompanyConfig(formData); // Handles both create and update
+                                            toast.success(editingCompany ? 'Empresa atualizada!' : 'Empresa criada!');
+                                            setShowForm(false);
+                                            // Optimistic update handled by App.jsx data refresh or reload
+                                            // Ideally we trigger a reload here, but saveCompanyConfig should handle it
+                                            window.location.reload(); // Simple brute force refresh
+                                        } catch (err) {
+                                            console.error(err);
+                                            toast.error('Erro ao salvar.');
+                                        } finally {
+                                            setIsLoading(false);
+                                        }
+                                    }}
+                                    disabled={isLoading}
+                                    className="px-6 py-3 bg-[#FD295E] hover:bg-[#e02451] text-white rounded-xl font-bold shadow-lg shadow-[#FD295E]/20 transition-all hover:scale-[1.02] flex items-center gap-2"
+                                >
+                                    {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
+                                    {editingCompany ? 'Salvar Alterações' : 'Criar Empresa'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Custom Delete Modal */}
+            {companyToDelete && (
+                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[70] flex items-center justify-center p-4 animate-in fade-in duration-200">
+                    <div className="bg-[#121212] border border-white/10 rounded-2xl shadow-2xl p-6 max-w-sm w-full relative overflow-hidden ring-1 ring-[#FD295E]/20">
+                        <div className="absolute top-0 right-0 w-32 h-32 bg-red-500/10 blur-[50px] rounded-full pointer-events-none"></div>
+                        <div className="relative z-10 text-center mb-6">
+                            <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-500/20">
+                                <Trash2 className="w-8 h-8 text-red-500" />
+                            </div>
+                            <h3 className="text-xl font-bold text-white mb-2">Excluir Empresa?</h3>
+                            <p className="text-gray-400 text-sm">
+                                Tem certeza que deseja excluir esta empresa e todos os seus dados? <br />
+                                <span className="text-red-400 font-semibold">Esta ação é irreversível.</span>
+                            </p>
+                        </div>
+
+                        <div className="flex gap-3 relative z-10">
+                            <button
+                                onClick={() => setCompanyToDelete(null)}
+                                className="flex-1 py-3 border border-white/10 rounded-lg text-gray-300 hover:bg-white/5 transition-colors font-medium"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                onClick={confirmDelete}
+                                className="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white rounded-lg font-bold shadow-lg shadow-red-900/20 transition-all hover:scale-[1.02]"
+                            >
+                                Sim, Excluir
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             <div className="min-h-screen flex items-center justify-center p-4 lg:p-12 relative z-10">
                 <div className="w-full max-w-7xl grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-24 items-center">
 
@@ -385,7 +483,7 @@ export function CompanySelection({ data, onSelect }) {
                                 <div
                                     key={company.id}
                                     className="group relative bg-white/[0.03] border border-white/5 rounded-2xl p-5 hover:bg-white/[0.06] hover:border-[#FD295E]/50 transition-all cursor-pointer hover:shadow-[0_0_30px_rgba(253,41,94,0.1)] duration-300"
-                                    onClick={() => onSelect(company)}
+                                    onClick={() => handleCompanyClick(company)}
                                 >
                                     <div className="flex items-center gap-5">
                                         <div className="w-16 h-16 rounded-2xl bg-[#1a1a1a] flex items-center justify-center text-[#FD295E] shrink-0 border border-white/5 shadow-inner group-hover:scale-105 transition-transform">

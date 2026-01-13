@@ -87,7 +87,7 @@ export const MobileSidebar = ({
         <>
             <div
                 className={cn(
-                    "h-10 px-4 py-4 flex flex-row md:hidden items-center justify-between bg-neutral-100 dark:bg-neutral-800 w-full"
+                    "h-10 px-4 py-4 flex flex-row md:hidden items-center justify-between bg-neutral-100 dark:bg-[#0a0a0a] w-full"
                 )}
                 {...props}
             >
@@ -108,7 +108,7 @@ export const MobileSidebar = ({
                                 ease: "easeInOut",
                             }}
                             className={cn(
-                                "fixed h-full w-full inset-0 bg-white dark:bg-neutral-900 p-10 z-[100] flex flex-col justify-between",
+                                "fixed h-full w-full inset-0 bg-white dark:bg-neutral-900 p-4 z-[100] flex flex-col justify-between",
                                 className
                             )}
                         >
@@ -134,14 +134,18 @@ export const SidebarLink = ({
 }) => {
     const { open, animate } = useSidebar();
 
-    // Adapted generic clickable wrapper
-    const Component = link.onClick ? 'button' : 'div';
+    // Adapted generic clickable wrapper with motion
+    const Component = link.onClick ? motion.button : motion.div;
 
     return (
         <Component
             onClick={link.onClick}
+            layout
+            whileHover={{ scale: 1.05, x: 5 }}
+            whileTap={{ scale: 0.95 }}
+            transition={{ type: "spring", stiffness: 400, damping: 17 }}
             className={cn(
-                "flex items-center gap-3 group/sidebar py-2 mx-2 pl-3 rounded-lg transition-colors",
+                "flex items-center gap-3 group/sidebar py-2.5 mx-2 pl-3 rounded-xl transition-all cursor-pointer w-[calc(100%-16px)] text-left hover:shadow-sm hover:bg-gray-100 dark:hover:bg-white/10",
                 className
             )}
             {...props}
@@ -151,8 +155,9 @@ export const SidebarLink = ({
                 animate={{
                     width: animate ? (open ? "auto" : 0) : "auto",
                     opacity: animate ? (open ? 1 : 0) : 1,
+                    display: animate ? (open ? "block" : "none") : "block"
                 }}
-                className="text-neutral-700 dark:text-neutral-200 text-sm whitespace-nowrap overflow-hidden"
+                className="text-neutral-700 dark:text-neutral-200 text-sm whitespace-nowrap overflow-hidden font-medium"
             >
                 {link.label}
             </motion.span>

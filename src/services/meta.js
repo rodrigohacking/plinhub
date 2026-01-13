@@ -15,7 +15,11 @@ export async function fetchMetaCampaigns(adAccountId, token) {
     const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
 
     try {
-        const response = await fetch(`${META_API_URL}/act_${actId}/campaigns?fields=${fields}&access_token=${token}`, {
+        // Query Params:
+        // - effective_status: include PAUSED campaigns (default is ACTIVE only often)
+        // - limit: 500 to catch everything
+        const query = `fields=${fields}&effective_status=['ACTIVE','PAUSED']&limit=500&access_token=${token}`;
+        const response = await fetch(`${META_API_URL}/act_${actId}/campaigns?${query}`, {
             signal: controller.signal
         });
         clearTimeout(timeoutId);
@@ -23,7 +27,8 @@ export async function fetchMetaCampaigns(adAccountId, token) {
 
         if (result.error) {
             console.error('Meta API Error:', result.error);
-            return [];
+            // Critical: Throw error so UI shows "Invalid Token" instead of "0 campaigns found"
+            throw new Error(result.error.message || 'Meta API Error');
         }
 
         const campaigns = result.data || [];

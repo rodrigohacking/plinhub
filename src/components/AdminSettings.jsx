@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Save, AlertCircle, CheckCircle, Play, Building, Upload, Lock, Unlock, Key, Eye, EyeOff } from 'lucide-react';
+import { toast } from 'sonner';
+import { Save, AlertCircle, CheckCircle, Play, Building, Upload, Lock, Unlock, Key, Eye, EyeOff, Users, UserPlus, Trash2, Shield } from 'lucide-react';
 import { fetchPipefyDeals } from '../services/pipefy';
 import { fetchMetaCampaigns } from '../services/meta';
 import { getCompaniesConfig, saveCompanyConfig, getAdminPin, setAdminPin, checkAdminPin } from '../lib/storage';
@@ -22,44 +23,96 @@ export function AdminSettings({ company, onSave }) {
         valueField: '',
         lossReasonField: '',
         metaAdAccountId: '',
-        metaToken: ''
+        metaToken: '',
+        // users: [] REMOVED from config state to avoid overwrite issues
     });
+    const [companyUsers, setCompanyUsers] = useState([]); // Separate state for DB users
+
     const [status, setStatus] = useState('idle');
     const [testStatus, setTestStatus] = useState({ type: '', msg: '', error: false });
+
+    // User Management State
+    const [newUserEmail, setNewUserEmail] = useState('');
+    const [newUserRole, setNewUserRole] = useState('editor');
 
     // Security State
     const [isLocked, setIsLocked] = useState(true);
     const [showPinModal, setShowPinModal] = useState(false);
     const [pinInput, setPinInput] = useState('');
-    const [pinError, setPinError] = useState('');
+    const [pinError, setPinError] = '';
     const [isSettingNewPin, setIsSettingNewPin] = useState(false);
     const [showToken, setShowToken] = useState(false); // Toggle password visibility after unlock
 
     useEffect(() => {
         if (company) {
-            // Load company config
-            const customCompanies = getCompaniesConfig();
-            const customConfig = customCompanies.find(c => c.id === company.id) || {};
 
-            setConfig({
-                id: company.id,
-                name: company.name,
-                cnpj: company.cnpj || '',
-                logo: company.logo || '',
-                pipefyOrgId: customConfig.pipefyOrgId || '',
-                pipefyPipeId: customConfig.pipefyPipeId || '',
-                pipefyToken: customConfig.pipefyToken || '',
-                wonPhase: customConfig.wonPhase || '',
-                wonPhaseId: customConfig.wonPhaseId || '',
-                lostPhase: customConfig.lostPhase || '',
-                lostPhaseId: customConfig.lostPhaseId || '',
-                qualifiedPhase: customConfig.qualifiedPhase || '',
-                qualifiedPhaseId: customConfig.qualifiedPhaseId || '',
-                valueField: customConfig.valueField || '',
-                lossReasonField: customConfig.lossReasonField || '',
-                metaAdAccountId: customConfig.metaAdAccountId || '',
-                metaToken: customConfig.metaToken || ''
-            });
+            // Load company config and users
+            const loadData = async () => {
+                try {
+                    // 1. Sync Company to DB (Ensure it exists)
+                    // If the company was created in localStorage but not in DB, we must create it now.
+                    try {
+                        await fetch(`http://localhost:3001/api/companies`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                id: company.id,
+                                name: company.name,
+                                cnpj: company.cnpj || '',
+                                logo: company.logo || ''
+                            })
+                        });
+                    } catch (syncErr) {
+                        console.error("Failed to sync company to DB:", syncErr);
+                        // Don't block, as it might already exist or be a network temporary issue
+                    }
+
+                    // 2. Fetch Users from DB
+                    try {
+                        const usersRes = await fetch(`http://localhost:3001/api/companies/${company.id}/users`);
+                        if (usersRes.ok) {
+                            const dbUsers = await usersRes.json();
+                            setCompanyUsers(dbUsers); // Set separate state
+                        }
+                    } catch (err) {
+                        console.error("Failed to fetch users from DB:", err);
+                        if (err.message.includes('Failed to fetch') || err.name === 'TypeError') {
+                            toast.error("Backend offline. Rode 'npm run dev' na pasta backend.");
+                        } else {
+                            toast.error("Erro ao carregar usuários.");
+                        }
+                    }
+
+                    // Load config directly from the 'company' prop (which is enriched with DB data by getData)
+                    // We no longer rely on 'getCompaniesConfig()' (localStorage) as the source of truth for these fields.
+                    setConfig(prev => ({
+                        ...prev,
+                        id: company.id,
+                        name: company.name,
+                        cnpj: company.cnpj || '',
+                        logo: company.logo || '',
+                        // Integration fields now come flattened from the backend/getData
+                        pipefyOrgId: company.pipefyOrgId || '',
+                        pipefyPipeId: company.pipefyPipeId || '',
+                        pipefyToken: company.pipefyToken || '',
+                        wonPhase: company.wonPhase || '',
+                        wonPhaseId: company.wonPhaseId || '',
+                        lostPhase: company.lostPhase || '',
+                        lostPhaseId: company.lostPhaseId || '',
+                        qualifiedPhase: company.qualifiedPhase || '',
+                        qualifiedPhaseId: company.qualifiedPhaseId || '',
+                        valueField: company.valueField || '',
+                        lossReasonField: company.lossReasonField || '',
+                        metaAdAccountId: company.metaAdAccountId || '',
+                        metaToken: company.metaToken || '',
+                    }));
+
+                } catch (e) {
+                    console.error("Error loading settings:", e);
+                }
+            };
+            loadData();
+
 
             // Look for existing PIN to determine if we are in "Create" or "Verify" mode initially
             const hasPin = !!getAdminPin();
@@ -84,21 +137,100 @@ export function AdminSettings({ company, onSave }) {
         }
     };
 
-    const handleSave = () => {
+
+    const handleAddUser = async () => {
+        if (!newUserEmail || !newUserEmail.includes('@')) {
+            toast.error('Por favor, insira um e-mail válido.');
+            return;
+        }
+
+        try {
+            // 1. Add to DB (Persistence)
+            const saveRes = await fetch(`http://localhost:3001/api/companies/${config.id}/users`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    email: newUserEmail.trim(),
+                    role: newUserRole
+                })
+            });
+
+            if (!saveRes.ok) throw new Error('Failed to save user to DB');
+            const savedUser = await saveRes.json();
+
+            // 2. Send Invite Email (Simulated)
+            const inviteRes = await fetch('http://localhost:3001/api/invites', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    email: newUserEmail.trim(),
+                    companyId: config.id,
+                    role: newUserRole,
+                    companyName: config.name
+                })
+            });
+
+            if (inviteRes.ok) {
+                toast.success(`Convite enviado para ${newUserEmail}`);
+            } else {
+                toast.warning('Convite não enviado (Backend offline), mas acesso foi salvo.');
+            }
+
+            // Update separate state with the REAL saved user from DB
+            setCompanyUsers(prev => [...prev, savedUser]);
+            setNewUserEmail('');
+
+        } catch (error) {
+            console.error('Error adding user:', error);
+            toast.warning('Erro ao salvar usuário. Verifique a conexão.');
+        }
+    };
+
+    const [userToRemove, setUserToRemove] = useState(null); // State for modal
+    const [showRemoveModal, setShowRemoveModal] = useState(false);
+
+    const handleRemoveClick = (email) => {
+        setUserToRemove(email);
+        setShowRemoveModal(true);
+    };
+
+    const confirmRemoveUser = async () => {
+        if (!userToRemove) return;
+
+        try {
+            // Remove from DB
+            await fetch(`http://localhost:3001/api/companies/${config.id}/users/${userToRemove}`, {
+                method: 'DELETE'
+            });
+
+            setCompanyUsers(prev => prev.filter(u => u.email !== userToRemove));
+            toast.success("Usuário removido.");
+        } catch (err) {
+            console.error("Error removing user:", err);
+            toast.error("Erro ao remover usuário.");
+        } finally {
+            setShowRemoveModal(false);
+            setUserToRemove(null);
+        }
+    };
+
+    const handleSave = async () => {
         if (!config.name) {
             alert('Por favor, preencha o nome da empresa.');
             return;
         }
 
         setStatus('saving');
-        saveCompanyConfig(config);
 
+        // Wait for the DB save to complete before signaling success
+        await saveCompanyConfig(config);
+
+        setStatus('success');
         setTimeout(() => {
-            setStatus('success');
-            setTimeout(() => setStatus('idle'), 2000);
-
+            setStatus('idle');
+            // Trigger the refresh callback if provided (IMPORTANT for App.jsx to reload data)
             if (onSave) onSave();
-        }, 800);
+        }, 1000);
     };
 
     const handlePinSubmit = () => {
@@ -167,6 +299,40 @@ export function AdminSettings({ company, onSave }) {
 
     return (
         <div className="max-w-4xl mx-auto animate-in fade-in duration-500 pb-12 relative">
+            {/* Remove User Confirmation Modal */}
+            {showRemoveModal && (
+                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                    <div className="bg-white dark:bg-[#1a1a1a] rounded-2xl shadow-2xl p-8 max-w-sm w-full animate-in zoom-in-95 duration-200 border border-transparent dark:border-white/10">
+                        <div className="text-center mb-6">
+                            <div className="w-16 h-16 bg-red-100 dark:bg-red-900/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                                <Trash2 className="w-8 h-8 text-red-600 dark:text-red-500" />
+                            </div>
+                            <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+                                Remover Acesso?
+                            </h3>
+                            <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
+                                Tem certeza que deseja remover o acesso de <span className="font-semibold text-gray-800 dark:text-gray-200">{userToRemove}</span>?
+                            </p>
+                        </div>
+
+                        <div className="flex gap-3 pt-2">
+                            <button
+                                onClick={() => { setShowRemoveModal(false); setUserToRemove(null); }}
+                                className="flex-1 py-3 text-gray-600 dark:text-gray-400 font-medium hover:bg-gray-50 dark:hover:bg-white/5 rounded-lg"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                onClick={confirmRemoveUser}
+                                className="flex-1 py-3 bg-red-600 dark:bg-red-600 text-white font-bold rounded-lg hover:bg-red-700"
+                            >
+                                Sim, Remover
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Security Modal */}
             {showPinModal && (
                 <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -286,6 +452,109 @@ export function AdminSettings({ company, onSave }) {
                                         className="w-full text-sm text-gray-500 dark:text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-[#FD295E]/10 dark:file:bg-[#FD295E]/20 file:text-[#FD295E] dark:file:text-[#FD295E] hover:file:bg-[#FD295E]/20 dark:hover:file:bg-[#FD295E]/30 cursor-pointer"
                                     />
                                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Carregue uma imagem (PNG, JPG) para usar como logo.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Users / Access Control */}
+                <div className="bg-white dark:bg-[#111] p-6 rounded-xl border border-gray-200 dark:border-white/5 shadow-sm relative overflow-hidden">
+                    <h2 className="text-lg font-semibold text-gray-800 dark:text-white mb-4 flex items-center gap-2">
+                        <Users className="w-5 h-5 text-gray-500 dark:text-gray-400" />
+                        Gestão de Acesso
+                    </h2>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                        {/* List Users */}
+                        <div className="lg:col-span-2 space-y-3">
+                            <h3 className="text-sm font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider mb-3">Usuários com Acesso</h3>
+                            {!companyUsers || companyUsers.length === 0 ? (
+                                <div className="p-8 border border-dashed border-gray-200 dark:border-white/10 rounded-xl text-center">
+                                    <Users className="w-8 h-8 text-gray-300 dark:text-gray-600 mx-auto mb-2" />
+                                    <p className="text-gray-500 dark:text-gray-400 text-sm">Nenhum usuário cadastrado.</p>
+                                </div>
+                            ) : (
+                                <div className="space-y-2">
+                                    {companyUsers.map((user, idx) => (
+                                        <div key={idx} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-white/5 border border-gray-100 dark:border-white/5 rounded-lg group">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-white/10 flex items-center justify-center text-gray-500 dark:text-gray-300">
+                                                    <span className="text-xs font-bold">{user.email.substring(0, 2).toUpperCase()}</span>
+                                                </div>
+                                                <div>
+                                                    <p className="text-sm font-medium text-gray-900 dark:text-white flex items-center gap-2">
+                                                        {user.email}
+                                                        {user.status === 'pending' && (
+                                                            <span className="text-[10px] bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400 px-1.5 py-0.5 rounded font-bold uppercase">
+                                                                Pendente
+                                                            </span>
+                                                        )}
+                                                    </p>
+                                                    <div className="flex items-center gap-2">
+                                                        <span className={`text-[10px] uppercase font-bold px-1.5 py-0.5 rounded ${user.role === 'admin' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400' :
+                                                            user.role === 'editor' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' :
+                                                                'bg-gray-100 text-gray-600 dark:bg-white/10 dark:text-gray-400'
+                                                            }`}>
+                                                            {user.role === 'admin' ? 'Administrador' : user.role === 'editor' ? 'Colaborador' : 'Leitor'}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <button
+                                                onClick={() => handleRemoveClick(user.email)}
+                                                className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+                                                title="Remover acesso"
+                                            >
+                                                <Trash2 className="w-4 h-4" />
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Add User Form */}
+                        <div className="bg-gray-50 dark:bg-white/[0.02] border border-gray-100 dark:border-white/5 rounded-xl p-5 h-fit">
+                            <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                                <UserPlus className="w-4 h-4 text-[#FD295E]" />
+                                Adicionar Usuário
+                            </h3>
+                            <div className="space-y-4">
+                                <div className="space-y-1.5">
+                                    <label className="text-xs font-medium text-gray-500 dark:text-gray-400">E-mail do Usuário</label>
+                                    <input
+                                        type="email"
+                                        value={newUserEmail}
+                                        onChange={(e) => setNewUserEmail(e.target.value)}
+                                        placeholder="usuario@email.com"
+                                        className="w-full p-2.5 bg-white dark:bg-[#111] border border-gray-200 dark:border-white/10 rounded-lg text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-[#FD295E] outline-none"
+                                    />
+                                </div>
+                                <div className="space-y-1.5">
+                                    <label className="text-xs font-medium text-gray-500 dark:text-gray-400">Nível de Acesso</label>
+                                    <select
+                                        value={newUserRole}
+                                        onChange={(e) => setNewUserRole(e.target.value)}
+                                        className="w-full p-2.5 bg-white dark:bg-[#111] border border-gray-200 dark:border-white/10 rounded-lg text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-[#FD295E] outline-none appearance-none"
+                                    >
+                                        <option value="admin">Administrador (Total)</option>
+                                        <option value="editor">Colaborador (Editor)</option>
+                                        <option value="viewer">Leitor (Apenas Visualização)</option>
+                                    </select>
+                                </div>
+                                <button
+                                    onClick={handleAddUser}
+                                    className="w-full py-2.5 bg-black dark:bg-white text-white dark:text-black font-medium rounded-lg hover:opacity-90 transition-opacity text-sm flex items-center justify-center gap-2"
+                                >
+                                    <UserPlus className="w-4 h-4" />
+                                    Conceder Acesso
+                                </button>
+                                <div className="pt-2 border-t border-gray-200 dark:border-white/5">
+                                    <div className="flex gap-2 items-start text-[10px] text-gray-500 dark:text-gray-400 leading-tight">
+                                        <Shield className="w-3 h-3 shrink-0 mt-0.5" />
+                                        <p>Usuários terão acesso apenas aos dados desta empresa conforme o nível selecionado.</p>
+                                    </div>
                                 </div>
                             </div>
                         </div>

@@ -25,8 +25,16 @@ export function LoginPage() {
         try {
             await signIn(email, password);
         } catch (err) {
-            setError('Falha no login. Verifique suas informações.');
-            console.error(err);
+            console.error("Login Failed - Detailed Error:", err);
+            window.lastError = err; // Expose for UI
+            // Check for specific Supabase error codes
+            if (err.message && err.message.includes('Email not confirmed')) {
+                setError('Por favor, confirme seu email antes de fazer login.');
+            } else if (err.message && err.message.includes('Invalid login credentials')) {
+                setError('Email ou senha incorretos.');
+            } else {
+                setError('Falha no login. Verifique suas informações.');
+            }
         } finally {
             setLoading(false);
         }
@@ -55,6 +63,9 @@ export function LoginPage() {
                     {error && (
                         <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-500 text-sm text-center">
                             {error}
+                            <div className="text-[10px] mt-1 opacity-75 font-mono border-t border-red-500/20 pt-1">
+                                {window.lastError?.message || ''}
+                            </div>
                         </div>
                     )}
 
@@ -109,6 +120,9 @@ export function LoginPage() {
 
                     <div className="text-center mt-6">
                         <p className="text-xs text-gray-600">© 2026 Grupo Plin</p>
+                        <p className="text-[10px] text-gray-800 mt-2 font-mono opacity-50">
+                            Server: {import.meta.env.VITE_SUPABASE_URL?.split('//')[1]?.split('.')[0] || 'Unknown'}
+                        </p>
                     </div>
                 </form>
             </div>

@@ -10,4 +10,14 @@ export default defineConfig({
       "@": path.resolve(path.dirname(new URL(import.meta.url).pathname), "./src"),
     },
   },
+  server: {
+    proxy: {
+      '/pipefy-api': {
+        target: 'https://api.pipefy.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/pipefy-api/, ''),
+        secure: false,
+      }
+    }
+  }
 })

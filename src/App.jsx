@@ -1,16 +1,18 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { Layout } from './components/Layout';
-import { CompanySelection } from './components/CompanySelection';
-import { DashboardSales } from './components/DashboardSales';
-import { DashboardMarketing } from './components/DashboardMarketing';
-import { Forms } from './components/Forms';
-import { AdminSettings } from './components/AdminSettings';
+// Lazy Loading for optimization
+const CompanySelection = React.lazy(() => import('./components/CompanySelection').then(module => ({ default: module.CompanySelection })));
+const DashboardSales = React.lazy(() => import('./components/DashboardSales').then(module => ({ default: module.DashboardSales })));
+const DashboardMarketing = React.lazy(() => import('./components/DashboardMarketing').then(module => ({ default: module.DashboardMarketing })));
+const Forms = React.lazy(() => import('./components/Forms').then(module => ({ default: module.Forms })));
+const AdminSettings = React.lazy(() => import('./components/AdminSettings').then(module => ({ default: module.AdminSettings })));
+const UserProfile = React.lazy(() => import('./components/UserProfile').then(module => ({ default: module.UserProfile })));
+
 import { AnimatePresence } from 'framer-motion';
 import { Toaster } from 'sonner';
 import { SidebarNew } from './components/SidebarNew';
 import { getData } from './lib/storage';
 import { Loading } from './components/Loading';
-import { UserProfile } from './components/UserProfile';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { LoginPage } from './components/LoginPage';
 
@@ -31,6 +33,7 @@ function MainApp() {
             if (view === 'home') {
                 setSelectedCompany(null);
                 updateUrl(null, null);
+                localStorage.removeItem('plin_company_id'); // Clear persistent choice
             } else {
                 setCurrentView(view);
                 updateUrl(selectedCompany?.id, view);
@@ -39,23 +42,53 @@ function MainApp() {
         }, 600);
     };
 
-    // Helper to sync URL
+    // Helper to sync URL (Clean Version)
     const updateUrl = (companyId, view) => {
         if (!companyId) {
             window.history.pushState({}, '', '/');
             return;
         }
-        const params = new URLSearchParams();
-        params.set('companyId', companyId);
-        if (view) params.set('view', view);
 
-        const newUrl = `${window.location.pathname}?${params.toString()}`;
-        window.history.pushState({}, '', newUrl);
+        // Save to LocalStorage for persistence
+        localStorage.setItem('plin_company_id', companyId);
+
+        let path = '/';
+        const params = new URLSearchParams();
+
+        // View -> Path Mapping
+        if (view === 'sales') {
+            path = '/vendas-geral';
+            // Don't add companyId to params for cleaner URL
+        } else if (view === 'marketing') {
+            path = '/marketing';
+        } else if (view === 'settings') {
+            path = '/settings';
+        } else if (view === 'set-goals') {
+            path = '/definir-metas';
+        } else if (view === 'profile') {
+            path = '/perfil';
+        } else {
+            // Default fallback for other views
+            params.set('view', view);
+        }
+
+        // Only append params if there are any
+        const queryString = params.toString();
+        const finalUrl = queryString ? `${path}?${queryString}` : path;
+
+        window.history.pushState({}, '', finalUrl);
     };
+
+    // Force redirect /home -> /
+    useEffect(() => {
+        if (window.location.pathname === '/home') {
+            window.history.replaceState({}, '', '/');
+        }
+    }, []);
 
     useEffect(() => {
         if (user) {
-            // Reset state on login to prevent stale data
+            // Reset state on login
             setData(null);
             setSelectedCompany(null);
             setIsLoading(true);
@@ -66,22 +99,52 @@ function MainApp() {
                 setData(d);
                 setIsLoading(false);
 
-                // URL Persistence: Restore State
+                // URL Persistence: Support both URL param (shareable links) AND LocalStorage (returning user)
                 const params = new URLSearchParams(window.location.search);
-                const urlCompanyId = params.get('companyId');
+                let targetCompanyId = params.get('companyId');
                 const urlView = params.get('view');
+                const pathname = window.location.pathname;
 
-                if (urlCompanyId) {
-                    // Note: IDs in URL are strings, IDs in data might be numbers. standardizing on loose comparison or toString
-                    const found = d.companies.find(c => String(c.id) === String(urlCompanyId));
+                // Fallback to LocalStorage if not in URL
+                if (!targetCompanyId) {
+                    targetCompanyId = localStorage.getItem('plin_company_id');
+                }
+
+                if (targetCompanyId) {
+                    const found = d.companies.find(c => String(c.id) === String(targetCompanyId));
                     if (found) {
                         setSelectedCompany(found);
-                        if (urlView) setCurrentView(urlView);
+
+                        // Restore View based on Path or Param
+                        if (pathname === '/vendas-geral') setCurrentView('sales');
+                        else if (pathname === '/marketing') setCurrentView('marketing');
+                        else if (pathname === '/settings') setCurrentView('settings');
+                        else if (pathname === '/definir-metas') setCurrentView('set-goals');
+                        else if (pathname === '/perfil') setCurrentView('profile');
+                        else if (urlView) setCurrentView(urlView);
                     }
                 }
             }).catch(e => console.error("APP: Data Load Error", e));
         }
     }, [user?.id]);
+
+    // URL Management for Login State
+    useEffect(() => {
+        if (!authLoading) {
+            const path = window.location.pathname;
+            if (!user) {
+                // If not logged in and not on /login, move to /login
+                if (path !== '/login') {
+                    window.history.replaceState({}, '', '/login');
+                }
+            } else {
+                // If logged in and on /login, move to root or restore
+                if (path === '/login') {
+                    window.history.replaceState({}, '', '/');
+                }
+            }
+        }
+    }, [authLoading, user]);
 
     if (authLoading) return <Loading />;
     if (!user) return <LoginPage />;
@@ -91,11 +154,26 @@ function MainApp() {
 
     if (!selectedCompany) {
         console.log("APP: Rendering CompanySelection");
-        return <CompanySelection data={data} onSelect={(c) => {
-            console.log("APP: Selected", c);
-            setSelectedCompany(c);
-            updateUrl(c.id, currentView);
-        }} />;
+        return (
+            <Suspense fallback={<Loading />}>
+                <CompanySelection data={data} onSelect={(c) => {
+                    console.log("APP: Selected", c);
+
+                    // 1. Immediate Navigation (Optimistic UI)
+                    setSelectedCompany(c);
+                    setCurrentView('sales');
+                    updateUrl(c.id, 'sales');
+
+                    // 2. Background Refresh (Don't await)
+                    getData().then(freshData => {
+                        console.log("APP: Background Refresh Complete");
+                        setData(freshData);
+                    }).catch(error => {
+                        console.error("APP: Background refresh failed", error);
+                    });
+                }} />
+            </Suspense>
+        );
     }
 
     const renderView = () => {
@@ -105,7 +183,20 @@ function MainApp() {
             case 'marketing':
                 return <DashboardMarketing data={data} company={selectedCompany} />;
             case 'settings':
-                return <AdminSettings data={data} company={selectedCompany} />;
+                return <AdminSettings
+                    data={data}
+                    company={selectedCompany}
+                    onSave={() => {
+                        console.log("APP: Settings Saved. Refreshing Data...");
+                        getData().then(freshData => {
+                            setData(freshData);
+                            if (selectedCompany) {
+                                const updatedSelf = freshData.companies.find(c => c.id === selectedCompany.id);
+                                if (updatedSelf) setSelectedCompany(updatedSelf);
+                            }
+                        });
+                    }}
+                />;
             case 'add-sale':
                 return <Forms type="add-sale" data={data} company={selectedCompany} onSuccess={() => {
                     setCurrentView('sales');
@@ -137,18 +228,12 @@ function MainApp() {
         <>
             <Layout
                 currentView={currentView}
-                onViewChange={(view) => {
-                    if (view === 'home') {
-                        setSelectedCompany(null);
-                        updateUrl(null, null);
-                    } else {
-                        setCurrentView(view);
-                        updateUrl(selectedCompany?.id, view);
-                    }
-                }}
+                onViewChange={handleViewChange}
                 company={selectedCompany}
             >
-                {renderView()}
+                <Suspense fallback={<Loading />}>
+                    {renderView()}
+                </Suspense>
             </Layout>
             <Toaster
                 richColors
