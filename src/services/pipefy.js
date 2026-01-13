@@ -1,4 +1,4 @@
-const PIPEFY_API_URL = 'http://localhost:3001/api/pipefy'; // Backend Proxy (Robust)
+const PIPEFY_API_URL = '/api/pipefy'; // Backend Proxy (Robust)
 
 const KNOWN_ROBUST_CONFIGS = {
   // ANDAR SEGUROS

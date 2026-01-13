@@ -168,7 +168,7 @@ export async function saveCompanyConfig(companyConfig) {
 
         // 1. Upsert Company
         const { data: company, error: companyError } = await supabase
-            .from('Company')
+            .from('companies')  // Corrected table name
             .upsert({
                 id: companyConfig.id,
                 name: companyConfig.name,
@@ -237,7 +237,7 @@ export async function saveCompanyConfig(companyConfig) {
 export async function deleteCompanyConfig(companyId) {
     try {
         const { error } = await supabase
-            .from('Company')
+            .from('companies') // Corrected table name
             .delete()
             .eq('id', companyId);
 
@@ -299,7 +299,7 @@ export async function getData() {
 
         // Fetch Company AND its Integrations
         const { data: companies, error } = await supabase
-            .from('Company')
+            .from('companies') // Corrected table name
             .select('*, Integration(*)');
 
         if (error) {
@@ -408,7 +408,7 @@ export async function getData() {
                 // Background Sync to DB to fix it for everyone
                 console.log(`Migrating config for company ${c.name} to DB...`);
                 try {
-                    await fetch('http://localhost:3001/api/companies', {
+                    await fetch('/api/companies', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(mergedCompany)

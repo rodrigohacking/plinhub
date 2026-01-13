@@ -140,7 +140,7 @@ export function CompanySelection({ data, onSelect }) {
 
         const companyId = companyToDelete;
         try {
-            const response = await fetch(`http://localhost:3001/api/companies/${companyId}`, {
+            const response = await fetch(`/api/companies/${companyId}`, {
                 method: 'DELETE'
             });
 

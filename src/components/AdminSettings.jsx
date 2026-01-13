@@ -52,7 +52,7 @@ export function AdminSettings({ company, onSave }) {
                     // 1. Sync Company to DB (Ensure it exists)
                     // If the company was created in localStorage but not in DB, we must create it now.
                     try {
-                        await fetch(`http://localhost:3001/api/companies`, {
+                        await fetch(`/api/companies`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
@@ -69,7 +69,7 @@ export function AdminSettings({ company, onSave }) {
 
                     // 2. Fetch Users from DB
                     try {
-                        const usersRes = await fetch(`http://localhost:3001/api/companies/${company.id}/users`);
+                        const usersRes = await fetch(`/api/companies/${company.id}/users`);
                         if (usersRes.ok) {
                             const dbUsers = await usersRes.json();
                             setCompanyUsers(dbUsers); // Set separate state
@@ -146,7 +146,7 @@ export function AdminSettings({ company, onSave }) {
 
         try {
             // 1. Add to DB (Persistence)
-            const saveRes = await fetch(`http://localhost:3001/api/companies/${config.id}/users`, {
+            const saveRes = await fetch(`/api/companies/${config.id}/users`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -159,7 +159,7 @@ export function AdminSettings({ company, onSave }) {
             const savedUser = await saveRes.json();
 
             // 2. Send Invite Email (Simulated)
-            const inviteRes = await fetch('http://localhost:3001/api/invites', {
+            const inviteRes = await fetch('/api/invites', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -199,7 +199,7 @@ export function AdminSettings({ company, onSave }) {
 
         try {
             // Remove from DB
-            await fetch(`http://localhost:3001/api/companies/${config.id}/users/${userToRemove}`, {
+            await fetch(`/api/companies/${config.id}/users/${userToRemove}`, {
                 method: 'DELETE'
             });
 
