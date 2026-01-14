@@ -75,7 +75,8 @@ export async function fetchPipefyDeals(orgId, pipeId, token, userConfig = {}) {
 
     if (!phasesRes.ok) {
       const errJson = await phasesRes.json().catch(() => ({}));
-      throw new Error(errJson.error?.message || errJson.error || phasesRes.statusText || 'Erro na conexão com Pipefy');
+      const detailedError = errJson.error?.message || errJson.error || `Erro ${phasesRes.status}: ${phasesRes.statusText}` || 'Erro na conexão com Pipefy';
+      throw new Error(detailedError);
     }
 
     const phasesJson = await phasesRes.json();
