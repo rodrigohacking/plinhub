@@ -5,7 +5,7 @@ import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
     LineChart, Line, Legend, Cell
 } from 'recharts';
-import { DollarSign, UserPlus, Target, MousePointer, TrendingUp, Filter, Instagram, Globe, Search, Users } from 'lucide-react';
+import { DollarSign, UserPlus, Target, MousePointer, TrendingUp, Filter, Instagram, Globe, Search, Users, Ban } from 'lucide-react';
 import { KPICard } from './KPICard';
 import { ChartCard } from './ChartCard';
 import { formatCurrency, formatNumber, formatPercent } from '../lib/utils';
@@ -148,7 +148,13 @@ export function DashboardMarketing({ company, data }) {
         });
         const campaignRanking = Object.values(campaignRankingMap).sort((a, b) => b.revenue - a.revenue);
 
-        // Calculate Derived
+        // 5. Meta Specific LOST Deals (For New KPI)
+        const metaLostDeals = closedInPeriod.filter(d => {
+            const ch = (d.channel || '').toLowerCase();
+            const isMeta = ch.includes('instagram') || ch.includes('facebook') || ch.includes('meta');
+            return isMeta && d.status === 'lost';
+        });
+
         const cpl = leads ? invest / leads : 0;
         const ctr = imps ? (clicks / imps) * 100 : 0;
         const cpm = imps ? (invest / imps) * 1000 : 0;
@@ -181,6 +187,7 @@ export function DashboardMarketing({ company, data }) {
             totalReach: reach,
             totalWonCount: wonCount, // Total (Mixed)
             metaWonCount: metaWonDeals.length, // Meta Only
+            metaLostCount: metaLostDeals.length, // Meta Lost (New)
             metaQualifiedCount: metaQualifiedDeals.length,
             totalWonValue: wonValue,
             cpl, ctr, cpm, cpc, convRate, roi, cac,
@@ -188,7 +195,7 @@ export function DashboardMarketing({ company, data }) {
         };
     }, [data.campaigns, data.sales, company.id, dateRange]);
 
-    const { totalInvestment, totalLeads, totalClicks, totalImpressions, totalReach, cpl, ctr, cpm, cpc, convRate, roi, cac, channels, metaWonCount, metaQualifiedCount, creativeRanking, campaignRanking } = metrics;
+    const { totalInvestment, totalLeads, totalClicks, totalImpressions, totalReach, cpl, ctr, cpm, cpc, convRate, roi, cac, channels, metaWonCount, metaLostCount, metaQualifiedCount, creativeRanking, campaignRanking } = metrics;
 
     // UI State for Ranking Toggle
     const [rankingMode, setRankingMode] = useState('creative'); // 'creative' or 'campaign'
@@ -242,7 +249,7 @@ export function DashboardMarketing({ company, data }) {
             </div>
 
             {/* 2. Premium KPI Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 md:gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 md:gap-6">
                 {/* Card 1: Investimento */}
                 <div className="bg-white dark:bg-[#111] p-6 rounded-3xl shadow-xl border border-gray-100 dark:border-white/5 relative overflow-hidden group hover:shadow-2xl transition-all duration-300">
                     <div className="flex flex-col h-full justify-between">
@@ -288,7 +295,7 @@ export function DashboardMarketing({ company, data }) {
                     </div>
                 </div>
 
-                {/* Card 4: CAC (New) */}
+                {/* Card 4: CAC */}
                 <div className="bg-white dark:bg-[#111] p-6 rounded-3xl shadow-xl border border-gray-100 dark:border-white/5 relative overflow-hidden group hover:shadow-2xl transition-all duration-300">
                     <div className="flex flex-col h-full justify-between">
                         <div className="flex justify-between items-start mb-4">
@@ -306,7 +313,6 @@ export function DashboardMarketing({ company, data }) {
 
                 {/* Card 5: Vendas Meta Ads */}
                 <div className="bg-white dark:bg-[#111] p-6 rounded-3xl shadow-xl border border-gray-100 dark:border-white/5 relative overflow-hidden group hover:shadow-2xl transition-all duration-300">
-                    {/* Decorative BG Gradient */}
                     <div className="absolute top-0 right-0 w-24 h-24 bg-purple-500/10 rounded-full -mr-10 -mt-10 blur-2xl group-hover:bg-purple-500/20 transition-all"></div>
                     <div className="flex flex-col h-full justify-between relative z-10">
                         <div className="flex justify-between items-start mb-4">
@@ -318,6 +324,37 @@ export function DashboardMarketing({ company, data }) {
                         <div>
                             <h3 className="text-3xl font-black text-gray-900 dark:text-white">{metaWonCount}</h3>
                             <p className="text-xs text-purple-600/60 font-medium mt-1">Via Facebook/Instagram</p>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Card 6: Churn de Oportunidades */}
+                <div className="bg-white dark:bg-[#111] p-6 rounded-3xl shadow-xl border border-gray-100 dark:border-white/5 relative overflow-hidden group hover:shadow-2xl transition-all duration-300">
+                    <div className="flex flex-col h-full justify-between">
+                        <div className="flex justify-between items-start mb-2">
+                            <p className="text-gray-500 dark:text-gray-400 font-bold text-lg">Leads Perdidos</p>
+                            <div className="p-2 bg-red-50 dark:bg-red-900/20 rounded-2xl text-red-500">
+                                <Ban className="w-6 h-6" />
+                            </div>
+                        </div>
+
+                        <div>
+                            <h3 className="text-5xl font-black text-red-500 mb-4">{metaLostCount}</h3>
+
+                            {/* Progress Bar / Separator */}
+                            <div className="w-full h-1.5 bg-red-100 dark:bg-red-900/20 rounded-full overflow-hidden mb-3">
+                                <div
+                                    className="h-full bg-red-400 rounded-full"
+                                    style={{ width: `${totalLeads ? Math.min((metaLostCount / totalLeads) * 100, 100) : 0}%` }}
+                                ></div>
+                            </div>
+
+                            <div className="flex justify-between items-center">
+                                <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">CHURN DE OPORTUNIDADES</p>
+                                <p className="text-xs font-bold text-red-400">
+                                    {totalLeads ? ((metaLostCount / totalLeads) * 100).toFixed(1) : 0}%
+                                </p>
+                            </div>
                         </div>
                     </div>
                 </div>

@@ -42,6 +42,7 @@ export function DashboardSales({ company, data }) {
     const [itemsPerPage, setItemsPerPage] = useState(10);
     const [sortOption, setSortOption] = useState('date-desc'); // date-desc, date-asc, value-desc, value-asc
     const [filterChannel, setFilterChannel] = useState('all');
+    const [filterInsuranceType, setFilterInsuranceType] = useState('all');
     const [isMobile, setIsMobile] = useState(false);
 
     useEffect(() => {
@@ -119,6 +120,10 @@ export function DashboardSales({ company, data }) {
         const closingTimeSum = wonDeals.reduce((acc, d) => acc + (d.daysToClose || 0), 0);
         const avgClosingTime = wonCount ? closingTimeSum / wonCount : 0;
 
+        // 5. Churn de Oportunidades
+        // Definition: (Lost / Leads Entraram) * 100
+        const churnRate = leadsCreatedCount ? (lostCount / leadsCreatedCount) * 100 : 0;
+
         return {
             newCount: newDeals.length,
             qualifiedCount, // Calculated formula
@@ -128,6 +133,7 @@ export function DashboardSales({ company, data }) {
             avgTicket: avgTicket,
             totalDeals,
             conversionRate,
+            churnRate, // New Metric
             avgClosingTime,
             leadsCreatedCount, // "Leads Entraram"
             wonDeals, // Exposing Array for Table
@@ -235,7 +241,7 @@ export function DashboardSales({ company, data }) {
                     <div className="w-full bg-gray-100 h-1 rounded-full overflow-hidden">
                         <div className="h-full bg-blue-500 w-full"></div>
                     </div>
-                    <p className="text-xs text-gray-400 mt-3 font-bold uppercase">Topo do Funil</p>
+                    <p className="text-xs text-gray-400 mt-3 font-bold uppercase">Oportunidades</p>
                 </div>
 
                 {/* Card 2: Qualificados */}
@@ -287,9 +293,11 @@ export function DashboardSales({ company, data }) {
                         </div>
                     </div>
                     <div className="w-full bg-gray-100 h-1 rounded-full overflow-hidden">
-                        <div className="h-full bg-red-500 w-full opacity-50"></div>
+                        <div className="h-full bg-red-500" style={{ width: `${Math.min(metrics.churnRate, 100)}%` }}></div>
                     </div>
-                    <p className="text-xs text-gray-400 mt-3 font-bold uppercase">Churn de Oportunidades</p>
+                    <p className="text-xs text-gray-400 mt-3 font-bold uppercase">
+                        {metrics.churnRate.toFixed(0)}% Churn de Oportunidades
+                    </p>
                 </div>
             </div>
 
@@ -407,6 +415,49 @@ export function DashboardSales({ company, data }) {
                 </div>
             </div>
 
+            {/* ANDAR SPECIFIC: Insurance Type Breakdown */}
+            {(String(company.pipefyPipeId) === '306438109' || (company.name || '').toLowerCase().includes('andar')) && (
+                <div className="bg-white dark:bg-[#111] p-6 rounded-3xl border border-gray-100 dark:border-white/5 shadow-xl h-[400px] mt-6">
+                    <div className="mb-6">
+                        <h3 className="text-xl font-bold text-gray-900 dark:text-white">Vendas por Tipo de Seguro</h3>
+                        <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">Distribuição por produto</p>
+                    </div>
+                    <ResponsiveContainer width="100%" height={260}>
+                        <PieChart>
+                            <Pie
+                                data={(() => {
+                                    const counts = {};
+                                    // Use 'wonDeals' to show breakdown of actual sales
+                                    metrics.wonDeals.forEach(d => {
+                                        const type = d.insuranceType || 'Não Identificado';
+                                        counts[type] = (counts[type] || 0) + 1;
+                                    });
+
+                                    return Object.keys(counts).map(k => ({ name: k, value: counts[k] })).sort((a, b) => b.value - a.value);
+                                })()}
+                                cx="50%"
+                                cy="50%"
+                                innerRadius={60}
+                                outerRadius={90}
+                                paddingAngle={5}
+                                dataKey="value"
+                            >
+                                {[...Array(10)].map((_, index) => (
+                                    <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                                ))}
+                            </Pie>
+                            <Tooltip />
+                            <Legend
+                                verticalAlign={isMobile ? 'bottom' : 'middle'}
+                                align={isMobile ? 'center' : 'right'}
+                                layout={isMobile ? 'horizontal' : 'vertical'}
+                                wrapperStyle={{ fontSize: '12px', paddingTop: isMobile ? '20px' : '0' }}
+                            />
+                        </PieChart>
+                    </ResponsiveContainer>
+                </div>
+            )}
+
             {/* Section 4: Últimas Vendas ("Recent Sales" Table) */}
             <div className="bg-white dark:bg-[#111] rounded-3xl border border-gray-100 dark:border-white/5 shadow-xl overflow-hidden">
                 <div className="p-8 border-b border-gray-100 dark:border-white/5 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -433,6 +484,23 @@ export function DashboardSales({ company, data }) {
                             ))}
                         </select>
 
+                        {/* INSURANCE TYPE FILTER (Andar Only) */}
+                        {(String(company.pipefyPipeId) === '306438109' || (company.name || '').toLowerCase().includes('andar')) && (
+                            <select
+                                value={filterInsuranceType}
+                                onChange={(e) => {
+                                    setFilterInsuranceType(e.target.value);
+                                    setCurrentPage(1);
+                                }}
+                                className="bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-gray-700 dark:text-gray-300 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 outline-none"
+                            >
+                                <option value="all">Todos os Seguros</option>
+                                {Array.from(new Set(metrics.wonDeals?.map(d => d.insuranceType).filter(Boolean) || [])).sort().map(type => (
+                                    <option key={type} value={type}>{type}</option>
+                                ))}
+                            </select>
+                        )}
+
                         {/* Sort Control */}
                         <select
                             value={sortOption}
@@ -455,6 +523,9 @@ export function DashboardSales({ company, data }) {
                                 <th className="px-6 py-4">Cliente / Título</th>
                                 <th className="px-6 py-4">Vendedor</th>
                                 <th className="px-6 py-4">Canal</th>
+                                {(String(company.pipefyPipeId) === '306438109' || (company.name || '').toLowerCase().includes('andar')) && (
+                                    <th className="px-6 py-4">Tipo Seguro</th>
+                                )}
                                 <th className="px-6 py-4">Valor</th>
                                 <th className="px-6 py-4">Status</th>
                             </tr>
@@ -468,6 +539,9 @@ export function DashboardSales({ company, data }) {
                                 // 2. Filter Logic
                                 if (filterChannel !== 'all') {
                                     tableData = tableData.filter(d => (d.channel || 'Desconhecido') === filterChannel);
+                                }
+                                if (filterInsuranceType !== 'all') {
+                                    tableData = tableData.filter(d => (d.insuranceType) === filterInsuranceType);
                                 }
 
                                 // 3. Sort Logic
@@ -519,6 +593,11 @@ export function DashboardSales({ company, data }) {
                                                         {deal.channel || 'N/A'}
                                                     </span>
                                                 </td>
+                                                {(String(company.pipefyPipeId) === '306438109' || (company.name || '').toLowerCase().includes('andar')) && (
+                                                    <td className="px-6 py-4 text-xs font-medium text-gray-500">
+                                                        {deal.insuranceType || '-'}
+                                                    </td>
+                                                )}
                                                 <td className="px-6 py-4 font-bold text-gray-900 dark:text-white">
                                                     {formatCurrency(deal.amount)}
                                                 </td>
@@ -542,6 +621,9 @@ export function DashboardSales({ company, data }) {
                     let tableData = [...(metrics.wonDeals || [])];
                     if (filterChannel !== 'all') {
                         tableData = tableData.filter(d => (d.channel || 'Desconhecido') === filterChannel);
+                    }
+                    if (filterInsuranceType !== 'all') {
+                        tableData = tableData.filter(d => (d.insuranceType) === filterInsuranceType);
                     }
 
                     const totalItems = tableData.length;

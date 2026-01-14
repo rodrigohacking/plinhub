@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { toast } from 'sonner';
-import { Building2, ArrowRight, Plus, Edit, Trash2, Save, X, Upload, Lock, Loader2 } from 'lucide-react';
+import { Building2, ArrowRight, Plus, Edit, Trash2, Save, X, Upload, Lock, Loader2, LogOut } from 'lucide-react';
 import { Background3D } from './ui/Background3D';
 import { getCompaniesConfig, saveCompanyConfig, deleteCompanyConfig, checkAdminPin, getAdminPin, setAdminPin } from '../lib/storage';
 import { useAuth } from '../contexts/AuthContext';
@@ -17,8 +17,16 @@ export function CompanySelection({ data, onSelect }) {
     const [isLoading, setIsLoading] = useState(false);
 
     // Debug Info
-    const { user } = useAuth();
+    const { user, signOut } = useAuth();
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'MISSING';
+
+    const handleLogout = async () => {
+        try {
+            await signOut();
+        } catch (error) {
+            toast.error('Erro ao sair');
+        }
+    };
 
     const [formData, setFormData] = useState({
         id: null,
@@ -546,15 +554,15 @@ export function CompanySelection({ data, onSelect }) {
                             )}
                         </div>
 
-                        <div className="mt-8 pt-6 border-t border-white/5 flex justify-end items-center text-[10px] text-gray-600 uppercase tracking-widest font-medium">
-                            <span>PLIN © 2026</span>
-                        </div>
-
-                        {/* DEBUG FOOTER */}
-                        <div className="mt-2 text-[9px] text-gray-800 font-mono text-center opacity-50 select-text">
-                            ENV: {supabaseUrl.substring(0, 15)}... |
-                            USER: {user ? user.id : 'NULL'} |
-                            TABLE: Company (Reverted)
+                        <div className="mt-8 pt-6 border-t border-white/5 flex justify-between items-center">
+                            <button
+                                onClick={handleLogout}
+                                className="group flex items-center gap-2 text-[10px] text-gray-500 hover:text-red-400 transition-colors uppercase tracking-widest font-medium cursor-pointer"
+                            >
+                                <LogOut className="w-3 h-3 group-hover:-translate-x-0.5 transition-transform" />
+                                <span>Sair</span>
+                            </button>
+                            <span className="text-[10px] text-gray-600 uppercase tracking-widest font-medium">PLIN © 2026</span>
                         </div>
                     </div>
                 </div>

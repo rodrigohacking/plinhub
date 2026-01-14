@@ -412,7 +412,16 @@ export async function fetchPipefyDeals(orgId, pipeId, token, userConfig = {}) {
         utm_content,
         utm_term,
         utm_source,
-        utm_medium
+        utm_medium,
+        // Insurance Type (Andar)
+        insuranceType: (() => {
+          if (!card.fields) return null;
+          const typeField = card.fields.find(f => {
+            const n = normalize(f.name);
+            return n.includes('tipo de seguro') || n.includes('qual o tipo de seguro') || n === 'produto';
+          });
+          return typeField ? typeField.value : null;
+        })()
       };
     }); // End of map
 
