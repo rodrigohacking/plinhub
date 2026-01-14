@@ -297,26 +297,55 @@ export async function getData() {
         const { data: { session } } = await supabase.auth.getSession();
         console.log("Current Session User:", session?.user?.id || "NO SESSION");
 
-        // Fetch Company AND its Integrations
-        // Try rigorous join first
-        let { data: companies, error } = await supabase
-            .from('Company')
-            .select('*, Integration(*)');
+        // STRATEGY CHANGE: Use Backend API to bypass RLS
+        // The backend uses Prisma (Server Role) so it can see everything.
+        let companies = [];
+        let apiError = null;
 
-        // Fallback: If Join fails (e.g. relation name mismatch), fetch companies only
-        if (error) {
-            console.warn("Supabase Join Failed. Retrying simple fetch...", error);
-            const { data: fallbackCompanies, error: fallbackError } = await supabase
-                .from('Company')
-                .select('*');
+        try {
+            const response = await fetch('/api/companies');
+            if (!response.ok) throw new Error(`API Error: ${response.status}`);
+            const data = await response.json();
 
-            if (fallbackError) {
-                console.error("Critical: Fallback fetch also failed.", fallbackError);
-                toast.error(`Erro crítico no banco: ${fallbackError.message}`);
-                return { companies: [] }; // Stop execution
+            if (Array.isArray(data)) {
+                companies = data;
+                console.log("[getData] Fetched via API (Success):", companies.length);
             } else {
-                companies = fallbackCompanies;
-                toast.warning("Aviso: Integrações não carregaram. Verifique o banco.");
+                throw new Error("API returned invalid format (not array)");
+            }
+        } catch (err) {
+            console.warn("[getData] API Fetch failed. Falling back to Supabase Direct.", err);
+            apiError = err;
+
+            // Fallback: Supabase Direct (Subject to RLS)
+            const { data: fallbackData, error: fallbackSupabaseError } = await supabase
+                .from('Company')
+                .select('*, Integration(*)');
+
+            if (fallbackSupabaseError) {
+                console.error("Critical: Both API and Supabase Direct failed.", fallbackSupabaseError);
+                toast.error(`Erro crítico de conexão: ${fallbackSupabaseError.message}`);
+                // return { companies: [] }; // Don't return empty yet, merge local
+            } else {
+                companies = fallbackData || [];
+                // Manual Flattening for Supabase Direct result (API does it automatically)
+                companies = companies.map(c => {
+                    const flat = { ...c };
+                    if (c.Integration && c.Integration.length > 0) {
+                        c.Integration.forEach(integration => {
+                            if (integration.type === 'pipefy') {
+                                flat.pipefyOrgId = integration.pipefyOrgId;
+                                flat.pipefyPipeId = integration.pipefyPipeId;
+                                flat.pipefyToken = integration.pipefyToken;
+                            }
+                            if (integration.type === 'meta_ads') {
+                                flat.metaAdAccountId = integration.metaAdAccountId;
+                                flat.metaToken = integration.metaAccessToken;
+                            }
+                        });
+                    }
+                    return flat;
+                });
             }
         }
 
