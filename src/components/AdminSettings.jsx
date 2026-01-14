@@ -294,6 +294,20 @@ export function AdminSettings({ company, onSave }) {
         }
     };
 
+    const forceSync = async () => {
+        if (!config.id) return;
+        setTestStatus({ type: 'sync', msg: 'Sincronizando dados para a nuvem...', error: false });
+        try {
+            await saveCompanyConfig(config);
+            setTestStatus({ type: 'sync', msg: 'Sucesso! Dados enviados para o banco de dados.', error: false });
+            toast.success("Dados sincronizados com a nuvem!");
+        } catch (e) {
+            console.error("Sync error:", e);
+            setTestStatus({ type: 'sync', msg: 'Erro ao sincronizar. Verifique o console.', error: true });
+            toast.error("Erro na sincronização.");
+        }
+    };
+
     if (!company) {
         return (
             <div className="max-w-4xl mx-auto animate-in fade-in duration-500 pb-12">
@@ -755,6 +769,28 @@ export function AdminSettings({ company, onSave }) {
                             <Play className="w-4 h-4" /> Testar Conexão
                         </button>
                     </div>
+
+                    {/* FORCE SYNC BUTTON (New) */}
+                    <div className="mb-4 p-4 bg-gray-50 dark:bg-white/5 border border-dashed border-gray-200 dark:border-white/10 rounded-lg flex flex-col sm:flex-row items-center justify-between gap-4">
+                        <div className="text-sm text-gray-600 dark:text-gray-400">
+                            <strong className="text-gray-900 dark:text-white block mb-1">Sincronização Nuvem</strong>
+                            Se os dados não aparecem no celular, clique aqui para forçar o envio.
+                        </div>
+                        <button
+                            onClick={forceSync}
+                            className="whitespace-nowrap bg-gray-900 dark:bg-white text-white dark:text-black px-4 py-2 rounded-lg text-sm font-bold hover:bg-black dark:hover:bg-gray-200 flex items-center gap-2 transition-colors"
+                        >
+                            <Upload className="w-4 h-4" />
+                            Forçar Envio Agora
+                        </button>
+                    </div>
+
+                    {testStatus.type === 'sync' && (
+                        <div className={`mb-4 p-3 rounded-lg text-sm flex items-center gap-2 ${testStatus.error ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}>
+                            {testStatus.error ? <AlertCircle className="w-4 h-4" /> : <CheckCircle className="w-4 h-4" />}
+                            {testStatus.msg}
+                        </div>
+                    )}
 
                     {isLocked && (
                         <div className="absolute inset-x-0 bottom-0 top-16 bg-white/60 dark:bg-black/60 backdrop-blur-sm z-10 flex flex-col items-center justify-center text-center p-6 border-t border-gray-100 dark:border-white/5">
