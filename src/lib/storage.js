@@ -298,13 +298,26 @@ export async function getData() {
         console.log("Current Session User:", session?.user?.id || "NO SESSION");
 
         // Fetch Company AND its Integrations
-        const { data: companies, error } = await supabase
+        // Try rigorous join first
+        let { data: companies, error } = await supabase
             .from('Company')
             .select('*, Integration(*)');
 
+        // Fallback: If Join fails (e.g. relation name mismatch), fetch companies only
         if (error) {
-            console.error("Supabase API Error DETAILED:", JSON.stringify(error, null, 2));
-            throw error;
+            console.warn("Supabase Join Failed. Retrying simple fetch...", error);
+            const { data: fallbackCompanies, error: fallbackError } = await supabase
+                .from('Company')
+                .select('*');
+
+            if (fallbackError) {
+                console.error("Critical: Fallback fetch also failed.", fallbackError);
+                toast.error(`Erro crítico no banco: ${fallbackError.message}`);
+                return { companies: [] }; // Stop execution
+            } else {
+                companies = fallbackCompanies;
+                toast.warning("Aviso: Integrações não carregaram. Verifique o banco.");
+            }
         }
 
         console.log("Supabase Success! Rows fetched:", companies ? companies.length : 0);
