@@ -1,3 +1,7 @@
+const path = require('path');
+// Load .env from root (../../.env relative to src/server.js)
+require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
+// Also try loading local .env for overrides
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
