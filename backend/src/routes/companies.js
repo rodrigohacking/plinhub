@@ -72,7 +72,82 @@ router.get('/', async (req, res) => {
     }
 });
 
-// ... (Other routes like POST/DELETE can remain using Prisma if local, 
-// OR should also be migrated. For now, fixing GET is priority for 'Empty State')
+/**
+ * POST /api/companies
+ * Create a new company
+ */
+router.post('/', async (req, res) => {
+    try {
+        const { name } = req.body;
+
+        if (!name) {
+            return res.status(400).json({ error: 'Company name is required' });
+        }
+
+        const { data, error } = await supabase
+            .from('Company')
+            .insert([{ name }])
+            .select()
+            .single();
+
+        if (error) throw error;
+
+        res.status(201).json(data);
+    } catch (error) {
+        console.error('Error creating company:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+/**
+ * PUT /api/companies/:id
+ * Update an existing company
+ */
+router.put('/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { name } = req.body;
+
+        const { data, error } = await supabase
+            .from('Company')
+            .update({ name })
+            .eq('id', id)
+            .select()
+            .single();
+
+        if (error) throw error;
+
+        if (!data) {
+            return res.status(404).json({ error: 'Company not found' });
+        }
+
+        res.json(data);
+    } catch (error) {
+        console.error('Error updating company:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+/**
+ * DELETE /api/companies/:id
+ * Delete a company
+ */
+router.delete('/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const { error } = await supabase
+            .from('Company')
+            .delete()
+            .eq('id', id);
+
+        if (error) throw error;
+
+        res.json({ success: true, message: 'Company deleted successfully' });
+    } catch (error) {
+        console.error('Error deleting company:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
 
 module.exports = router;

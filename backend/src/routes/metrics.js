@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const prisma = require('../utils/prisma');
+const supabase = require('../utils/supabase'); // Changed from prisma
 
 /**
  * Get metrics for a company
@@ -13,28 +13,28 @@ router.get('/:companyId', async (req, res) => {
 
         // Calculate date range
         const days = parseInt(range.replace('d', ''));
-        const endDate = new Date();
+        const endDate = new Date().toISOString();
         const startDate = new Date();
         startDate.setDate(startDate.getDate() - days);
+        const startDateStr = startDate.toISOString();
 
-        const where = {
-            companyId: parseInt(companyId),
-            date: {
-                gte: startDate,
-                lte: endDate
-            }
-        };
+        let query = supabase
+            .from('Metric')
+            .select('*')
+            .eq('companyId', parseInt(companyId))
+            .gte('date', startDateStr)
+            .lte('date', endDate)
+            .order('date', { ascending: false });
 
         if (source) {
-            where.source = source;
+            query = query.eq('source', source);
         }
 
-        const metrics = await prisma.metric.findMany({
-            where,
-            orderBy: { date: 'desc' }
-        });
+        const { data: metrics, error } = await query;
 
-        res.json(metrics);
+        if (error) throw new Error(error.message);
+
+        res.json(metrics || []);
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -49,24 +49,23 @@ router.get('/:companyId/unified', async (req, res) => {
         const { range = '30d', tag = 'all' } = req.query;
         let { companyId } = req.params;
 
-        // ... (company lookup remains the same) ...
         let company;
         let numericId = parseInt(companyId);
 
         if (!isNaN(numericId)) {
-            company = await prisma.company.findUnique({ where: { id: numericId } });
+            const { data } = await supabase.from('Company').select('id, name').eq('id', numericId).single();
+            company = data;
         }
 
         if (!company) {
             // Try searching by name if ID fails
-            company = await prisma.company.findFirst({
-                where: {
-                    OR: [
-                        { name: { contains: companyId } },
-                        { name: { contains: decodeURIComponent(companyId) } }
-                    ]
-                }
-            });
+            // Supabase 'ilike' for case-insensitive contains
+            const { data } = await supabase.from('Company')
+                .select('id, name')
+                .or(`name.ilike.%${companyId}%,name.ilike.%${decodeURIComponent(companyId)}%`)
+                .limit(1)
+                .single();
+            company = data;
         }
 
         if (!company) {
@@ -112,38 +111,54 @@ router.get('/:companyId/unified', async (req, res) => {
             }
         }
 
-        // Get Meta Ads metrics (filter by tag if relevant)
-        const metaMetrics = await prisma.metric.findMany({
-            where: {
-                companyId: effectiveId,
-                source: 'meta_ads',
-                label: tag,
-                date: { gte: startDate, lte: endDate }
-            },
-            orderBy: { date: 'desc' }
-        });
+        const startDateStr = startDate.toISOString();
+        const endDateStr = endDate.toISOString();
 
-        // Get Pipefy metrics (filter by tag)
-        const pipefyMetrics = await prisma.metric.findMany({
-            where: {
-                companyId: effectiveId,
-                source: 'pipefy',
-                label: tag,
-                date: { gte: startDate, lte: endDate }
-            },
-            orderBy: { date: 'desc' }
-        });
+        // Get Meta Ads metrics
+        let metaQuery = supabase
+            .from('Metric')
+            .select('*')
+            .eq('companyId', effectiveId)
+            .eq('source', 'meta_ads')
+            .gte('date', startDateStr)
+            .lte('date', endDateStr)
+            .order('date', { ascending: false });
 
-        // Get available tags for this company to help frontend
-        const uniqueLabels = await prisma.metric.findMany({
-            where: { companyId: effectiveId, source: 'pipefy' },
-            select: { label: true },
-            distinct: ['label']
-        });
-        const availableTags = uniqueLabels.map(l => l.label).filter(l => l !== 'all');
+        if (tag !== 'all') {
+            metaQuery = metaQuery.eq('label', tag);
+        }
+        const { data: metaMetrics } = await metaQuery;
+
+        // Get Pipefy metrics
+        let pipefyQuery = supabase
+            .from('Metric')
+            .select('*')
+            .eq('companyId', effectiveId)
+            .eq('source', 'pipefy')
+            .gte('date', startDateStr)
+            .lte('date', endDateStr)
+            .order('date', { ascending: false });
+
+        if (tag !== 'all') {
+            pipefyQuery = pipefyQuery.eq('label', tag);
+        }
+        const { data: pipefyMetrics } = await pipefyQuery;
+
+        // Get available tags
+        const { data: uniqueLabels } = await supabase
+            .from('Metric')
+            .select('label')
+            .eq('companyId', effectiveId)
+            .eq('source', 'pipefy');
+
+        // Manual distinct as Supabase distinct requires specific setup, or just JS filter
+        const availableTags = [...new Set(uniqueLabels?.map(l => l.label) || [])].filter(l => l !== 'all');
+
+        const safeMetaMetrics = metaMetrics || [];
+        const safePipefyMetrics = pipefyMetrics || [];
 
         // Aggregate totals
-        const metaTotal = metaMetrics.reduce((acc, m) => ({
+        const metaTotal = safeMetaMetrics.reduce((acc, m) => ({
             spend: acc.spend + (m.spend || 0),
             impressions: acc.impressions + (m.impressions || 0),
             clicks: acc.clicks + (m.clicks || 0),
@@ -151,23 +166,44 @@ router.get('/:companyId/unified', async (req, res) => {
         }), { spend: 0, impressions: 0, clicks: 0, conversions: 0 });
 
         // Aggregate totals for the period
-        const pipefyTotal = pipefyMetrics.reduce((acc, m) => ({
+        const pipefyTotal = safePipefyMetrics.reduce((acc, m) => ({
             leadsEntered: acc.leadsEntered + (m.cardsCreated || 0),
             leadsQualified: acc.leadsQualified + (m.cardsQualified || 0),
             salesClosed: acc.salesClosed + (m.cardsConverted || 0),
             leadsLost: acc.leadsLost + (m.cardsLost || 0)
         }), { leadsEntered: 0, leadsQualified: 0, salesClosed: 0, leadsLost: 0 });
 
-        // Get lifetime totals from the latest sync record (which contains cardsByPhase)
-        const latestMetric = pipefyMetrics[0] || await prisma.metric.findFirst({
-            where: { companyId: effectiveId, source: 'pipefy', label: tag },
-            orderBy: { date: 'desc' }
-        });
+        // Get lifetime totals from the latest sync record
+        // We look for one record, ordered by date desc
+        let latestPipefyQuery = supabase
+            .from('Metric')
+            .select('*')
+            .eq('companyId', effectiveId)
+            .eq('source', 'pipefy')
+            .order('date', { ascending: false })
+            .limit(1)
+            .single();
+
+        if (tag !== 'all') {
+            latestPipefyQuery = latestPipefyQuery.eq('label', tag);
+        }
+
+        let { data: latestMetric } = await latestPipefyQuery;
+
+        // If query above failed (e.g. no label match), fallback to first from period list
+        if (!latestMetric && safePipefyMetrics.length > 0) {
+            latestMetric = safePipefyMetrics[0];
+        }
 
         let lifetimePipefy = null;
         if (latestMetric && latestMetric.cardsByPhase) {
             try {
-                const phases = JSON.parse(latestMetric.cardsByPhase);
+                // If it's already an object (Supabase might return JSONB as object), use it.
+                // Else parse string.
+                const phases = typeof latestMetric.cardsByPhase === 'string'
+                    ? JSON.parse(latestMetric.cardsByPhase)
+                    : latestMetric.cardsByPhase;
+
                 const findCount = (names) => {
                     const key = Object.keys(phases).find(k =>
                         names.some(n => k.toLowerCase().includes(n.toLowerCase()))
@@ -218,13 +254,13 @@ router.get('/:companyId/unified', async (req, res) => {
         res.json({
             metaAds: {
                 total: metaTotal,
-                daily: metaMetrics
+                daily: safeMetaMetrics
             },
             pipefy: {
                 total: pipefyTotal,
                 lifetime: lifetimePipefy,
                 summary: pipefySummary,
-                daily: pipefyMetrics
+                daily: safePipefyMetrics
             },
             comparative: {
                 costPerLead: costPerLead,

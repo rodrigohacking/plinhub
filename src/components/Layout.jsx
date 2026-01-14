@@ -8,7 +8,7 @@ export function Layout({ children, currentView, onViewChange, company }) {
     const isMobile = typeof window !== 'undefined' ? window.innerWidth < 768 : false;
 
     return (
-        <div className="flex flex-col md:flex-row h-screen bg-gray-50 dark:bg-black font-sans transition-colors duration-300">
+        <div className="flex flex-col md:flex-row h-[100dvh] overflow-hidden bg-gray-50 dark:bg-black font-sans transition-colors duration-300">
             <SidebarNew
                 currentView={currentView}
                 onNavigate={onViewChange}

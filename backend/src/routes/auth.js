@@ -3,7 +3,7 @@ const router = express.Router();
 const passport = require('passport');
 const FacebookStrategy = require('passport-facebook').Strategy;
 const { encrypt } = require('../utils/encryption');
-const prisma = require('../utils/prisma');
+const supabase = require('../utils/supabase'); // Changed from prisma
 const metaAdsService = require('../services/metaAds.service');
 
 // Configure Facebook Strategy
@@ -70,35 +70,38 @@ router.get('/meta/callback',
             // Use first ad account (or let user choose later)
             const adAccount = adAccounts[0];
 
-            // Save integration
-            await prisma.integration.upsert({
-                where: {
-                    companyId_type: {
-                        companyId,
-                        type: 'meta_ads'
-                    }
-                },
-                update: {
-                    metaAccessToken: encrypt(accessToken),
-                    metaAdAccountId: adAccount.id,
-                    metaAccountName: adAccount.name,
-                    metaBusinessId: adAccount.business?.id,
-                    metaStatus: adAccount.account_status === 1 ? 'active' : 'restricted',
-                    metaTokenExpiry: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000), // 60 days
-                    isActive: true
-                },
-                create: {
-                    companyId,
-                    type: 'meta_ads',
-                    metaAccessToken: encrypt(accessToken),
-                    metaAdAccountId: adAccount.id,
-                    metaAccountName: adAccount.name,
-                    metaBusinessId: adAccount.business?.id,
-                    metaStatus: adAccount.account_status === 1 ? 'active' : 'restricted',
-                    metaTokenExpiry: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000),
-                    isActive: true
-                }
-            });
+            // Save integration (Upsert Logic)
+
+            // Check existence
+            const { data: existing } = await supabase
+                .from('Integration')
+                .select('id')
+                .eq('companyId', companyId)
+                .eq('type', 'meta_ads')
+                .single();
+
+            const payload = {
+                companyId,
+                type: 'meta_ads',
+                metaAccessToken: encrypt(accessToken),
+                metaAdAccountId: adAccount.id,
+                metaAccountName: adAccount.name,
+                metaBusinessId: adAccount.business?.id,
+                metaStatus: adAccount.account_status === 1 ? 'active' : 'restricted',
+                metaTokenExpiry: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000), // 60 days
+                isActive: true,
+                updatedAt: new Date()
+            };
+
+            if (existing) {
+                payload.id = existing.id;
+            }
+
+            const { error } = await supabase
+                .from('Integration')
+                .upsert(payload);
+
+            if (error) throw new Error(error.message);
 
             // Redirect back to frontend
             res.redirect(`${process.env.FRONTEND_URL}/settings?meta_connected=true`);
@@ -117,18 +120,25 @@ router.post('/meta/disconnect', async (req, res) => {
     try {
         const { companyId } = req.body;
 
-        await prisma.integration.update({
-            where: {
-                companyId_type: {
-                    companyId: parseInt(companyId),
-                    type: 'meta_ads'
-                }
-            },
-            data: {
-                isActive: false,
-                metaAccessToken: null
-            }
-        });
+        const { data: existing } = await supabase
+            .from('Integration')
+            .select('id')
+            .eq('companyId', parseInt(companyId))
+            .eq('type', 'meta_ads')
+            .single();
+
+        if (existing) {
+            const { error } = await supabase
+                .from('Integration')
+                .update({
+                    isActive: false,
+                    metaAccessToken: null,
+                    updatedAt: new Date()
+                })
+                .eq('id', existing.id);
+
+            if (error) throw new Error(error.message);
+        }
 
         res.json({ success: true });
     } catch (error) {

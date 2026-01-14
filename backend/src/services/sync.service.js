@@ -1,4 +1,4 @@
-const prisma = require('../utils/prisma');
+const supabase = require('../utils/supabase'); // Changed from prisma
 const { decrypt } = require('../utils/encryption');
 const metaAdsService = require('./metaAds.service');
 const pipefyService = require('./pipefy.service');
@@ -12,9 +12,12 @@ class SyncService {
 
         // Resolve company if ID is not found or companyIdInput is a string
         if (isNaN(companyId)) {
-            const company = await prisma.company.findFirst({
-                where: { name: { contains: String(companyIdInput) } }
-            });
+            const { data: company } = await supabase.from('Company')
+                .select('id')
+                .or(`name.ilike.%${companyIdInput}%`)
+                .limit(1)
+                .single();
+
             if (company) {
                 companyId = company.id;
             } else {
@@ -26,12 +29,13 @@ class SyncService {
         const startTime = Date.now();
 
         try {
-            const integrations = await prisma.integration.findMany({
-                where: {
-                    companyId,
-                    isActive: true
-                }
-            });
+            const { data: integrations, error } = await supabase
+                .from('Integration')
+                .select('*')
+                .eq('companyId', companyId)
+                .eq('isActive', true);
+
+            if (error) throw new Error(error.message);
 
             const results = {
                 metaAds: null,
@@ -109,31 +113,40 @@ class SyncService {
         const labelsToSave = ['all', 'META ADS'];
 
         for (const label of labelsToSave) {
-            await prisma.metric.upsert({
-                where: {
-                    companyId_date_source_label: {
-                        companyId,
-                        date: new Date(today),
-                        source: 'meta_ads',
-                        label: label
-                    }
-                },
-                update: metricData,
-                create: {
-                    companyId,
-                    source: 'meta_ads',
-                    date: new Date(today),
-                    label: label,
-                    ...metricData
-                }
-            });
+            // Prisma Upsert -> Supabase Upsert
+            // Note: We need the ID to update, or we rely on a Unique Constraint.
+            // Assuming 'Metric_companyId_date_source_label_key' exists, we can just upsert.
+            // Since we can't easily rely on constraints being perfectly mapped in Supabase without checking,
+            // we'll try to FIND first.
+
+            // Construct find query
+            const { data: existing } = await supabase
+                .from('Metric')
+                .select('id')
+                .eq('companyId', companyId)
+                .eq('date', today)
+                .eq('source', 'meta_ads')
+                .eq('label', label)
+                .single();
+
+            const payload = {
+                companyId,
+                source: 'meta_ads',
+                date: today, // Date string YYYY-MM-DD or ISO
+                label: label,
+                ...metricData
+            };
+
+            if (existing) {
+                payload.id = existing.id;
+            }
+
+            const { error } = await supabase.from('Metric').upsert(payload);
+            if (error) throw new Error(error.message);
         }
 
         // Update integration lastSync
-        await prisma.integration.update({
-            where: { id: integration.id },
-            data: { lastSync: new Date() }
-        });
+        await supabase.from('Integration').update({ lastSync: new Date() }).eq('id', integration.id);
 
         await this.logSync(companyId, 'meta_ads', 'success', 'Metrics synced successfully', 1);
 
@@ -160,13 +173,7 @@ class SyncService {
         );
 
         const todayTimestamp = new Date().toISOString().split('T')[0];
-
-        // Process DAILY metrics
-        // We iterate over the dates returned by the service
         const dates = Object.keys(metrics.dailyMetrics || {});
-
-        // If no daily metrics found, we still might want to update "today" with snapshot
-        // But normally if we have cards, we have dates.
 
         for (const dateStr of dates) {
             const dayTags = metrics.dailyMetrics[dateStr];
@@ -175,86 +182,83 @@ class SyncService {
             for (const tag of tagKeys) {
                 const tagMetrics = dayTags[tag];
 
-                // For historical days, we might not have 'cardsByPhase' snapshot as it's a current state thing
-                // But our service implementation doesn't strictly separate snapshot vs history well for phase counts.
-                // However, for the dashboard 'Won/Lost' counts, we rely on the daily increments.
-                // The 'cardsByPhase' is usually used for "Current Pipeline Status".
-                // So we should save 'cardsByPhase' only to the LATEST date (today), or keep it null for historical.
-                // The service returns empty cardsByPhase for daily buckets (except 'all' maybe?).
-                // My service code: `metricsByTag[t].cardsByPhase` was populated for Aggregate, NOT for daily (except initialized empty).
-                // So daily records won't have phases. That's fine.
+                const { data: existing } = await supabase
+                    .from('Metric')
+                    .select('id')
+                    .eq('companyId', companyId)
+                    .eq('date', dateStr)
+                    .eq('source', 'pipefy')
+                    .eq('label', tag)
+                    .single();
 
-                await prisma.metric.upsert({
-                    where: {
-                        companyId_date_source_label: {
-                            companyId,
-                            date: new Date(dateStr),
-                            source: 'pipefy',
-                            label: tag
-                        }
-                    },
-                    update: {
-                        cardsCreated: tagMetrics.cardsCreated,
-                        cardsQualified: tagMetrics.cardsQualified,
-                        cardsConverted: tagMetrics.cardsConverted,
-                        cardsLost: tagMetrics.cardsLost,
-                        conversionRate: tagMetrics.conversionRate,
-                        // Update phases only if present (likely only for Aggregate logic, but let's leave as is)
-                        // cardsByPhase: JSON.stringify(tagMetrics.cardsByPhase) 
-                    },
-                    create: {
-                        companyId,
-                        source: 'pipefy',
-                        date: new Date(dateStr),
-                        label: tag,
-                        cardsCreated: tagMetrics.cardsCreated,
-                        cardsQualified: tagMetrics.cardsQualified,
-                        cardsConverted: tagMetrics.cardsConverted,
-                        cardsLost: tagMetrics.cardsLost,
-                        conversionRate: tagMetrics.conversionRate,
-                        cardsByPhase: JSON.stringify(tagMetrics.cardsByPhase)
-                    }
-                });
+                const payload = {
+                    companyId,
+                    source: 'pipefy',
+                    date: dateStr,
+                    label: tag,
+                    cardsCreated: tagMetrics.cardsCreated,
+                    cardsQualified: tagMetrics.cardsQualified,
+                    cardsConverted: tagMetrics.cardsConverted,
+                    cardsLost: tagMetrics.cardsLost,
+                    conversionRate: tagMetrics.conversionRate,
+                    cardsByPhase: JSON.stringify(tagMetrics.cardsByPhase)
+                };
+
+                if (existing) {
+                    payload.id = existing.id;
+                }
+
+                await supabase.from('Metric').upsert(payload);
             }
         }
 
-        // Also save the CURRENT PIPELINE STATE (Phases) to TODAY's record (using the aggregate 'metricsByTag')
-        // so that "Current Pipeline" charts work.
+        // Also save the CURRENT PIPELINE STATE (Phases) to TODAY's record
         const aggregateTags = Object.keys(metrics.metricsByTag);
         for (const tag of aggregateTags) {
             const agg = metrics.metricsByTag[tag];
-            // We only care about updating the 'cardsByPhase' for today
-            await prisma.metric.upsert({
-                where: {
-                    companyId_date_source_label: {
-                        companyId,
-                        date: new Date(todayTimestamp),
-                        source: 'pipefy',
-                        label: tag
-                    }
-                },
-                update: {
-                    cardsByPhase: JSON.stringify(agg.cardsByPhase)
-                },
-                create: {
-                    companyId,
-                    source: 'pipefy',
-                    date: new Date(todayTimestamp),
-                    label: tag,
-                    cardsCreated: 0, // Don't double count daily metrics if they are already in the loop above
-                    cardsQualified: 0,
-                    cardsConverted: 0,
-                    cardsLost: 0,
-                    cardsByPhase: JSON.stringify(agg.cardsByPhase)
-                }
-            });
+
+            const { data: existing } = await supabase
+                .from('Metric')
+                .select('id')
+                .eq('companyId', companyId)
+                .eq('date', todayTimestamp)
+                .eq('source', 'pipefy')
+                .eq('label', tag)
+                .single();
+
+            const payload = {
+                companyId,
+                source: 'pipefy',
+                date: todayTimestamp,
+                label: tag,
+                cardsByPhase: JSON.stringify(agg.cardsByPhase),
+                // Initialize default values if creating new
+                cardsCreated: 0,
+                cardsQualified: 0,
+                cardsConverted: 0,
+                cardsLost: 0
+            };
+
+            // If updating, we DON'T want to overwrite the counts we might have set in the loop above?
+            // Wait, the loop above iterates dates inclusive of today.
+            // So if today exists in 'dates', we already set counts.
+            // We just need to ensure cardsByPhase is up to date.
+
+            if (existing) {
+                payload.id = existing.id;
+                // If existing, we only update cardsByPhase to avoid resetting counts to 0
+                const { error } = await supabase
+                    .from('Metric')
+                    .update({ cardsByPhase: JSON.stringify(agg.cardsByPhase) })
+                    .eq('id', existing.id);
+                if (error) console.error("Error updating phases:", error);
+            } else {
+                await supabase.from('Metric').insert(payload);
+            }
         }
 
         // Update integration lastSync
-        await prisma.integration.update({
-            where: { id: integration.id },
-            data: { lastSync: new Date() }
-        });
+        await supabase.from('Integration').update({ lastSync: new Date() }).eq('id', integration.id);
 
         await this.logSync(companyId, 'pipefy', 'success', 'Metrics synced successfully', dates.length);
 
@@ -265,15 +269,13 @@ class SyncService {
      * Log sync operation
      */
     async logSync(companyId, source, status, message, recordsProcessed = 0, duration = null) {
-        await prisma.syncLog.create({
-            data: {
-                companyId,
-                source,
-                status,
-                message,
-                recordsProcessed,
-                duration
-            }
+        await supabase.from('SyncLog').insert({
+            companyId,
+            source,
+            status,
+            message,
+            recordsProcessed,
+            duration
         });
     }
 }

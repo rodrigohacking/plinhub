@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const prisma = require('../utils/prisma');
+const supabase = require('../utils/supabase'); // Changed from prisma
 const { encrypt, decrypt } = require('../utils/encryption');
 const pipefyService = require('../services/pipefy.service');
 const metaAdsService = require('../services/metaAds.service');
@@ -13,27 +13,21 @@ router.get('/:companyId', async (req, res) => {
     try {
         const { companyId } = req.params;
 
-        const integrations = await prisma.integration.findMany({
-            where: { companyId: parseInt(companyId) },
-            select: {
-                id: true,
-                type: true,
-                isActive: true,
-                lastSync: true,
-                // Pipefy
-                pipefyOrgId: true,
-                pipefyPipeId: true,
-                // Meta Ads (without token)
-                metaAdAccountId: true,
-                metaAccountName: true,
-                metaStatus: true,
-                metaTokenExpiry: true,
-                createdAt: true,
-                updatedAt: true
-            }
-        });
+        // Prisma: findMany with select
+        // Supabase: select(columns).eq('companyId', id)
+        const { data: integrations, error } = await supabase
+            .from('Integration')
+            .select(`
+                id, type, isActive, lastSync,
+                pipefyOrgId, pipefyPipeId,
+                metaAdAccountId, metaAccountName, metaStatus, metaTokenExpiry,
+                createdAt, updatedAt
+            `)
+            .eq('companyId', parseInt(companyId));
 
-        res.json(integrations);
+        if (error) throw new Error(error.message);
+
+        res.json(integrations || []);
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -48,30 +42,88 @@ router.post('/:companyId/pipefy', async (req, res) => {
         const { companyId } = req.params;
         const { pipefyOrgId, pipefyPipeId, pipefyToken } = req.body;
 
-        const integration = await prisma.integration.upsert({
-            where: {
-                companyId_type: {
-                    companyId: parseInt(companyId),
-                    type: 'pipefy'
-                }
-            },
-            update: {
-                pipefyOrgId,
-                pipefyPipeId,
-                pipefyToken: encrypt(pipefyToken),
-                isActive: true
-            },
-            create: {
-                companyId: parseInt(companyId),
-                type: 'pipefy',
-                pipefyOrgId,
-                pipefyPipeId,
-                pipefyToken: encrypt(pipefyToken),
-                isActive: true
-            }
-        });
+        // Prisma: upsert
+        // Supabase: upsert (requires conflict on unique keys)
+        // Note: Assuming 'Integration_companyId_type_key' is the unique constraint. 
+        // We'll insert/update based on companyId + type match.
+
+        // First check if exists to get ID (Supabase upsert by default matches ON PRIMARY KEY unless specified)
+        // Since we don't have the ID, we query first.
+        const { data: existing } = await supabase
+            .from('Integration')
+            .select('id')
+            .eq('companyId', parseInt(companyId))
+            .eq('type', 'pipefy')
+            .single();
+
+        const payload = {
+            companyId: parseInt(companyId),
+            type: 'pipefy', // Unique key comb
+            pipefyOrgId,
+            pipefyPipeId,
+            pipefyToken: encrypt(pipefyToken),
+            isActive: true,
+            updatedAt: new Date()
+        };
+
+        if (existing) {
+            payload.id = existing.id; // Include ID to trigger update
+        }
+
+        const { data: integration, error } = await supabase
+            .from('Integration')
+            .upsert(payload)
+            .select()
+            .single();
+
+        if (error) throw new Error(error.message);
 
         res.json({ success: true, integration });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+
+
+/**
+ * Save Manual Meta Ads integration (Token only)
+ * POST /api/integrations/:companyId/meta
+ */
+router.post('/:companyId/meta', async (req, res) => {
+    try {
+        const { companyId } = req.params;
+        const { metaAdAccountId, metaToken } = req.body;
+
+        const { data: existing } = await supabase
+            .from('Integration')
+            .select('id')
+            .eq('companyId', parseInt(companyId))
+            .eq('type', 'meta_ads')
+            .single();
+
+        const payload = {
+            companyId: parseInt(companyId),
+            type: 'meta_ads',
+            metaAdAccountId,
+            metaAccessToken: encrypt(metaToken),
+            isActive: true,
+            updatedAt: new Date()
+        };
+
+        if (existing) {
+            payload.id = existing.id;
+        }
+
+        const { data, error } = await supabase
+            .from('Integration')
+            .upsert(payload)
+            .select()
+            .single();
+
+        if (error) throw new Error(error.message);
+
+        res.json({ success: true, integration: data });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -100,16 +152,14 @@ router.post('/:companyId/meta/test', async (req, res) => {
     try {
         const { companyId } = req.params;
 
-        const integration = await prisma.integration.findUnique({
-            where: {
-                companyId_type: {
-                    companyId: parseInt(companyId),
-                    type: 'meta_ads'
-                }
-            }
-        });
+        const { data: integration, error } = await supabase
+            .from('Integration')
+            .select('metaAccessToken')
+            .eq('companyId', parseInt(companyId))
+            .eq('type', 'meta_ads')
+            .single();
 
-        if (!integration || !integration.metaAccessToken) {
+        if (error || !integration || !integration.metaAccessToken) {
             return res.status(404).json({ error: 'Meta Ads integration not found' });
         }
 
@@ -130,14 +180,13 @@ router.delete('/:companyId/:type', async (req, res) => {
     try {
         const { companyId, type } = req.params;
 
-        await prisma.integration.delete({
-            where: {
-                companyId_type: {
-                    companyId: parseInt(companyId),
-                    type
-                }
-            }
-        });
+        const { error } = await supabase
+            .from('Integration')
+            .delete()
+            .eq('companyId', parseInt(companyId))
+            .eq('type', type);
+
+        if (error) throw new Error(error.message);
 
         res.json({ success: true });
     } catch (error) {

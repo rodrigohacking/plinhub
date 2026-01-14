@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const syncService = require('../services/sync.service');
-const prisma = require('../utils/prisma');
+const supabase = require('../utils/supabase'); // Changed from prisma
 
 /**
  * Force manual sync for a company
@@ -15,18 +15,17 @@ router.post('/:companyId/force', async (req, res) => {
         let numericId = parseInt(companyId);
 
         if (!isNaN(numericId)) {
-            company = await prisma.company.findUnique({ where: { id: numericId } });
+            const { data } = await supabase.from('Company').select('*').eq('id', numericId).single();
+            company = data;
         }
 
         if (!company) {
-            company = await prisma.company.findFirst({
-                where: {
-                    OR: [
-                        { name: { contains: companyId } },
-                        { name: { contains: decodeURIComponent(companyId) } }
-                    ]
-                }
-            });
+            const { data } = await supabase.from('Company')
+                .select('*')
+                .or(`name.ilike.%${companyId}%,name.ilike.%${decodeURIComponent(companyId)}%`)
+                .limit(1)
+                .single();
+            company = data;
         }
 
         if (!company) {
@@ -53,13 +52,16 @@ router.get('/:companyId/logs', async (req, res) => {
         const { companyId } = req.params;
         const { limit = 50 } = req.query;
 
-        const logs = await prisma.syncLog.findMany({
-            where: { companyId: parseInt(companyId) },
-            orderBy: { createdAt: 'desc' },
-            take: parseInt(limit)
-        });
+        const { data: logs, error } = await supabase
+            .from('SyncLog')
+            .select('*')
+            .eq('companyId', parseInt(companyId))
+            .order('createdAt', { ascending: false })
+            .limit(parseInt(limit));
 
-        res.json(logs);
+        if (error) throw new Error(error.message);
+
+        res.json(logs || []);
     } catch (error) {
         res.status(500).json({ error: error.message });
     }

@@ -39,7 +39,7 @@ export function AdminSettings({ company, onSave }) {
     const [isLocked, setIsLocked] = useState(true);
     const [showPinModal, setShowPinModal] = useState(false);
     const [pinInput, setPinInput] = useState('');
-    const [pinError, setPinError] = '';
+    const [pinError, setPinError] = useState('');
     const [isSettingNewPin, setIsSettingNewPin] = useState(false);
     const [showToken, setShowToken] = useState(false); // Toggle password visibility after unlock
 

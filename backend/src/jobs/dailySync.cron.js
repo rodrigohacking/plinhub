@@ -1,5 +1,5 @@
 const cron = require('node-cron');
-const prisma = require('../utils/prisma');
+const supabase = require('../utils/supabase'); // Changed from prisma
 const syncService = require('../services/sync.service');
 
 /**
@@ -15,19 +15,28 @@ function startCronJobs() {
 
         try {
             // Get all companies with active integrations
-            const companies = await prisma.company.findMany({
-                where: {
-                    integrations: {
-                        some: {
-                            isActive: true
-                        }
-                    }
-                },
-                select: {
-                    id: true,
-                    name: true
-                }
-            });
+            // Step 1: Find active integrations to get company IDs
+            const { data: activeIntegrations, error: intError } = await supabase
+                .from('Integration')
+                .select('companyId')
+                .eq('isActive', true);
+
+            if (intError) throw new Error(intError.message);
+
+            const companyIds = [...new Set(activeIntegrations.map(i => i.companyId))];
+
+            if (companyIds.length === 0) {
+                console.log("No companies with active integrations found.");
+                return;
+            }
+
+            // Step 2: Fetch companies
+            const { data: companies, error: compError } = await supabase
+                .from('Company')
+                .select('id, name')
+                .in('id', companyIds);
+
+            if (compError) throw new Error(compError.message);
 
             console.log(`Found ${companies.length} companies to sync`);
 
