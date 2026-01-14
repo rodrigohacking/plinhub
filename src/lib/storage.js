@@ -168,7 +168,7 @@ export async function saveCompanyConfig(companyConfig) {
 
         // 1. Upsert Company
         const { data: company, error: companyError } = await supabase
-            .from('companies')  // Corrected table name
+            .from('Company')  // Reverted to original singular table name
             .upsert({
                 id: companyConfig.id,
                 name: companyConfig.name,
@@ -237,7 +237,7 @@ export async function saveCompanyConfig(companyConfig) {
 export async function deleteCompanyConfig(companyId) {
     try {
         const { error } = await supabase
-            .from('companies') // Corrected table name
+            .from('Company') // Reverted to original singular table name
             .delete()
             .eq('id', companyId);
 
@@ -299,7 +299,7 @@ export async function getData() {
 
         // Fetch Company AND its Integrations
         const { data: companies, error } = await supabase
-            .from('companies') // Corrected table name
+            .from('Company') // Reverted to original singular table name
             .select('*, Integration(*)');
 
         if (error) {
@@ -489,7 +489,7 @@ export async function getData() {
                     lossReasonField: 'Motivo Recusa'
                 } : {};
 
-                const pipefySales = await fetchPipefyDeals(
+                const pipefyResult = await fetchPipefyDeals(
                     effectiveCompany.pipefyOrgId,
                     effectiveCompany.pipefyPipeId,
                     effectiveCompany.pipefyToken,
@@ -504,6 +504,11 @@ export async function getData() {
                         lossReasonField: effectiveCompany.lossReasonField || andarConfig.lossReasonField || apolarConfig.lossReasonField
                     }
                 );
+
+                const pipefySales = Array.isArray(pipefyResult) ? pipefyResult : pipefyResult.deals;
+                if (!Array.isArray(pipefyResult) && pipefyResult.debug) {
+                    console.log(`[Storage] Pipefy Debug for ${effectiveCompany.name}:`, pipefyResult.debug);
+                }
 
                 if (isApolar) {
                     console.log("DEBUG APOLAR - Config:", apolarConfig);

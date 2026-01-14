@@ -66,11 +66,13 @@ app.get('/health', (req, res) => {
 // Proxy Route for Pipefy (Bypassing CORS)
 const axios = require('axios');
 app.post('/api/pipefy', async (req, res) => {
+    console.log('[Proxy] Incoming Query size:', req.body.query?.length);
     try {
         const { query } = req.body;
         const authHeader = req.headers.authorization;
 
         if (!authHeader) {
+            console.warn('[Proxy] Missing Auth Header');
             return res.status(401).json({ error: 'Missing Authorization header' });
         }
 
@@ -86,9 +88,17 @@ app.post('/api/pipefy', async (req, res) => {
 
         res.json(response.data);
     } catch (error) {
-        console.error('Pipefy Proxy Error:', error.response?.data || error.message);
+        console.error('Pipefy Proxy Error:', error.message);
+        if (error.response) {
+            console.error('Pipefy Response Data:', JSON.stringify(error.response.data).slice(0, 200));
+        }
+
         res.status(error.response?.status || 500).json({
-            error: error.response?.data || { message: error.message }
+            error: {
+                message: error.message,
+                details: error.response?.data,
+                stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+            }
         });
     }
 });

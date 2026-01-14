@@ -73,10 +73,19 @@ export async function fetchPipefyDeals(orgId, pipeId, token, userConfig = {}) {
       body: JSON.stringify({ query: phasesQuery })
     });
 
+    if (!phasesRes.ok) {
+      const errJson = await phasesRes.json().catch(() => ({}));
+      throw new Error(errJson.error?.message || errJson.error || phasesRes.statusText || 'Erro na conexão com Pipefy');
+    }
+
     const phasesJson = await phasesRes.json();
     if (phasesJson.errors) {
       console.error('[Pipefy] Error fetching phases:', phasesJson.errors);
-      return [];
+      throw new Error(phasesJson.errors[0]?.message || 'Erro GraphQL desconhecido');
+    }
+
+    if (phasesJson.error) {
+      throw new Error(phasesJson.error.message || phasesJson.error);
     }
 
     const phases = phasesJson.data?.pipe?.phases || [];
@@ -410,14 +419,22 @@ export async function fetchPipefyDeals(orgId, pipeId, token, userConfig = {}) {
     const summary = {
       total: allEdges.length,
       filtered: mappedDeals.length,
-      won: mappedDeals.filter(d => d.status === 'won').length
+      won: mappedDeals.filter(d => d.status === 'won').length,
+      phasesFound: phases.length
     };
     console.log(`[Pipefy Debug] Fetch Complete. Raw: ${allEdges.length}, Active(Depth Limit): ${mappedDeals.length}, Won: ${summary.won}`);
 
-    return mappedDeals;
+    return {
+      deals: mappedDeals,
+      debug: {
+        phasesFound: phases.length,
+        totalRaw: allEdges.length,
+        filteredCount: mappedDeals.length
+      }
+    };
 
   } catch (error) {
     console.error('Pipefy Fetch Error:', error);
-    return [];
+    throw error; // Propagate error to AdminSettings
   }
 }

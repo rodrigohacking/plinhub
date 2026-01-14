@@ -214,17 +214,17 @@ export function DashboardMarketing({ company, data }) {
             className="space-y-8 pb-12"
         >
             {/* 1. Hero Banner (Marketing Theme - Emerald/Dark) */}
-            <div className="bg-gradient-to-r from-emerald-900 to-slate-900 rounded-3xl p-10 text-white shadow-2xl relative overflow-hidden">
+            <div className="bg-gradient-to-r from-emerald-900 to-slate-900 rounded-3xl p-6 md:p-10 text-white shadow-2xl relative overflow-hidden">
                 <div className="absolute top-0 right-0 w-96 h-96 bg-teal-500/10 rounded-full -mr-32 -mt-32 blur-3xl"></div>
                 <div className="relative z-10 flex flex-col md:flex-row justify-between items-end gap-6">
-                    <div>
+                    <div className="w-full md:w-auto">
                         <div className="flex items-center gap-3 mb-2">
                             <div className="p-2 bg-white/10 rounded-lg backdrop-blur-sm">
                                 <Instagram className="w-8 h-8 text-white" />
                             </div>
-                            <h2 className="text-4xl font-black tracking-tight">Performance Meta Ads</h2>
+                            <h2 className="text-2xl md:text-3xl lg:text-4xl font-black tracking-tight">Performance Meta Ads</h2>
                         </div>
-                        <p className="text-emerald-100 text-lg">Monitoramento de campanhas do Facebook e Instagram.</p>
+                        <p className="text-emerald-100 text-sm md:text-lg">Monitoramento de campanhas do Facebook e Instagram.</p>
                         <div className="mt-6">
                             <DateRangeFilter value={dateRange} onChange={setDateRange} />
                         </div>

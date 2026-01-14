@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -42,6 +42,14 @@ export function DashboardSales({ company, data }) {
     const [itemsPerPage, setItemsPerPage] = useState(10);
     const [sortOption, setSortOption] = useState('date-desc'); // date-desc, date-asc, value-desc, value-asc
     const [filterChannel, setFilterChannel] = useState('all');
+    const [isMobile, setIsMobile] = useState(false);
+
+    useEffect(() => {
+        const checkMobile = () => setIsMobile(window.innerWidth < 768);
+        checkMobile();
+        window.addEventListener('resize', checkMobile);
+        return () => window.removeEventListener('resize', checkMobile);
+    }, []);
 
     // Filter sales/deals for this company and date range
     // Split filtering logic:
@@ -297,7 +305,7 @@ export function DashboardSales({ company, data }) {
                         </div>
                         <div>
                             <p className="text-gray-500 dark:text-gray-400 text-sm font-bold uppercase tracking-wide">Faturamento Total</p>
-                            <h3 className="text-4xl font-black text-gray-900 dark:text-white mt-1">{formatCurrency(metrics.wonValue)}</h3>
+                            <h3 className="text-xl md:text-2xl lg:text-4xl font-black text-gray-900 dark:text-white mt-1 break-all">{formatCurrency(metrics.wonValue)}</h3>
                         </div>
                     </div>
                 </div>
@@ -310,7 +318,7 @@ export function DashboardSales({ company, data }) {
                         </div>
                         <div>
                             <p className="text-gray-500 dark:text-gray-400 text-sm font-bold uppercase tracking-wide">Ticket Médio</p>
-                            <h3 className="text-4xl font-black text-gray-900 dark:text-white mt-1">{formatCurrency(metrics.avgTicket)}</h3>
+                            <h3 className="text-xl md:text-2xl lg:text-4xl font-black text-gray-900 dark:text-white mt-1 break-all">{formatCurrency(metrics.avgTicket)}</h3>
                         </div>
                     </div>
                 </div>
@@ -388,7 +396,12 @@ export function DashboardSales({ company, data }) {
                                 ))}
                             </Pie>
                             <Tooltip />
-                            <Legend verticalAlign="middle" align="right" layout="vertical" wrapperStyle={{ fontSize: '12px' }} />
+                            <Legend
+                                verticalAlign={isMobile ? 'bottom' : 'middle'}
+                                align={isMobile ? 'center' : 'right'}
+                                layout={isMobile ? 'horizontal' : 'vertical'}
+                                wrapperStyle={{ fontSize: '12px', paddingTop: isMobile ? '20px' : '0' }}
+                            />
                         </PieChart>
                     </ResponsiveContainer>
                 </div>
@@ -538,7 +551,7 @@ export function DashboardSales({ company, data }) {
 
                     if (totalItems > 0) {
                         return (
-                            <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100 dark:border-white/5 bg-gray-50 dark:bg-white/5">
+                            <div className="flex flex-col md:flex-row items-center justify-between px-6 py-4 border-t border-gray-100 dark:border-white/5 bg-gray-50 dark:bg-white/5 gap-4">
                                 <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
                                     <span>Linhas por página:</span>
                                     <select
@@ -651,9 +664,9 @@ export function DashboardSales({ company, data }) {
                                 <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-black text-lg border-2 ${rankColor}`}>
                                     {index + 1}º
                                 </div>
-                                <div className="flex-1">
-                                    <div className="flex justify-between items-center mb-2">
-                                        <p className="font-bold text-gray-900 dark:text-white text-lg">{sdr.name}</p>
+                                <div className="flex-1 min-w-0">
+                                    <div className="flex justify-between items-start mb-2 gap-2">
+                                        <p className="font-bold text-gray-900 dark:text-white text-lg truncate">{sdr.name}</p>
                                         <div className="text-right">
                                             <p className="font-black text-gray-900 dark:text-white">{formatCurrency(sdr.wonValue)}</p>
                                             <p className="text-[10px] text-gray-400 uppercase font-bold">Meta: {formatCurrency(individualGoal)}</p>
@@ -876,7 +889,7 @@ export function DashboardSales({ company, data }) {
                                 contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                                 cursor={{ fill: '#f1f5f9' }}
                             />
-                            <Legend wrapperStyle={{ paddingTop: '20px' }} />
+                            <Legend wrapperStyle={{ paddingTop: '20px', fontSize: '11px' }} />
                             {(() => {
                                 // Extract unique reasons dynamically
                                 const allReasons = new Set();
@@ -996,8 +1009,8 @@ export function DashboardSales({ company, data }) {
                                     </div>
                                 </div>
 
-                                <div className="flex items-center gap-8">
-                                    <div className="w-40 h-40 relative flex items-center justify-center">
+                                <div className="flex flex-col sm:flex-row items-center gap-4 sm:gap-8">
+                                    <div className="w-40 h-40 relative flex items-center justify-center shrink-0">
                                         <ResponsiveContainer width="100%" height="100%">
                                             <RadialBarChart
                                                 innerRadius="80%"
@@ -1044,8 +1057,8 @@ export function DashboardSales({ company, data }) {
                                     </div>
                                 </div>
 
-                                <div className="flex items-center gap-8">
-                                    <div className="w-40 h-40 relative flex items-center justify-center">
+                                <div className="flex flex-col sm:flex-row items-center gap-4 sm:gap-8">
+                                    <div className="w-40 h-40 relative flex items-center justify-center shrink-0">
                                         <ResponsiveContainer width="100%" height="100%">
                                             <RadialBarChart
                                                 innerRadius="80%"
@@ -1092,8 +1105,8 @@ export function DashboardSales({ company, data }) {
                                     </div>
                                 </div>
 
-                                <div className="flex items-center gap-8">
-                                    <div className="w-40 h-40 relative flex items-center justify-center">
+                                <div className="flex flex-col sm:flex-row items-center gap-4 sm:gap-8">
+                                    <div className="w-40 h-40 relative flex items-center justify-center shrink-0">
                                         <ResponsiveContainer width="100%" height="100%">
                                             <RadialBarChart
                                                 innerRadius="80%"

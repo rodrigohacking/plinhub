@@ -440,17 +440,17 @@ export function CompanySelection({ data, onSelect }) {
                 </div>
             )}
 
-            <div className="min-h-screen flex items-center justify-center p-4 lg:p-12 relative z-10">
-                <div className="w-full max-w-7xl grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-24 items-center">
+            <div className="min-h-screen flex flex-col lg:flex-row items-center justify-center p-4 lg:p-12 relative z-10 overflow-y-auto">
+                <div className="w-full max-w-7xl grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-24 items-center">
 
                     {/* Left Column: Hero Brand (Logo Only) */}
-                    <div className="flex flex-col items-center lg:items-start justify-center animate-in slide-in-from-left duration-700 delay-100">
-                        <div className="relative group cursor-default mb-6">
+                    <div className="flex flex-col items-center lg:items-start justify-center animate-in slide-in-from-left duration-700 delay-100 mb-4 lg:mb-0">
+                        <div className="relative group cursor-default mb-4 lg:mb-6">
                             <div className="absolute -inset-4 bg-gradient-to-r from-[#FD295E] to-[#FF6B6B] rounded-full blur-3xl opacity-20 group-hover:opacity-30 transition-opacity duration-1000"></div>
                             <img
                                 src="/logo-hub.png"
                                 alt="PLIN HUB"
-                                className="relative h-48 md:h-64 lg:h-80 object-contain drop-shadow-2xl transition-transform duration-500 hover:scale-[1.02]"
+                                className="relative h-28 md:h-48 lg:h-80 object-contain drop-shadow-2xl transition-transform duration-500 hover:scale-[1.02]"
                             />
                         </div>
                         <div className="max-w-md text-center lg:text-left space-y-2">
@@ -464,11 +464,11 @@ export function CompanySelection({ data, onSelect }) {
                     </div>
 
                     {/* Right Column: Glass Interaction Panel */}
-                    <div className="bg-[#0a0a0a]/60 backdrop-blur-2xl border border-white/5 rounded-[2rem] shadow-2xl p-8 lg:p-12 animate-in slide-in-from-right duration-700 delay-200 ring-1 ring-white/5">
-                        <div className="flex justify-between items-center mb-10">
+                    <div className="bg-[#0a0a0a]/60 backdrop-blur-2xl border border-white/5 rounded-[2rem] shadow-2xl p-5 md:p-12 animate-in slide-in-from-right duration-700 delay-200 ring-1 ring-white/5 w-full">
+                        <div className="flex justify-between items-center mb-6 lg:mb-10">
                             <div>
-                                <h2 className="text-3xl font-bold text-white tracking-tight">EMPRESAS:</h2>
-                                <p className="text-sm text-gray-400 font-medium tracking-widest">ESCOLHA UMA OPÇÃO ABAIXO</p>
+                                <h2 className="text-xl md:text-3xl font-bold text-white tracking-tight">EMPRESAS:</h2>
+                                <p className="text-[10px] md:text-sm text-gray-400 font-medium tracking-widest">ESCOLHA UMA OPÇÃO ABAIXO</p>
                             </div>
                             <button
                                 onClick={() => handleProtectedAction({ type: 'new' })}
@@ -485,20 +485,20 @@ export function CompanySelection({ data, onSelect }) {
                                     className="group relative bg-white/[0.03] border border-white/5 rounded-2xl p-5 hover:bg-white/[0.06] hover:border-[#FD295E]/50 transition-all cursor-pointer hover:shadow-[0_0_30px_rgba(253,41,94,0.1)] duration-300"
                                     onClick={() => handleCompanyClick(company)}
                                 >
-                                    <div className="flex items-center gap-5">
-                                        <div className="w-16 h-16 rounded-2xl bg-[#1a1a1a] flex items-center justify-center text-[#FD295E] shrink-0 border border-white/5 shadow-inner group-hover:scale-105 transition-transform">
+                                    <div className="flex items-center gap-3 md:gap-5">
+                                        <div className="w-12 h-12 md:w-16 md:h-16 rounded-2xl bg-[#1a1a1a] flex items-center justify-center text-[#FD295E] shrink-0 border border-white/5 shadow-inner group-hover:scale-105 transition-transform">
                                             {company.logo ? (
                                                 <img src={company.logo} alt={company.name} className="w-full h-full object-contain rounded-xl p-2" />
                                             ) : (
-                                                <Building2 className="w-8 h-8" />
+                                                <Building2 className="w-6 h-6 md:w-8 md:h-8" />
                                             )}
                                         </div>
                                         <div className="flex-1 min-w-0">
-                                            <h3 className="font-bold text-white text-lg truncate group-hover:text-[#FD295E] transition-colors">{company.name}</h3>
-                                            <p className="text-xs text-gray-500 truncate font-mono tracking-wider">{company.cnpj || 'CNPJ NÃO INFORMADO'}</p>
+                                            <h3 className="font-bold text-white text-base md:text-lg truncate group-hover:text-[#FD295E] transition-colors">{company.name}</h3>
+                                            <p className="text-[10px] md:text-xs text-gray-500 truncate font-mono tracking-wider">{company.cnpj || 'CNPJ NÃO INFORMADO'}</p>
                                         </div>
-                                        <div className="w-10 h-10 rounded-full bg-white/5 flex items-center justify-center group-hover:bg-[#FD295E] group-hover:text-white transition-all transform group-hover:rotate-[-45deg] shadow-lg shadow-transparent group-hover:shadow-[#FD295E]/40">
-                                            <ArrowRight className="w-5 h-5" />
+                                        <div className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-white/5 flex items-center justify-center group-hover:bg-[#FD295E] group-hover:text-white transition-all transform group-hover:rotate-[-45deg] shadow-lg shadow-transparent group-hover:shadow-[#FD295E]/40">
+                                            <ArrowRight className="w-4 h-4 md:w-5 md:h-5" />
                                         </div>
                                     </div>
 

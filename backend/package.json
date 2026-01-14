@@ -3,6 +3,7 @@
     "version": "1.0.0",
     "description": "Backend API for Plin Dashboard - Meta Ads & Pipefy Integration",
     "main": "src/server.js",
+    "type": "commonjs",
     "scripts": {
         "dev": "nodemon src/server.js",
         "start": "node src/server.js",

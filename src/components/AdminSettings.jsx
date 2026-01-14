@@ -260,11 +260,20 @@ export function AdminSettings({ company, onSave }) {
     const testPipefy = async () => {
         setTestStatus({ type: 'pipefy', msg: 'Testando conexão...', error: false });
         try {
-            const deals = await fetchPipefyDeals(config.pipefyOrgId, config.pipefyPipeId, config.pipefyToken);
+            const result = await fetchPipefyDeals(config.pipefyOrgId, config.pipefyPipeId, config.pipefyToken);
+            // Result can be an array (legacy) or object with { deals, debug }
+            const deals = Array.isArray(result) ? result : (result.deals || []);
+            const debug = !Array.isArray(result) ? result.debug : null;
+
             if (deals.length > 0) {
                 setTestStatus({ type: 'pipefy', msg: `Sucesso! Encontramos ${deals.length} cards.`, error: false });
             } else {
-                setTestStatus({ type: 'pipefy', msg: 'Conexão OK, mas nenhum card encontrado.', error: true });
+                let msg = 'Conexão OK, mas nenhum card encontrado.';
+                if (debug) {
+                    msg += ` (Fases: ${debug.phasesFound}, Cards Raw: ${debug.totalRaw})`;
+                    if (debug.phasesFound > 0 && debug.totalRaw === 0) msg += ' O Pipe parece estar vazio.';
+                }
+                setTestStatus({ type: 'pipefy', msg: msg, error: true });
             }
         } catch (e) {
             setTestStatus({ type: 'pipefy', msg: `Erro: ${e.message}`, error: true });
@@ -563,12 +572,12 @@ export function AdminSettings({ company, onSave }) {
 
                 {/* Pipefy */}
                 <div className="bg-white dark:bg-[#111] p-6 rounded-xl border border-gray-200 dark:border-white/5 shadow-sm relative overflow-hidden">
-                    <div className="flex justify-between items-center mb-4">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-4 sm:gap-0">
                         <h2 className="text-lg font-semibold text-gray-800 dark:text-white flex items-center gap-2">
                             <div className="w-2 h-8 bg-[#FD295E] rounded-full"></div>
                             Integração Pipefy
                         </h2>
-                        <div className="flex gap-2">
+                        <div className="flex gap-2 w-full sm:w-auto">
                             <button onClick={testPipefy} className="text-sm text-[#FD295E] dark:text-[#FD295E] hover:text-[#e11d48] dark:hover:text-[#FD295E]/70 font-medium flex items-center gap-1">
                                 <Play className="w-4 h-4" /> Testar Conexão
                             </button>
@@ -737,7 +746,7 @@ export function AdminSettings({ company, onSave }) {
 
                 {/* Meta Ads */}
                 <div className="bg-white dark:bg-[#111] p-6 rounded-xl border border-gray-200 dark:border-white/5 shadow-sm relative overflow-hidden">
-                    <div className="flex justify-between items-center mb-4">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-4 sm:gap-0">
                         <h2 className="text-lg font-semibold text-gray-800 dark:text-white flex items-center gap-2">
                             <div className="w-2 h-8 bg-blue-400 rounded-full"></div>
                             Integração Meta Ads
