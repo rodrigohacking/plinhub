@@ -1,6 +1,10 @@
 {
     "rewrites": [
         {
+            "source": "/api/pipefy",
+            "destination": "/api/pipefy.js"
+        },
+        {
             "source": "/api/(.*)",
             "destination": "/api/index.js"
         },
