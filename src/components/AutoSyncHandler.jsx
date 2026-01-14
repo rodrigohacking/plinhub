@@ -9,10 +9,28 @@ export function AutoSyncHandler() {
     useEffect(() => {
         const runAutoSync = async () => {
             // 1. Get Local Data
-            const localCompanies = getCompaniesConfig();
-            if (!localCompanies || localCompanies.length === 0) return;
+            let localCompanies = getCompaniesConfig();
 
-            // 2. Filter out dummy/seed checks if any (optional, backend handles valid IDs)
+            // Fallback: Check legacy monolithic storage if separate config is empty
+            if (!localCompanies || localCompanies.length === 0) {
+                try {
+                    const legacyRaw = localStorage.getItem('plin_system_data_v4');
+                    if (legacyRaw) {
+                        const legacyData = JSON.parse(legacyRaw);
+                        if (legacyData.companies && Array.isArray(legacyData.companies)) {
+                            console.log("[AutoSync] Found companies in legacy storage. Using them.");
+                            localCompanies = legacyData.companies;
+                        }
+                    }
+                } catch (e) {
+                    console.warn("[AutoSync] Legacy storage check failed", e);
+                }
+            }
+
+            if (!localCompanies || localCompanies.length === 0) {
+                console.log("[AutoSync] No local companies found to sync.");
+                return;
+            }
             // We want to sync REAL companies user created.
             // Check if we have connectivity first (simple ping or just try)
 
