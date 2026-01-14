@@ -554,7 +554,7 @@ export function CompanySelection({ data, onSelect }) {
                         <div className="mt-2 text-[9px] text-gray-800 font-mono text-center opacity-50 select-text">
                             ENV: {supabaseUrl.substring(0, 15)}... |
                             USER: {user ? user.id : 'NULL'} |
-                            TABLE: companies
+                            TABLE: Company (Reverted)
                         </div>
                     </div>
                 </div>

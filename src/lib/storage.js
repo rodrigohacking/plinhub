@@ -168,7 +168,7 @@ export async function saveCompanyConfig(companyConfig) {
 
         // 1. Upsert Company
         const { data: company, error: companyError } = await supabase
-            .from('companies')  // Standardized to lowercase
+            .from('Company')
             .upsert({
                 id: companyConfig.id,
                 name: companyConfig.name,
@@ -196,7 +196,7 @@ export async function saveCompanyConfig(companyConfig) {
             });
 
             const { error: pipefyError } = await supabase
-                .from('integrations')
+                .from('Integration')
                 .upsert({
                     // Composite Key mimic (companyId + type) needs unique constraint in DB
                     companyId: company.id,
@@ -215,7 +215,7 @@ export async function saveCompanyConfig(companyConfig) {
         // Meta Ads
         if (companyConfig.metaAdAccountId || companyConfig.metaToken) {
             const { error: metaError } = await supabase
-                .from('integrations')
+                .from('Integration')
                 .upsert({
                     companyId: company.id,
                     type: 'meta_ads',
@@ -237,7 +237,7 @@ export async function saveCompanyConfig(companyConfig) {
 export async function deleteCompanyConfig(companyId) {
     try {
         const { error } = await supabase
-            .from('companies')
+            .from('Company')
             .delete()
             .eq('id', companyId);
 
@@ -299,8 +299,8 @@ export async function getData() {
 
         // Fetch Company AND its Integrations
         const { data: companies, error } = await supabase
-            .from('companies')
-            .select('*, integrations(*)');
+            .from('Company')
+            .select('*, Integration(*)');
 
         if (error) {
             console.error("Supabase API Error DETAILED:", JSON.stringify(error, null, 2));
@@ -323,8 +323,8 @@ export async function getData() {
 
                 // Flatten Integrations if any
                 // Note: PostgREST returns relations as the table name, usually capitalized if the table is.
-                if (c.integrations && c.integrations.length > 0) {
-                    c.integrations.forEach(integration => {
+                if (c.Integration && c.Integration.length > 0) {
+                    c.Integration.forEach(integration => {
                         if (integration.type === 'pipefy') {
                             flatCompany.pipefyOrgId = integration.pipefyOrgId;
                             flatCompany.pipefyPipeId = integration.pipefyPipeId;
