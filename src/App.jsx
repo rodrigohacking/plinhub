@@ -15,6 +15,7 @@ import { getData } from './lib/storage';
 import { Loading } from './components/Loading';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { LoginPage } from './components/LoginPage';
+import { AutoSyncHandler } from './components/AutoSyncHandler';
 
 function MainApp() {
     console.log("APP: Minimal Render Start");
@@ -249,6 +250,7 @@ function MainApp() {
 function App() {
     return (
         <AuthProvider>
+            <AutoSyncHandler />
             <MainApp />
         </AuthProvider>
     );
