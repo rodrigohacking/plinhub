@@ -50,7 +50,18 @@ router.get('/', async (req, res) => {
                         company.pipefyOrgId = integration.pipefyOrgId;
                         company.pipefyPipeId = integration.pipefyPipeId;
                         company.pipefyToken = integration.pipefyToken;
-                        // Parse JSON fields if needed
+
+                        // Parse JSON settings and merge (Flatten)
+                        if (integration.settings) {
+                            try {
+                                const settings = typeof integration.settings === 'string'
+                                    ? JSON.parse(integration.settings)
+                                    : integration.settings;
+                                Object.assign(company, settings);
+                            } catch (e) {
+                                console.warn(`Error parsing settings for company ${c.id}:`, e);
+                            }
+                        }
                     }
                     if (integration.type === 'meta_ads') {
                         company.metaAdAccountId = integration.metaAdAccountId;
@@ -86,7 +97,7 @@ router.post('/', async (req, res) => {
 
         const { data, error } = await supabase
             .from('Company')
-            .insert([{ name }])
+            .upsert({ name }, { onConflict: 'name' })
             .select()
             .single();
 

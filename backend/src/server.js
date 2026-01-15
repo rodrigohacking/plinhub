@@ -9,6 +9,7 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const session = require('express-session');
 const passport = require('passport');
+const axios = require('axios');
 
 // Patch BigInt serialization
 BigInt.prototype.toJSON = function () {
@@ -68,9 +69,7 @@ app.get('/health', (req, res) => {
 });
 
 // Proxy Route for Pipefy (Bypassing CORS)
-const axios = require('axios');
 app.post('/api/pipefy', async (req, res) => {
-    console.log('[Proxy] Incoming Query size:', req.body.query?.length);
     try {
         const { query } = req.body;
         const authHeader = req.headers.authorization;
@@ -78,6 +77,10 @@ app.post('/api/pipefy', async (req, res) => {
         if (!authHeader) {
             console.warn('[Proxy] Missing Auth Header');
             return res.status(401).json({ error: 'Missing Authorization header' });
+        }
+
+        if (!query) {
+            return res.status(400).json({ error: 'Missing GraphQL query in body' });
         }
 
         const response = await axios.post('https://api.pipefy.com/graphql',
@@ -92,16 +95,16 @@ app.post('/api/pipefy', async (req, res) => {
 
         res.json(response.data);
     } catch (error) {
-        console.error('Pipefy Proxy Error:', error.message);
-        if (error.response) {
-            console.error('Pipefy Response Data:', JSON.stringify(error.response.data).slice(0, 200));
-        }
+        // Detailed Error Logging
+        const status = error.response?.status || 500;
+        const data = error.response?.data || error.message;
 
-        res.status(error.response?.status || 500).json({
+        console.error(`[Pipefy Proxy] Error ${status}:`, JSON.stringify(data).slice(0, 300));
+
+        res.status(status).json({
             error: {
-                message: error.message,
-                details: error.response?.data,
-                stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+                message: 'Pipefy API Error',
+                originalError: data
             }
         });
     }

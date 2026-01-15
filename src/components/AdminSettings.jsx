@@ -1,9 +1,75 @@
 import React, { useState, useEffect } from 'react';
 import { toast } from 'sonner';
 import { Save, AlertCircle, CheckCircle, Play, Building, Upload, Lock, Unlock, Key, Eye, EyeOff, Users, UserPlus, Trash2, Shield } from 'lucide-react';
-import { fetchPipefyDeals } from '../services/pipefy';
+import { fetchPipefyDeals, getPipeDetails } from '../services/pipefy';
 import { fetchMetaCampaigns } from '../services/meta';
 import { getCompaniesConfig, saveCompanyConfig, getAdminPin, setAdminPin, checkAdminPin } from '../lib/storage';
+
+// Helper Component for Multi-Select
+const PhaseMultiSelect = ({ label, type, selectedIds, phases, onSelect }) => {
+    const [isOpen, setIsOpen] = useState(false);
+    const containerRef = React.useRef(null);
+
+    // Close on click outside
+    useEffect(() => {
+        const handleClickOutside = (event) => {
+            if (containerRef.current && !containerRef.current.contains(event.target)) {
+                setIsOpen(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
+    const selectedList = phases.filter(p => selectedIds.includes(String(p.id)));
+
+    return (
+        <div className="relative" ref={containerRef}>
+            <label className={`text-xs font-bold uppercase mb-1 block ${type === 'won' ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400'}`}>
+                {label}
+            </label>
+
+            <div
+                onClick={() => setIsOpen(!isOpen)}
+                className="w-full p-2 text-sm border border-gray-300 dark:border-white/10 rounded-lg bg-white dark:bg-[#1a1a1a] cursor-pointer flex justify-between items-center min-h-[38px]"
+            >
+                <div className="flex flex-wrap gap-1">
+                    {selectedList.length === 0 && <span className="text-gray-400">Selecione as fases...</span>}
+                    {selectedList.map(p => (
+                        <span key={p.id} className={`text-[10px] px-2 py-0.5 rounded-full flex items-center gap-1 ${type === 'won' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                            {p.name}
+                            <div
+                                onClick={(e) => { e.stopPropagation(); onSelect(String(p.id)); }}
+                                className="cursor-pointer hover:font-bold"
+                            >×</div>
+                        </span>
+                    ))}
+                </div>
+                <div className="text-gray-400 text-xs">▼</div>
+            </div>
+
+            {isOpen && (
+                <div className="absolute z-50 w-full mt-1 bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-white/10 rounded-lg shadow-xl max-h-60 overflow-y-auto">
+                    {phases.map(p => {
+                        const isSelected = selectedIds.includes(String(p.id));
+                        return (
+                            <div
+                                key={p.id}
+                                onClick={() => onSelect(String(p.id))}
+                                className={`p-2 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-white/5 flex items-center gap-2 ${isSelected ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}
+                            >
+                                <div className={`w-4 h-4 rounded border flex items-center justify-center ${isSelected ? 'bg-[#FD295E] border-[#FD295E]' : 'border-gray-300'}`}>
+                                    {isSelected && <span className="text-white text-xs">✓</span>}
+                                </div>
+                                <span className="text-gray-700 dark:text-gray-200">{p.name}</span>
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
+        </div>
+    );
+};
 
 export function AdminSettings({ company, onSave }) {
     const [config, setConfig] = useState({
@@ -41,7 +107,12 @@ export function AdminSettings({ company, onSave }) {
     const [pinInput, setPinInput] = useState('');
     const [pinError, setPinError] = useState('');
     const [isSettingNewPin, setIsSettingNewPin] = useState(false);
+    const [newPin, setNewPin] = useState(''); // Added missing state
     const [showToken, setShowToken] = useState(false); // Toggle password visibility after unlock
+
+    // Pipefy Auto-Config State
+    const [pipeDetails, setPipeDetails] = useState({ phases: [], fields: [], loaded: false });
+    const [loadingPipeDetails, setLoadingPipeDetails] = useState(false);
 
     useEffect(() => {
         if (company) {
@@ -222,15 +293,26 @@ export function AdminSettings({ company, onSave }) {
 
         setStatus('saving');
 
-        // Wait for the DB save to complete before signaling success
-        await saveCompanyConfig(config);
+        try {
+            // Wait for the DB save to complete before signaling success
+            const savedCompany = await saveCompanyConfig(config);
 
-        setStatus('success');
-        setTimeout(() => {
-            setStatus('idle');
-            // Trigger the refresh callback if provided (IMPORTANT for App.jsx to reload data)
-            if (onSave) onSave();
-        }, 1000);
+            // CRITICAL: Update local ID to ensure subsequent saves are UPDATES (PUT), not CREATES (POST)
+            if (savedCompany && savedCompany.id) {
+                setConfig(prev => ({ ...prev, id: savedCompany.id }));
+            }
+
+            setStatus('success');
+            setTimeout(() => {
+                setStatus('idle');
+                // Trigger the refresh callback if provided (IMPORTANT for App.jsx to reload data)
+                if (onSave) onSave();
+            }, 1000);
+        } catch (error) {
+            console.error("Save error:", error);
+            setStatus('idle'); // Reset status so button works again
+            toast.error(`Erro ao salvar: ${error.message}`);
+        }
     };
 
     const handlePinSubmit = () => {
@@ -308,561 +390,502 @@ export function AdminSettings({ company, onSave }) {
         }
     };
 
+    const loadPipeDetails = async () => {
+        if (!config.pipefyPipeId || !config.pipefyToken) {
+            toast.error("Preencha o Pipe ID e o Token antes de carregar.");
+            return;
+        }
+
+        setLoadingPipeDetails(true);
+        try {
+            const details = await getPipeDetails(config.pipefyPipeId, config.pipefyToken);
+            setPipeDetails({ ...details, loaded: true });
+            toast.success("Fases e Campos carregados com sucesso!");
+
+            // Auto-Match logic (Heuristic) if fields are empty
+            setConfig(prev => {
+                const updates = {};
+
+                // Won Phase Match
+                if (!prev.wonPhaseId) {
+                    const won = details.phases.find(p => {
+                        const n = p.name.toLowerCase();
+                        return n.includes('ganho') || n.includes('won') || n.includes('vendido') || n.includes('fechado') || n.includes('contrato');
+                    });
+                    if (won) {
+                        updates.wonPhase = won.name;
+                        updates.wonPhaseId = won.id;
+                    }
+                }
+
+                // Lost Phase Match
+                if (!prev.lostPhaseId) {
+                    const lost = details.phases.find(p => {
+                        const n = p.name.toLowerCase();
+                        return n.includes('perdido') || n.includes('lost') || n.includes('cancelado');
+                    });
+                    if (lost) {
+                        updates.lostPhase = lost.name;
+                        updates.lostPhaseId = lost.id;
+                    }
+                }
+
+                return { ...prev, ...updates };
+            });
+
+        } catch (error) {
+            console.error(error);
+            toast.error(`Erro ao carregar pipe: ${error.message}`);
+        } finally {
+            setLoadingPipeDetails(false);
+        }
+    };
+
+    const handlePhaseSelect = (type, selectedId) => {
+        const toggleId = (currentIds, id) => {
+            const list = (currentIds || '').split(',').map(s => s.trim()).filter(Boolean);
+            if (list.includes(id)) {
+                return list.filter(l => l !== id).join(',');
+            } else {
+                return [...list, id].join(',');
+            }
+        };
+
+        if (type === 'won') {
+            setConfig(prev => {
+                const newIds = toggleId(prev.wonPhaseId, selectedId);
+                const phase = pipeDetails.phases.find(p => String(p.id) === String(selectedId));
+                return {
+                    ...prev,
+                    wonPhaseId: newIds,
+                    wonPhase: phase ? phase.name : prev.wonPhase // Fallback name
+                };
+            });
+        } else if (type === 'lost') {
+            setConfig(prev => {
+                const newIds = toggleId(prev.lostPhaseId, selectedId);
+                const phase = pipeDetails.phases.find(p => String(p.id) === String(selectedId));
+                return {
+                    ...prev,
+                    lostPhaseId: newIds,
+                    lostPhase: phase ? phase.name : prev.lostPhase
+                };
+            });
+        }
+    };
+
+    // Helper for Glass Cards
+    const GlassCard = ({ children, className = '' }) => (
+        <div className={`bg-white dark:bg-[#1a1a1a] rounded-3xl border border-gray-100 dark:border-white/5 shadow-xl shadow-gray-200/50 dark:shadow-black/50 overflow-hidden ${className}`}>
+            {children}
+        </div>
+    );
+
+    const SectionHeader = ({ icon: Icon, title, color = "text-gray-900" }) => (
+        <div className="flex items-center gap-3 mb-6 pb-4 border-b border-gray-100 dark:border-white/5">
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center bg-gray-50 dark:bg-white/5 ${color}`}>
+                <Icon className="w-5 h-5" />
+            </div>
+            <h2 className="text-lg font-bold text-gray-900 dark:text-white">{title}</h2>
+        </div>
+    );
+
+    const handleNewPinSave = () => {
+        if (newPin.length < 4) return;
+        setAdminPin(newPin);
+        setIsSettingNewPin(false);
+        setNewPin('');
+        setIsLocked(false);
+        toast.success("PIN definido com sucesso!");
+    };
+
     if (!company) {
         return (
             <div className="max-w-4xl mx-auto animate-in fade-in duration-500 pb-12">
-                <div className="bg-white dark:bg-[#111] p-12 rounded-xl border border-gray-200 dark:border-white/5 shadow-sm text-center">
-                    <Building className="w-16 h-16 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
-                    <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-200 mb-2">Nenhuma empresa selecionada</h3>
-                    <p className="text-gray-500 dark:text-gray-400">Selecione uma empresa para configurar.</p>
-                </div>
+                <GlassCard className="p-12 text-center">
+                    <div className="w-20 h-20 bg-gray-50 dark:bg-white/5 rounded-full flex items-center justify-center mx-auto mb-6 animate-pulse">
+                        <Building className="w-10 h-10 text-gray-300 dark:text-gray-600" />
+                    </div>
+                    <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Selecione uma Organização</h2>
+                    <p className="text-gray-500 max-w-md mx-auto">Para acessar as configurações, selecione primeiro uma organização no menu principal.</p>
+                </GlassCard>
             </div>
         );
     }
 
     return (
-        <div className="max-w-4xl mx-auto animate-in fade-in duration-500 pb-12 relative">
-            {/* Remove User Confirmation Modal */}
-            {showRemoveModal && (
-                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                    <div className="bg-white dark:bg-[#1a1a1a] rounded-2xl shadow-2xl p-8 max-w-sm w-full animate-in zoom-in-95 duration-200 border border-transparent dark:border-white/10">
-                        <div className="text-center mb-6">
-                            <div className="w-16 h-16 bg-red-100 dark:bg-red-900/20 rounded-full flex items-center justify-center mx-auto mb-4">
-                                <Trash2 className="w-8 h-8 text-red-600 dark:text-red-500" />
-                            </div>
-                            <h3 className="text-xl font-bold text-gray-900 dark:text-white">
-                                Remover Acesso?
-                            </h3>
-                            <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
-                                Tem certeza que deseja remover o acesso de <span className="font-semibold text-gray-800 dark:text-gray-200">{userToRemove}</span>?
-                            </p>
-                        </div>
+        <div className="max-w-6xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-700 pb-32 relative font-sans">
 
-                        <div className="flex gap-3 pt-2">
-                            <button
-                                onClick={() => { setShowRemoveModal(false); setUserToRemove(null); }}
-                                className="flex-1 py-3 text-gray-600 dark:text-gray-400 font-medium hover:bg-gray-50 dark:hover:bg-white/5 rounded-lg"
-                            >
-                                Cancelar
-                            </button>
-                            <button
-                                onClick={confirmRemoveUser}
-                                className="flex-1 py-3 bg-red-600 dark:bg-red-600 text-white font-bold rounded-lg hover:bg-red-700"
-                            >
-                                Sim, Remover
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Security Modal */}
-            {showPinModal && (
-                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                    <div className="bg-white dark:bg-[#1a1a1a] rounded-2xl shadow-2xl p-8 max-w-sm w-full animate-in zoom-in-95 duration-200 border border-transparent dark:border-white/10">
-                        <div className="text-center mb-6">
-                            <div className="w-16 h-16 bg-[#FD295E]/10 dark:bg-[#FD295E]/20 rounded-full flex items-center justify-center mx-auto mb-4">
-                                <Lock className="w-8 h-8 text-[#FD295E] dark:text-[#FD295E]" />
-                            </div>
-                            <h3 className="text-xl font-bold text-gray-900 dark:text-white">
-                                {isSettingNewPin ? 'Criar PIN de Segurança' : 'Acesso Restrito'}
-                            </h3>
-                            <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
-                                {isSettingNewPin
-                                    ? 'Defina um PIN numérico para proteger os tokens de acesso.'
-                                    : 'Digite seu PIN para visualizar ou editar os tokens.'}
-                            </p>
-                        </div>
-
-                        <div className="space-y-4">
-                            <input
-                                autoFocus
-                                type="password"
-                                value={pinInput}
-                                onChange={(e) => setPinInput(e.target.value)}
-                                placeholder="Digite o PIN"
-                                className="w-full text-center text-2xl tracking-[0.5em] font-bold p-3 border border-gray-300 dark:border-white/10 rounded-lg focus:ring-2 focus:ring-[#FD295E] outline-none text-gray-900 dark:text-white bg-white dark:bg-[#111]"
-                                onKeyDown={(e) => e.key === 'Enter' && handlePinSubmit()}
-                                maxLength={6}
-                            />
-                            {pinError && <p className="text-red-500 text-sm text-center font-medium">{pinError}</p>}
-
-                            <div className="flex gap-3 pt-2">
-                                <button
-                                    onClick={() => { setShowPinModal(false); setPinError(''); setPinInput(''); }}
-                                    className="flex-1 py-3 text-gray-600 dark:text-gray-400 font-medium hover:bg-gray-50 dark:hover:bg-white/5 rounded-lg"
-                                >
-                                    Cancelar
-                                </button>
-                                <button
-                                    onClick={handlePinSubmit}
-                                    className="flex-1 py-3 bg-[#FD295E] text-white font-bold rounded-lg hover:bg-[#e11d48]"
-                                >
-                                    {isSettingNewPin ? 'Definir PIN' : 'Desbloquear'}
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            <div className="mb-8 flex justify-between items-end">
+            {/* Header / Actions */}
+            <div className="flex flex-col md:flex-row justify-between items-end mb-10 gap-6">
                 <div>
-                    <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Configurações da Empresa</h1>
-                    <p className="text-gray-500 dark:text-gray-400">Gerencie os dados e integrações de {company.name}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                    {isLocked ? (
-                        <button
-                            onClick={() => setShowPinModal(true)}
-                            className="bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-500/20 px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-colors"
-                        >
-                            <Lock className="w-4 h-4" /> Tokens Bloqueados
-                        </button>
-                    ) : (
-                        <button
-                            onClick={() => { setIsLocked(true); setShowToken(false); }}
-                            className="bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/20 px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 hover:bg-emerald-100 dark:hover:bg-emerald-900/30 transition-colors"
-                        >
-                            <Unlock className="w-4 h-4" /> Tokens Liberados
-                        </button>
-                    )}
-                </div>
-            </div>
-
-            <div className="space-y-6">
-                {/* Company Data */}
-                <div className="bg-white dark:bg-[#111] p-6 rounded-xl border border-gray-200 dark:border-white/5 shadow-sm">
-                    <h2 className="text-lg font-semibold text-gray-800 dark:text-white mb-4 flex items-center gap-2">
-                        <Building className="w-5 h-5 text-gray-500 dark:text-gray-400" />
-                        Dados da Empresa
-                    </h2>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div className="space-y-2">
-                            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Nome da Empresa</label>
-                            <input
-                                type="text"
-                                name="name"
-                                value={config.name}
-                                onChange={handleChange}
-                                className="w-full p-3 border border-gray-300 dark:border-white/10 rounded-lg focus:ring-2 focus:ring-[#FD295E] outline-none text-black dark:text-white bg-white dark:bg-[#1a1a1a]"
-                            />
-                        </div>
-                        <div className="space-y-2">
-                            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">CNPJ</label>
-                            <input
-                                type="text"
-                                name="cnpj"
-                                value={config.cnpj}
-                                onChange={handleChange}
-                                placeholder="00.000.000/0001-00"
-                                className="w-full p-3 border border-gray-300 dark:border-white/10 rounded-lg focus:ring-2 focus:ring-[#FD295E] outline-none text-black dark:text-white bg-white dark:bg-[#1a1a1a]"
-                            />
-                        </div>
-                        <div className="space-y-2 md:col-span-2">
-                            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Logo da Empresa</label>
-                            <div className="flex items-center gap-4">
-                                {config.logo && (
-                                    <div className="w-20 h-20 rounded-lg border border-gray-200 dark:border-white/10 p-2 bg-gray-50 dark:bg-white/5 flex items-center justify-center shrink-0">
-                                        <img src={config.logo} alt="Logo" className="max-w-full max-h-full object-contain rounded" />
-                                    </div>
-                                )}
-                                <div className="flex-1">
-                                    <input
-                                        type="file"
-                                        accept="image/*"
-                                        onChange={handleFileChange}
-                                        className="w-full text-sm text-gray-500 dark:text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-[#FD295E]/10 dark:file:bg-[#FD295E]/20 file:text-[#FD295E] dark:file:text-[#FD295E] hover:file:bg-[#FD295E]/20 dark:hover:file:bg-[#FD295E]/30 cursor-pointer"
-                                    />
-                                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Carregue uma imagem (PNG, JPG) para usar como logo.</p>
-                                </div>
-                            </div>
-                        </div>
+                    <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#FD295E]/10 text-[#FD295E] text-xs font-bold uppercase tracking-wider mb-3">
+                        Configurações
                     </div>
+                    <h1 className="text-4xl font-extrabold text-gray-900 dark:text-white tracking-tight">
+                        {company.name}
+                    </h1>
+                    <p className="text-gray-500 dark:text-gray-400 mt-2 text-lg">Gerencie dados, acessos e integrações da sua organização.</p>
                 </div>
 
-                {/* Users / Access Control */}
-                <div className="bg-white dark:bg-[#111] p-6 rounded-xl border border-gray-200 dark:border-white/5 shadow-sm relative overflow-hidden">
-                    <h2 className="text-lg font-semibold text-gray-800 dark:text-white mb-4 flex items-center gap-2">
-                        <Users className="w-5 h-5 text-gray-500 dark:text-gray-400" />
-                        Gestão de Acesso
-                    </h2>
+                <div className="flex items-center gap-3">
+                    <button
+                        onClick={() => setIsSettingNewPin(!isSettingNewPin)}
+                        className="px-5 py-3 bg-white dark:bg-[#1a1a1a] text-gray-700 dark:text-gray-300 rounded-xl text-sm font-bold border border-gray-200 dark:border-white/10 hover:bg-gray-50 dark:hover:bg-white/5 transition-all flex items-center gap-2 shadow-sm"
+                    >
+                        <Key className="w-4 h-4" /> {isSettingNewPin ? 'Cancelar' : 'Alterar PIN'}
+                    </button>
 
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                        {/* List Users */}
-                        <div className="lg:col-span-2 space-y-3">
-                            <h3 className="text-sm font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider mb-3">Usuários com Acesso</h3>
-                            {!companyUsers || companyUsers.length === 0 ? (
-                                <div className="p-8 border border-dashed border-gray-200 dark:border-white/10 rounded-xl text-center">
-                                    <Users className="w-8 h-8 text-gray-300 dark:text-gray-600 mx-auto mb-2" />
-                                    <p className="text-gray-500 dark:text-gray-400 text-sm">Nenhum usuário cadastrado.</p>
-                                </div>
-                            ) : (
-                                <div className="space-y-2">
-                                    {companyUsers.map((user, idx) => (
-                                        <div key={idx} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-white/5 border border-gray-100 dark:border-white/5 rounded-lg group">
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-white/10 flex items-center justify-center text-gray-500 dark:text-gray-300">
-                                                    <span className="text-xs font-bold">{user.email.substring(0, 2).toUpperCase()}</span>
-                                                </div>
-                                                <div>
-                                                    <p className="text-sm font-medium text-gray-900 dark:text-white flex items-center gap-2">
-                                                        {user.email}
-                                                        {user.status === 'pending' && (
-                                                            <span className="text-[10px] bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400 px-1.5 py-0.5 rounded font-bold uppercase">
-                                                                Pendente
-                                                            </span>
-                                                        )}
-                                                    </p>
-                                                    <div className="flex items-center gap-2">
-                                                        <span className={`text-[10px] uppercase font-bold px-1.5 py-0.5 rounded ${user.role === 'admin' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400' :
-                                                            user.role === 'editor' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' :
-                                                                'bg-gray-100 text-gray-600 dark:bg-white/10 dark:text-gray-400'
-                                                            }`}>
-                                                            {user.role === 'admin' ? 'Administrador' : user.role === 'editor' ? 'Colaborador' : 'Leitor'}
-                                                        </span>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <button
-                                                onClick={() => handleRemoveClick(user.email)}
-                                                className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
-                                                title="Remover acesso"
-                                            >
-                                                <Trash2 className="w-4 h-4" />
-                                            </button>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Add User Form */}
-                        <div className="bg-gray-50 dark:bg-white/[0.02] border border-gray-100 dark:border-white/5 rounded-xl p-5 h-fit">
-                            <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-                                <UserPlus className="w-4 h-4 text-[#FD295E]" />
-                                Adicionar Usuário
-                            </h3>
-                            <div className="space-y-4">
-                                <div className="space-y-1.5">
-                                    <label className="text-xs font-medium text-gray-500 dark:text-gray-400">E-mail do Usuário</label>
-                                    <input
-                                        type="email"
-                                        value={newUserEmail}
-                                        onChange={(e) => setNewUserEmail(e.target.value)}
-                                        placeholder="usuario@email.com"
-                                        className="w-full p-2.5 bg-white dark:bg-[#111] border border-gray-200 dark:border-white/10 rounded-lg text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-[#FD295E] outline-none"
-                                    />
-                                </div>
-                                <div className="space-y-1.5">
-                                    <label className="text-xs font-medium text-gray-500 dark:text-gray-400">Nível de Acesso</label>
-                                    <select
-                                        value={newUserRole}
-                                        onChange={(e) => setNewUserRole(e.target.value)}
-                                        className="w-full p-2.5 bg-white dark:bg-[#111] border border-gray-200 dark:border-white/10 rounded-lg text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-[#FD295E] outline-none appearance-none"
-                                    >
-                                        <option value="admin">Administrador (Total)</option>
-                                        <option value="editor">Colaborador (Editor)</option>
-                                        <option value="viewer">Leitor (Apenas Visualização)</option>
-                                    </select>
-                                </div>
-                                <button
-                                    onClick={handleAddUser}
-                                    className="w-full py-2.5 bg-black dark:bg-white text-white dark:text-black font-medium rounded-lg hover:opacity-90 transition-opacity text-sm flex items-center justify-center gap-2"
-                                >
-                                    <UserPlus className="w-4 h-4" />
-                                    Conceder Acesso
-                                </button>
-                                <div className="pt-2 border-t border-gray-200 dark:border-white/5">
-                                    <div className="flex gap-2 items-start text-[10px] text-gray-500 dark:text-gray-400 leading-tight">
-                                        <Shield className="w-3 h-3 shrink-0 mt-0.5" />
-                                        <p>Usuários terão acesso apenas aos dados desta empresa conforme o nível selecionado.</p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                {/* Pipefy */}
-                <div className="bg-white dark:bg-[#111] p-6 rounded-xl border border-gray-200 dark:border-white/5 shadow-sm relative overflow-hidden">
-                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-4 sm:gap-0">
-                        <h2 className="text-lg font-semibold text-gray-800 dark:text-white flex items-center gap-2">
-                            <div className="w-2 h-8 bg-[#FD295E] rounded-full"></div>
-                            Integração Pipefy
-                        </h2>
-                        <div className="flex gap-2 w-full sm:w-auto">
-                            <button onClick={testPipefy} className="text-sm text-[#FD295E] dark:text-[#FD295E] hover:text-[#e11d48] dark:hover:text-[#FD295E]/70 font-medium flex items-center gap-1">
-                                <Play className="w-4 h-4" /> Testar Conexão
-                            </button>
-                        </div>
-                    </div>
-
-                    {isLocked && (
-                        <div className="absolute inset-x-0 bottom-0 top-16 bg-white/60 dark:bg-black/60 backdrop-blur-sm z-10 flex flex-col items-center justify-center text-center p-6 border-t border-gray-100 dark:border-white/5">
-                            <Lock className="w-10 h-10 text-gray-400 dark:text-gray-500 mb-2" />
-                            <h4 className="text-gray-800 dark:text-white font-bold">Área Protegida</h4>
-                            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4 max-w-xs">Para visualizar ou editar tokens sensíveis, é necessário desbloquear o acesso.</p>
-                            <button
-                                onClick={() => setShowPinModal(true)}
-                                className="bg-gray-900 dark:bg-white text-white dark:text-black px-6 py-2 rounded-lg font-medium hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors flex items-center gap-2 shadow-lg"
-                            >
-                                <Key className="w-4 h-4" /> Inserir PIN de Acesso
-                            </button>
-                        </div>
-                    )}
-
-                    {testStatus.type === 'pipefy' && (
-                        <div className={`mb-4 p-3 rounded-lg text-sm flex items-center gap-2 ${testStatus.error ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}>
-                            {testStatus.error ? <AlertCircle className="w-4 h-4" /> : <CheckCircle className="w-4 h-4" />}
-                            {testStatus.msg}
-                        </div>
-                    )}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Organization ID</label>
-                            <input
-                                type="text"
-                                name="pipefyOrgId"
-                                value={config.pipefyOrgId}
-                                onChange={handleChange}
-                                placeholder="Ex: 300567"
-                                className="w-full p-2 border border-gray-300 dark:border-white/10 rounded-lg focus:ring-2 focus:ring-[#FD295E] outline-none text-black dark:text-white bg-white dark:bg-[#1a1a1a]"
-                            />
-                        </div>
-                        <div className="space-y-2">
-                            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Pipe ID</label>
-                            <input
-                                type="text"
-                                name="pipefyPipeId"
-                                value={config.pipefyPipeId}
-                                onChange={handleChange}
-                                placeholder="Ex: 1029384"
-                                className="w-full p-2 border border-gray-300 dark:border-white/10 rounded-lg focus:ring-2 focus:ring-[#FD295E] outline-none text-black dark:text-white bg-white dark:bg-[#1a1a1a]"
-                            />
-                        </div>
-                        <div className="space-y-2 md:col-span-2 relative">
-                            <div className="flex justify-between">
-                                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Personal Access Token</label>
-                                {!isLocked && (
-                                    <button
-                                        type="button"
-                                        onClick={() => setShowToken(!showToken)}
-                                        className="text-xs text-[#FD295E] dark:text-[#FD295E] hover:underline flex items-center gap-1"
-                                    >
-                                        {showToken ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-                                        {showToken ? 'Ocultar' : 'Mostrar'}
-                                    </button>
-                                )}
-                            </div>
-                            <input
-                                type={showToken && !isLocked ? "text" : "password"}
-                                name="pipefyToken"
-                                value={config.pipefyToken}
-                                onChange={handleChange}
-                                disabled={isLocked}
-                                placeholder="Bearer token..."
-                                className={`w-full p-2 border border-gray-300 dark:border-white/10 rounded-lg focus:ring-2 focus:ring-[#FD295E] outline-none font-mono text-black dark:text-white ${isLocked ? 'bg-gray-50 dark:bg-white/5' : 'bg-white dark:bg-[#1a1a1a]'}`}
-                            />
-                        </div>
-                    </div>
-
-                    {/* Manual Mapping Section */}
-                    {!isLocked && (
-                        <div className="mt-6 pt-6 border-t border-gray-100 dark:border-white/5 animate-in fade-in slide-in-from-top-4 duration-500">
-                            <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-                                🛠️ Mapeamento de Campos (Avançado)
-                            </h3>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                {/* Group: Ganho */}
-                                <div className="space-y-3 p-3 bg-gray-50 dark:bg-white/5 rounded-lg border border-gray-100 dark:border-white/5">
-                                    <div className="space-y-1">
-                                        <label className="text-xs font-bold text-green-700 dark:text-green-400 uppercase">Fase GANHO (Nome)</label>
-                                        <input
-                                            type="text"
-                                            name="wonPhase"
-                                            value={config.wonPhase}
-                                            onChange={handleChange}
-                                            placeholder="Ex: Contato Assinado"
-                                            className="w-full p-2 text-sm border border-gray-300 dark:border-white/10 rounded-lg focus:ring-2 focus:ring-[#FD295E] outline-none text-black dark:text-white bg-white dark:bg-[#1a1a1a]"
-                                        />
-                                    </div>
-                                    <div className="space-y-1">
-                                        <label className="text-xs font-bold text-green-700 dark:text-green-400 uppercase">Fase GANHO (ID)</label>
-                                        <input
-                                            type="text"
-                                            name="wonPhaseId"
-                                            value={config.wonPhaseId || ''}
-                                            onChange={handleChange}
-                                            placeholder="Ex: 3045678"
-                                            className="w-full p-2 text-sm border border-gray-300 dark:border-white/10 rounded-lg focus:ring-2 focus:ring-[#FD295E] outline-none font-mono text-black dark:text-white bg-white dark:bg-[#1a1a1a]"
-                                        />
-                                    </div>
-                                </div>
-
-                                {/* Group: Perdido */}
-                                <div className="space-y-3 p-3 bg-gray-50 dark:bg-white/5 rounded-lg border border-gray-100 dark:border-white/5">
-                                    <div className="space-y-1">
-                                        <label className="text-xs font-bold text-red-700 dark:text-red-400 uppercase">Fase PERDIDO (Nome)</label>
-                                        <input
-                                            type="text"
-                                            name="lostPhase"
-                                            value={config.lostPhase}
-                                            onChange={handleChange}
-                                            placeholder="Ex: Perdido"
-                                            className="w-full p-2 text-sm border border-gray-300 dark:border-white/10 rounded-lg focus:ring-2 focus:ring-[#FD295E] outline-none text-black dark:text-white bg-white dark:bg-[#1a1a1a]"
-                                        />
-                                    </div>
-                                    <div className="space-y-1">
-                                        <label className="text-xs font-bold text-red-700 dark:text-red-400 uppercase">Fase PERDIDO (ID)</label>
-                                        <input
-                                            type="text"
-                                            name="lostPhaseId"
-                                            value={config.lostPhaseId || ''}
-                                            onChange={handleChange}
-                                            placeholder="Ex: 338889931"
-                                            className="w-full p-2 text-sm border border-gray-300 dark:border-white/10 rounded-lg focus:ring-2 focus:ring-[#FD295E] outline-none font-mono text-black dark:text-white bg-white dark:bg-[#1a1a1a]"
-                                        />
-                                    </div>
-                                </div>
-
-                                {/* Group: Qualificado - REMOVED per user request */}
-
-                                {/* Other Fields */}
-                                <div className="space-y-3 p-3 bg-gray-50 dark:bg-white/5 rounded-lg border border-gray-100 dark:border-white/5">
-                                    <div className="space-y-1">
-                                        <label className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Nome do Campo: Valor</label>
-                                        <input
-                                            type="text"
-                                            name="valueField"
-                                            value={config.valueField}
-                                            onChange={handleChange}
-                                            placeholder="Ex: Valor mensal..."
-                                            className="w-full p-2 text-sm border border-gray-300 dark:border-white/10 rounded-lg focus:ring-2 focus:ring-[#FD295E] outline-none text-black dark:text-white bg-white dark:bg-[#1a1a1a]"
-                                        />
-                                    </div>
-                                    <div className="space-y-1">
-                                        <label className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Nome do Campo: Motivo Perda</label>
-                                        <input
-                                            type="text"
-                                            name="lossReasonField"
-                                            value={config.lossReasonField}
-                                            onChange={handleChange}
-                                            placeholder="Ex: Motivo da perda"
-                                            className="w-full p-2 text-sm border border-gray-300 dark:border-white/10 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-black dark:text-white bg-white dark:bg-[#1a1a1a]"
-                                        />
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-                </div>
-
-                {/* Meta Ads */}
-                <div className="bg-white dark:bg-[#111] p-6 rounded-xl border border-gray-200 dark:border-white/5 shadow-sm relative overflow-hidden">
-                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-4 sm:gap-0">
-                        <h2 className="text-lg font-semibold text-gray-800 dark:text-white flex items-center gap-2">
-                            <div className="w-2 h-8 bg-blue-400 rounded-full"></div>
-                            Integração Meta Ads
-                        </h2>
-                        <button onClick={testMeta} className="text-sm text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 font-medium flex items-center gap-1">
-                            <Play className="w-4 h-4" /> Testar Conexão
-                        </button>
-                    </div>
-
-                    {/* FORCE SYNC BUTTON (New) */}
-                    <div className="mb-4 p-4 bg-gray-50 dark:bg-white/5 border border-dashed border-gray-200 dark:border-white/10 rounded-lg flex flex-col sm:flex-row items-center justify-between gap-4">
-                        <div className="text-sm text-gray-600 dark:text-gray-400">
-                            <strong className="text-gray-900 dark:text-white block mb-1">Sincronização Nuvem</strong>
-                            Se os dados não aparecem no celular, clique aqui para forçar o envio.
-                        </div>
-                        <button
-                            onClick={forceSync}
-                            className="whitespace-nowrap bg-gray-900 dark:bg-white text-white dark:text-black px-4 py-2 rounded-lg text-sm font-bold hover:bg-black dark:hover:bg-gray-200 flex items-center gap-2 transition-colors"
-                        >
-                            <Upload className="w-4 h-4" />
-                            Forçar Envio Agora
-                        </button>
-                    </div>
-
-                    {testStatus.type === 'sync' && (
-                        <div className={`mb-4 p-3 rounded-lg text-sm flex items-center gap-2 ${testStatus.error ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}>
-                            {testStatus.error ? <AlertCircle className="w-4 h-4" /> : <CheckCircle className="w-4 h-4" />}
-                            {testStatus.msg}
-                        </div>
-                    )}
-
-                    {isLocked && (
-                        <div className="absolute inset-x-0 bottom-0 top-16 bg-white/60 dark:bg-black/60 backdrop-blur-sm z-10 flex flex-col items-center justify-center text-center p-6 border-t border-gray-100 dark:border-white/5">
-                            <Lock className="w-10 h-10 text-gray-400 dark:text-gray-500 mb-2" />
-                            <h4 className="text-gray-800 dark:text-white font-bold">Área Protegida</h4>
-                            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4 max-w-xs">Para visualizar ou editar tokens sensíveis, é necessário desbloquear o acesso.</p>
-                            <button
-                                onClick={() => setShowPinModal(true)}
-                                className="bg-gray-900 dark:bg-white text-white dark:text-black px-6 py-2 rounded-lg font-medium hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors flex items-center gap-2 shadow-lg"
-                            >
-                                <Key className="w-4 h-4" /> Inserir PIN de Acesso
-                            </button>
-                        </div>
-                    )}
-
-                    {testStatus.type === 'meta' && (
-                        <div className={`mb-4 p-3 rounded-lg text-sm flex items-center gap-2 ${testStatus.error ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}>
-                            {testStatus.error ? <AlertCircle className="w-4 h-4" /> : <CheckCircle className="w-4 h-4" />}
-                            {testStatus.msg}
-                        </div>
-                    )}
-                    <div className="grid grid-cols-1 gap-4">
-                        <div className="space-y-2">
-                            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Ad Account ID</label>
-                            <input
-                                type="text"
-                                name="metaAdAccountId"
-                                value={config.metaAdAccountId}
-                                onChange={handleChange}
-                                placeholder="Ex: act_123456789"
-                                className="w-full p-2 border border-gray-300 dark:border-white/10 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-black dark:text-white bg-white dark:bg-[#1a1a1a]"
-                            />
-                        </div>
-                        <div className="space-y-2 relative">
-                            <div className="flex justify-between">
-                                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Access Token</label>
-                                {!isLocked && (
-                                    <button
-                                        type="button"
-                                        onClick={() => setShowToken(!showToken)}
-                                        className="text-xs text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
-                                    >
-                                        {showToken ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-                                        {showToken ? 'Ocultar' : 'Mostrar'}
-                                    </button>
-                                )}
-                            </div>
-                            <input
-                                type={showToken && !isLocked ? "text" : "password"}
-                                name="metaToken"
-                                value={config.metaToken}
-                                onChange={handleChange}
-                                disabled={isLocked}
-                                placeholder="EAAB..."
-                                className={`w-full p-2 border border-gray-300 dark:border-white/10 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-mono text-black dark:text-white ${isLocked ? 'bg-gray-50 dark:bg-white/5' : 'bg-white dark:bg-[#1a1a1a]'}`}
-                            />
-                        </div>
-                    </div>
-                </div>
-
-                {/* Save Button */}
-                <div className="flex justify-end">
                     <button
                         onClick={handleSave}
                         disabled={status === 'saving'}
-                        className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-xl font-semibold transition-colors disabled:opacity-50"
+                        className={`px-6 py-3 rounded-xl text-white font-bold flex items-center gap-2 shadow-lg shadow-[#FD295E]/30 transition-all transform hover:-translate-y-0.5 ${status === 'saving' ? 'bg-[#FD295E]/70 cursor-wait' : 'bg-[#FD295E] hover:bg-[#e11d48]'}`}
                     >
-                        {status === 'saving' ? 'Salvando...' : status === 'success' ? 'Salvo!' : 'Salvar Configurações'}
-                        {status === 'success' ? <CheckCircle className="w-5 h-5" /> : <Save className="w-5 h-5" />}
+                        {status === 'saving' ? <>Salvando... <Save className="w-4 h-4 animate-bounce" /></> : status === 'success' ? <>Salvo! <CheckCircle className="w-4 h-4" /></> : <>Salvar Alterações <Save className="w-4 h-4" /></>}
                     </button>
                 </div>
             </div>
+
+            {/* PIN Reset Panel */}
+            {isSettingNewPin && (
+                <div className="mb-10 p-1 bg-gradient-to-r from-yellow-400 to-orange-500 rounded-3xl shadow-xl animate-in slide-in-from-top-4">
+                    <div className="bg-white dark:bg-[#1a1a1a] p-8 rounded-[22px]">
+                        <div className="flex flex-col md:flex-row items-center gap-8">
+                            <div className="flex-1">
+                                <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2 flex items-center gap-2">
+                                    <Shield className="w-6 h-6 text-yellow-500" />
+                                    Redefinir PIN de Segurança
+                                </h3>
+                                <p className="text-gray-500 dark:text-gray-400">Este PIN é usado para proteger chaves de API e configurações sensíveis.</p>
+                            </div>
+                            <div className="flex items-center gap-4">
+                                <input
+                                    type="text"
+                                    maxLength={6}
+                                    value={newPin}
+                                    onChange={(e) => setNewPin(e.target.value.replace(/\D/g, ''))}
+                                    className="w-40 p-4 bg-gray-50 dark:bg-black/20 border-2 border-gray-100 dark:border-white/10 rounded-2xl outline-none focus:border-yellow-500 font-mono text-2xl text-center tracking-[0.5em] font-bold text-gray-900 dark:text-white transition-colors placeholder:tracking-normal placeholder:text-base placeholder:font-sans"
+                                    placeholder="000000"
+                                />
+                                <button
+                                    onClick={handleNewPinSave}
+                                    disabled={newPin.length < 4}
+                                    className="px-6 py-4 bg-yellow-500 hover:bg-yellow-600 text-white rounded-xl font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-yellow-500/30"
+                                >
+                                    Gravar Novo PIN
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+
+                {/* Left Column: Organization & Access */}
+                <div className="lg:col-span-4 space-y-8">
+
+                    {/* Company Data */}
+                    <GlassCard className="p-6">
+                        <SectionHeader icon={Building} title="Dados da Organização" />
+                        <div className="space-y-6">
+                            <div>
+                                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 block">Nome da Organização</label>
+                                <input
+                                    type="text"
+                                    name="name"
+                                    value={config.name}
+                                    onChange={handleChange}
+                                    className="w-full p-4 bg-gray-50 dark:bg-black/20 border border-gray-200 dark:border-white/5 rounded-xl outline-none focus:ring-2 focus:ring-[#FD295E] transition-all font-medium text-lg"
+                                    placeholder="Ex: Minha Empresa"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 block">Logo da Marca</label>
+                                <div className="group relative w-full h-40 rounded-2xl border-2 border-dashed border-gray-300 dark:border-white/10 hover:border-[#FD295E] transition-all bg-gray-50 dark:bg-black/20 overflow-hidden flex flex-col items-center justify-center cursor-pointer">
+                                    <input type="file" accept="image/*" onChange={handleFileChange} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" />
+
+                                    {config.logo ? (
+                                        <div className="relative w-full h-full p-4 flex items-center justify-center bg-white dark:bg-[#111]">
+                                            <img src={config.logo} alt="Logo" className="max-h-full object-contain" />
+                                            <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white font-medium backdrop-blur-sm">
+                                                Trocar Logo
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="text-center p-4">
+                                            <div className="w-10 h-10 bg-[#FD295E]/10 rounded-full flex items-center justify-center mx-auto mb-2 text-[#FD295E]">
+                                                <Upload className="w-5 h-5" />
+                                            </div>
+                                            <p className="text-sm font-medium text-gray-600 dark:text-gray-300">Clique para enviar</p>
+                                            <p className="text-xs text-gray-400 mt-1">PNG, JPG (Max 2MB)</p>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    </GlassCard>
+
+                    {/* Access Management */}
+                    <GlassCard className="p-6">
+                        <SectionHeader icon={Users} title="Gestão de Acesso" />
+
+                        {/* Add User */}
+                        <div className="flex gap-2 mb-6">
+                            <input
+                                type="email"
+                                value={newUserEmail}
+                                onChange={(e) => setNewUserEmail(e.target.value)}
+                                placeholder="E-mail do novo usuário..."
+                                className="flex-1 p-3 bg-gray-50 dark:bg-black/20 border border-gray-200 dark:border-white/5 rounded-xl outline-none focus:ring-2 focus:ring-[#FD295E] text-sm"
+                            />
+                            <button onClick={handleAddUser} className="bg-black dark:bg-white text-white dark:text-black p-3 rounded-xl hover:opacity-80 transition-opacity">
+                                <UserPlus className="w-5 h-5" />
+                            </button>
+                        </div>
+
+                        <div className="space-y-3">
+                            {companyUsers.map((user, idx) => (
+                                <div key={idx} className="group flex items-center justify-between p-3 rounded-xl border border-transparent hover:border-gray-100 dark:hover:border-white/5 hover:bg-gray-50 dark:hover:bg-white/5 transition-all">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-gray-200 to-gray-300 dark:from-gray-800 dark:to-gray-700 flex items-center justify-center text-xs font-bold text-gray-700 dark:text-gray-300 shadow-inner">
+                                            {user.email.substring(0, 2).toUpperCase()}
+                                        </div>
+                                        <div className="overflow-hidden">
+                                            <p className="text-sm font-semibold text-gray-900 dark:text-white truncate w-32 md:w-40">{user.email}</p>
+                                            <p className="text-[10px] uppercase font-bold text-gray-400">{user.role}</p>
+                                        </div>
+                                    </div>
+                                    <button onClick={() => handleRemoveClick(user.email)} className="text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all p-2">
+                                        <Trash2 className="w-4 h-4" />
+                                    </button>
+                                </div>
+                            ))}
+                            {companyUsers.length === 0 && (
+                                <p className="text-center text-sm text-gray-400 py-4 italic">Nenhum usuário adicional.</p>
+                            )}
+                        </div>
+                    </GlassCard>
+                </div>
+
+                {/* Right Column: Integrations */}
+                <div className="lg:col-span-8 space-y-8">
+
+                    {/* Pipefy Integration */}
+                    <GlassCard className="border-l-4 border-l-[#FD295E]">
+                        <div className="p-8">
+                            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4">
+                                <div className="flex items-center gap-4">
+                                    <div className="w-12 h-12 bg-[#0065FF]/10 text-[#0065FF] rounded-2xl flex items-center justify-center">
+                                        <svg viewBox="0 0 24 24" className="w-6 h-6 fill-current"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 15h-2v-6h2v6zm4 0h-2v-8h2v8z" /></svg>
+                                    </div>
+                                    <div>
+                                        <h2 className="text-xl font-bold text-gray-900 dark:text-white">Integração Pipefy</h2>
+                                        <p className="text-sm text-gray-500">Conecte seu fluxo de vendas para automação de métricas.</p>
+                                    </div>
+                                </div>
+                                <div className="flex gap-2">
+                                    <button onClick={loadPipeDetails} disabled={loadingPipeDetails} className="px-4 py-2 bg-gray-100 dark:bg-white/5 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-white/10 font-bold text-xs uppercase tracking-wide flex items-center gap-2">
+                                        {loadingPipeDetails ? <span className="animate-spin">⏳</span> : <Upload className="w-3 h-3" />} {pipeDetails.loaded ? 'Recarregar' : 'Carregar Pipe'}
+                                    </button>
+                                    <button onClick={testPipefy} className="px-4 py-2 bg-[#0065FF]/10 text-[#0065FF] rounded-lg hover:bg-[#0065FF]/20 font-bold text-xs uppercase tracking-wide flex items-center gap-2">
+                                        <Play className="w-3 h-3" /> Testar
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Test Status Feedback - RESTORED */}
+                            {testStatus && testStatus.type === 'pipefy' && (
+                                <div className={`mb-6 p-4 rounded-xl text-sm font-medium flex items-center gap-3 animate-in fade-in slide-in-from-top-2 ${testStatus.error ? 'bg-red-50 text-red-700 dark:bg-red-900/20' : 'bg-green-50 text-green-700 dark:bg-green-900/20'}`}>
+                                    {testStatus.error ? <AlertCircle className="w-5 h-5" /> : <CheckCircle className="w-5 h-5" />}
+                                    {testStatus.msg}
+                                </div>
+                            )}
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                                <div className="space-y-2">
+                                    <label className="text-xs font-bold text-gray-500 uppercase tracking-wider ml-1">Org ID</label>
+                                    <input type="text" name="pipefyOrgId" value={config.pipefyOrgId} onChange={handleChange} className="w-full p-3 bg-gray-50 dark:bg-black/20 border border-gray-200 dark:border-white/5 rounded-xl outline-none focus:ring-2 focus:ring-[#0065FF]" placeholder="Ex: 123456" />
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="text-xs font-bold text-gray-500 uppercase tracking-wider ml-1">Pipe ID</label>
+                                    <input type="text" name="pipefyPipeId" value={config.pipefyPipeId} onChange={handleChange} className="w-full p-3 bg-gray-50 dark:bg-black/20 border border-gray-200 dark:border-white/5 rounded-xl outline-none focus:ring-2 focus:ring-[#0065FF]" placeholder="Ex: 789012" />
+                                </div>
+                            </div>
+
+                            <div className="space-y-2 relative group">
+                                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider ml-1">Access Token</label>
+                                <div className="relative">
+                                    <input type={showToken ? "text" : "password"} name="pipefyToken" value={config.pipefyToken} onChange={handleChange} className="w-full p-3 bg-gray-50 dark:bg-black/20 border border-gray-200 dark:border-white/5 rounded-xl outline-none focus:ring-2 focus:ring-[#0065FF] font-mono text-xs pr-10" placeholder="Insira seu token de API" />
+                                    <button onClick={() => setShowToken(!showToken)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-white transition-colors">{showToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* ADVANCED MAPPING AREA */}
+                        <div className="relative border-t border-gray-100 dark:border-white/5 bg-gray-50/50 dark:bg-black/20 p-8">
+
+                            {!isLocked ? (
+                                <div className="space-y-8 animate-in mt-2 fade-in slide-in-from-top-2">
+                                    <div className="flex items-center gap-2 mb-4">
+                                        <div className="h-px bg-gray-200 dark:bg-white/10 flex-1"></div>
+                                        <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Mapeamento Avançado</span>
+                                        <div className="h-px bg-gray-200 dark:bg-white/10 flex-1"></div>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                        <div className="space-y-4">
+                                            {pipeDetails.loaded ? (
+                                                <PhaseMultiSelect label="Fase GANHO" type="won" selectedIds={(config.wonPhaseId || '').split(',')} phases={pipeDetails.phases} onSelect={(id) => handlePhaseSelect('won', id)} />
+                                            ) : (
+                                                <div className="opacity-50 pointer-events-none filter blur-[1px]">
+                                                    <label className="text-xs font-bold text-green-600 mb-1 block">Fase GANHO</label>
+                                                    <div className="p-3 border rounded-xl bg-white dark:bg-white/5 text-sm">Carregue o Pipe primeiro...</div>
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div className="space-y-4">
+                                            {pipeDetails.loaded ? (
+                                                <PhaseMultiSelect label="Fase PERDIDO" type="lost" selectedIds={(config.lostPhaseId || '').split(',')} phases={pipeDetails.phases} onSelect={(id) => handlePhaseSelect('lost', id)} />
+                                            ) : (
+                                                <div className="opacity-50 pointer-events-none filter blur-[1px]">
+                                                    <label className="text-xs font-bold text-red-600 mb-1 block">Fase PERDIDO</label>
+                                                    <div className="p-3 border rounded-xl bg-white dark:bg-white/5 text-sm">Carregue o Pipe primeiro...</div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-6 bg-white dark:bg-[#111] rounded-2xl border border-gray-100 dark:border-white/5 shadow-sm">
+                                        <div className="space-y-2">
+                                            <label className="text-xs font-bold text-gray-500 uppercase">Campo Valor</label>
+                                            {pipeDetails.loaded ?
+                                                <select name="valueField" value={config.valueField || ''} onChange={handleChange} className="w-full p-2.5 bg-gray-50 dark:bg-black/20 border border-transparent hover:border-gray-200 dark:hover:border-white/10 rounded-lg text-sm outline-none focus:ring-2 focus:ring-[#0065FF]">
+                                                    <option value="">✨ Automático (Inteligente)</option>
+                                                    {pipeDetails.fields.map(f => <option key={f.id} value={f.label}>{f.label}</option>)}
+                                                    <option value="__custom__">✏️ Manual</option>
+                                                </select>
+                                                : <input disabled type="text" className="w-full p-2.5 bg-gray-100 dark:bg-white/5 rounded-lg text-sm cursor-not-allowed" placeholder="Aguardando Pipe..." />
+                                            }
+                                        </div>
+                                        <div className="space-y-2">
+                                            <label className="text-xs font-bold text-gray-500 uppercase">Motivo Perda</label>
+                                            {pipeDetails.loaded ?
+                                                <select name="lossReasonField" value={config.lossReasonField || ''} onChange={handleChange} className="w-full p-2.5 bg-gray-50 dark:bg-black/20 border border-transparent hover:border-gray-200 dark:hover:border-white/10 rounded-lg text-sm outline-none focus:ring-2 focus:ring-[#0065FF]">
+                                                    <option value="">✨ Automático (Inteligente)</option>
+                                                    {pipeDetails.fields.map(f => <option key={f.id} value={f.label}>{f.label}</option>)}
+                                                    <option value="__custom__">✏️ Manual</option>
+                                                </select>
+                                                : <input disabled type="text" className="w-full p-2.5 bg-gray-100 dark:bg-white/5 rounded-lg text-sm cursor-not-allowed" placeholder="Aguardando Pipe..." />
+                                            }
+                                        </div>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="absolute inset-0 bg-white/60 dark:bg-black/60 backdrop-blur-md z-10 flex flex-col items-center justify-center text-center p-8 transition-all duration-500">
+                                    <div className="w-16 h-16 bg-white dark:bg-[#222] rounded-full shadow-2xl flex items-center justify-center mb-4 ring-4 ring-gray-50 dark:ring-white/5">
+                                        <Lock className="w-6 h-6 text-gray-400" />
+                                    </div>
+                                    <h3 className="text-xl font-bold text-gray-900 dark:text-white">Configurações Avançadas Protegidas</h3>
+                                    <p className="text-sm text-gray-500 mb-6 max-w-xs mx-auto">Para evitar quebras de sistema, o mapeamento de campos está bloqueado.</p>
+                                    <button onClick={() => setShowPinModal(true)} className="px-6 py-3 bg-[#FD295E] hover:bg-[#e11d48] text-white rounded-xl font-bold flex items-center gap-2 shadow-lg shadow-[#FD295E]/20 hover:scale-105 transition-all">
+                                        <Unlock className="w-4 h-4" /> Desbloquear
+                                    </button>
+                                </div>
+                            )}
+
+                            {/* Fake Background Content for Blur Effect */}
+                            {isLocked && (
+                                <div className="opacity-30 pointer-events-none filter blur-sm select-none" aria-hidden="true">
+                                    <div className="grid grid-cols-2 gap-8 mb-6">
+                                        <div className="h-20 bg-gray-200 dark:bg-white/5 rounded-xl"></div>
+                                        <div className="h-20 bg-gray-200 dark:bg-white/5 rounded-xl"></div>
+                                    </div>
+                                    <div className="h-32 bg-gray-200 dark:bg-white/5 rounded-xl"></div>
+                                </div>
+                            )}
+
+                        </div>
+                    </GlassCard>
+
+                    {/* Meta Ads Integration */}
+                    <GlassCard className="border-l-4 border-l-blue-500">
+                        <div className="p-8">
+                            <div className="flex justify-between items-center mb-8">
+                                <SectionHeader icon={() => <div className="w-5 h-5 bg-blue-500 rounded-full" />} title="Integração Meta Ads" color="text-blue-500 bg-blue-50" />
+                                <button onClick={testMeta} className="text-blue-500 text-xs font-bold uppercase tracking-wider flex items-center gap-1 hover:bg-blue-50 px-3 py-1 rounded-lg transition-colors"><Play className="w-3 h-3" /> Testar Conexão</button>
+                            </div>
+
+                            {/* Meta Test Result */}
+                            {testStatus && testStatus.type === 'meta' && (
+                                <div className={`mb-6 p-4 rounded-xl text-sm font-medium flex items-center gap-3 animate-in fade-in slide-in-from-top-2 ${testStatus.error ? 'bg-red-50 text-red-700 dark:bg-red-900/20' : 'bg-green-50 text-green-700 dark:bg-green-900/20'}`}>
+                                    {testStatus.error ? <AlertCircle className="w-5 h-5" /> : <CheckCircle className="w-5 h-5" />}
+                                    {testStatus.msg}
+                                </div>
+                            )}
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div className="space-y-2">
+                                    <label className="text-xs font-bold text-gray-500 uppercase tracking-wider ml-1">Ad Account ID</label>
+                                    <input type="text" name="metaAdAccountId" value={config.metaAdAccountId} onChange={handleChange} className="w-full p-3 bg-gray-50 dark:bg-black/20 border border-gray-200 dark:border-white/5 rounded-xl outline-none focus:ring-2 focus:ring-blue-500" />
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="text-xs font-bold text-gray-500 uppercase tracking-wider ml-1">Access Token</label>
+                                    <input type="password" name="metaToken" value={config.metaToken} onChange={handleChange} className="w-full p-3 bg-gray-50 dark:bg-black/20 border border-gray-200 dark:border-white/5 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm" />
+                                </div>
+                            </div>
+                        </div>
+                    </GlassCard>
+
+                </div>
+            </div>
+
+            {/* Modals remain mostly same but slightly cleaner */}
+            {/* Remove User Modal */}
+            {showRemoveModal && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-[100] flex items-center justify-center p-4 animate-in fade-in duration-300">
+                    <div className="bg-white dark:bg-[#1a1a1a] rounded-3xl shadow-2xl p-8 max-w-sm w-full animate-in zoom-in-95 duration-200 border border-white/20">
+                        <div className="text-center mb-8">
+                            <div className="w-20 h-20 bg-red-100 dark:bg-red-900/20 rounded-full flex items-center justify-center mx-auto mb-6">
+                                <Trash2 className="w-10 h-10 text-red-600" />
+                            </div>
+                            <h3 className="text-2xl font-bold text-gray-900 dark:text-white">Remover Acesso?</h3>
+                            <p className="text-gray-500 dark:text-gray-400 mt-2 leading-relaxed">
+                                O usuário <span className="font-bold text-gray-900 dark:text-white">{userToRemove}</span> perderá acesso imediato.
+                            </p>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                            <button onClick={() => { setShowRemoveModal(false); setUserToRemove(null); }} className="py-4 text-gray-600 dark:text-gray-300 font-bold hover:bg-gray-50 dark:hover:bg-white/5 rounded-2xl transition-colors">Cancelar</button>
+                            <button onClick={confirmRemoveUser} className="py-4 bg-red-600 text-white font-bold rounded-2xl hover:bg-red-700 shadow-lg shadow-red-600/30 transition-all hover:scale-105 active:scale-95">Sim, Remover</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Security PIN Modal */}
+            {showPinModal && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-[100] flex items-center justify-center p-4 animate-in fade-in duration-300">
+                    <div className="bg-white dark:bg-[#1a1a1a] rounded-3xl shadow-2xl p-10 max-w-sm w-full animate-in zoom-in-95 duration-200 border border-white/20">
+                        <div className="text-center mb-8">
+                            <div className="w-16 h-16 bg-[#FD295E]/10 rounded-2xl flex items-center justify-center mx-auto mb-4 rotate-3">
+                                <Lock className="w-8 h-8 text-[#FD295E]" />
+                            </div>
+                            <h3 className="text-2xl font-bold text-gray-900 dark:text-white">Acesso Restrito</h3>
+                            <p className="text-gray-500 text-sm mt-2">Área protegida para administradores.</p>
+                        </div>
+                        <div className="space-y-6">
+                            <input autoFocus type="password" value={pinInput} onChange={(e) => setPinInput(e.target.value)} placeholder="• • • • • •" className="w-full text-center text-4xl tracking-widest font-bold p-4 bg-transparent border-b-2 border-gray-200 dark:border-white/10 outline-none focus:border-[#FD295E] text-gray-900 dark:text-white placeholder:text-gray-300 dark:placeholder:text-gray-700 transition-colors" onKeyDown={(e) => e.key === 'Enter' && handlePinSubmit()} maxLength={6} />
+                            {pinError && <p className="text-red-500 text-sm text-center font-bold bg-red-50 dark:bg-red-900/20 p-2 rounded-lg">{pinError}</p>}
+                            <div className="grid grid-cols-2 gap-4">
+                                <button onClick={() => { setShowPinModal(false); setPinError(''); setPinInput(''); }} className="py-3 text-gray-500 font-bold hover:bg-gray-50 dark:hover:bg-white/5 rounded-xl transition-colors">Voltar</button>
+                                <button onClick={handlePinSubmit} className="py-3 bg-[#FD295E] text-white font-bold rounded-xl hover:bg-[#e11d48] shadow-lg shadow-[#FD295E]/30 transition-all hover:scale-105">Desbloquear</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
         </div>
     );
 }

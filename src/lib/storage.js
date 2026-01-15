@@ -166,132 +166,107 @@ export async function saveCompanyConfig(companyConfig) {
     try {
         console.log("Saving Company via API:", companyConfig);
 
-        const method = companyConfig.id && companyConfig.id.toString().length < 13 ? 'PUT' : 'POST'; // Heuristic: Time-based IDs (Date.now()) are long, existing DB IDs might be short? Actually Supabase IDs are BigInt.
-        // Better logic: If we are 'editing', we likely have an ID that exists in DB. 
-        // If it's a new company generated with Date.now() on frontend, we should probably POST (Create).
-
-        // HOWEVER, the backend 'POST' creates a NEW ID. The frontend generates `id: Date.now()` for temp display.
-        // We should send the data to POST, and let backend return the real ID.
-
         let url = '/api/companies';
         let fetchMethod = 'POST';
-
-        // Check if it's an update (we assume if it has an ID and we are in edit mode)
-        // This is tricky because `handleNewCompany` sets ID to Date.now().
-        // We need to know if it's an existing DB company.
-
-        // Strategy: Try PUT if it looks like a valid DB update, else POST?
-        // Or simplified: Just use the API. 
-        // NOTE: The current `saveCompanyConfig` logic was "Upsert".
-        // The backend `POST` creates new. `PUT` updates.
-
-        // Let's assume for now we always POST if it's new, PUT if existing.
-        // But the frontend `id` for new companies is `Date.now()`.
-        // We should probably strip the ID for POST.
-
-        // Actually, looking at `CompanySelection.jsx`, `editingCompany` determines if it's edit.
-        // But `saveCompanyConfig` only takes `companyConfig`.
-
-        // Let's look at `companyConfig.id`.
-        // If it was fetched from DB, it has a DB ID.
-        // If it was created locally, it has `Date.now()`.
-
-        // Let's rely on the fact that existing companies from DB usually don't look like timestamps (though they could).
-        // A better way: The Payload to this function doesn't explicit "isNew".
-        // We can try to UPSERT via API if we add an endpoint, OR
-        // we can just check if we can fetch it first? No that's slow.
-
-        // Let's assume if it is being saved, we should try to match ID.
-
-        // Updated logic: Pass the `id` to the backend.
-        // If existing, backend updates.
-        // But backend POST creates ID automatically.
-
-        // Let's change `saveCompanyConfig` to use logic:
-        // If `companyConfig.createdAt` exists? No.
-
-        // Let's assume Upsert Logic in Backend?
-        // No, I implemented strict POST and PUT.
-
-        const isNew = companyConfig.id && companyConfig.id.toString().length >= 13; // Date.now() is 13 digits. DB IDs (serial) are usually smaller. UUIDs are strings.
-        // This is flaky.
-
-        // Alternative: The modified `CompanySelection` can pass a flag? 
-        // No, I can't easily change call sites without reading them all.
-
-        // Let's use the implementation:
-        // payload needs: name, pipefy details, meta details.
-
-        const payload = {
-            name: companyConfig.name,
-            // Flattened Integ Details
-            pipefyOrgId: companyConfig.pipefyOrgId,
-            pipefyPipeId: companyConfig.pipefyPipeId,
-            pipefyToken: companyConfig.pipefyToken,
-            metaAdAccountId: companyConfig.metaAdAccountId,
-            metaAccessToken: companyConfig.metaToken // Map 'metaToken' to 'metaAccessToken' expected by some endpoints? 
-            // Wait, backend `companies.js` POST only takes `name`.
-            // I only implemented `insert([{ name }])`.
-            // I missed the integrations part in the backend POST!
-
-            // I need to update Backend companies.js to handle integrations too, OR
-            // Call Reference: companies.js POST only inserts Name.
-            // integrations.js routes exist for adding integrations.
-        };
-
-        // Oh, I see. I need to update backend companies.js to handle the full creation flow to be robust,
-        // OR do multiple calls here.
-
-        // Re-reading my backend implementation of POST /api/companies:
-        // It ONLY inserts `name`.
-
-        // So here I must:
-        // 1. Create/Update Company
-        // 2. Create/Update Integrations
-
         let companyId = companyConfig.id;
 
-        // Heuristic for "Is this a new company or update?"
-        // If we are saving, and it's from the UI "Edit", we want to PUT.
-        // If "New", we want POST.
-        // The ID `Date.now()` is definitely new.
+        // Heuristic: 
+        // 1. If ID is a Number (1, 2, or Timestamp) -> It is LOCAL (Seed or Temp). We must POST (Create).
+        // 2. If ID is a String (UUID) -> It is from DB. We must PUT (Update).
 
-        if (typeof companyId === 'number' && companyId > 1600000000000) { // It's a timestamp
-            fetchMethod = 'POST';
-            url = '/api/companies';
-            // Remove ID validation in POST
-        } else {
+        const isStringId = typeof companyId === 'string' && companyConfig.id.length > 20; // UUID is 36 chars
+        const isDbId = isStringId;
+
+        if (isDbId) {
             fetchMethod = 'PUT';
             url = `/api/companies/${companyId}`;
         }
 
-        const companyResponse = await fetch(url, {
-            method: fetchMethod,
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: companyConfig.name })
-        });
+        let companyResponse;
 
-        if (!companyResponse.ok) throw new Error('Failed to save company');
+        try {
+            companyResponse = await fetch(url, {
+                method: fetchMethod,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: companyConfig.name })
+            });
+
+            if (!companyResponse.ok) {
+                const errText = await companyResponse.text(); // Get server error
+
+                // ROBUSTNESS: If Duplicate Key Error (Unique Constraint on Name),
+                // it means the company EXISTS but we tried to POST (or PUT to wrong ID).
+                // We should FIND the ID by Name and retry as PUT.
+                if (companyResponse.status === 500 && errText.toLowerCase().includes('duplicate')) {
+                    console.warn("Duplicate Name detected (500). Retrying as UPDATE (Upsert logic)... Error:", errText);
+
+                    // 1. Fetch all companies to find the ID
+                    const allRes = await fetch('/api/companies');
+                    if (allRes.ok) {
+                        const all = await allRes.json();
+                        const existing = all.find(c => c.name.toLowerCase().trim() === companyConfig.name.toLowerCase().trim());
+
+                        if (existing) {
+                            console.log(`Found existing company "${existing.name}" with ID ${existing.id}. Switching to PUT.`);
+                            fetchMethod = 'PUT';
+                            url = `/api/companies/${existing.id}`;
+                            companyId = existing.id; // Update local var for integrations
+
+                            companyResponse = await fetch(url, {
+                                method: 'PUT',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ name: companyConfig.name })
+                            });
+                        } else {
+                            // Name matches nothing? Then why duplicate? Race condition or soft-deleted?
+                            // Throw original error.
+                            throw new Error(`Failed to save company (Duplicate): ${errText}`);
+                        }
+                    }
+                } else {
+                    throw new Error(`Failed to save company: ${companyResponse.status} ${errText}`);
+                }
+            }
+        } catch (innerErr) {
+            throw innerErr;
+        }
+
+        if (!companyResponse.ok) {
+            const errText = await companyResponse.text().catch(() => '');
+            throw new Error(`Failed to save company: ${companyResponse.status} ${errText}`);
+        }
+
         const company = await companyResponse.json();
         const realId = company.id;
 
         // Now Save Integrations
         // Pipefy
         if (companyConfig.pipefyPipeId || companyConfig.pipefyToken) {
-            await fetch(`/api/integrations/${realId}/pipefy`, {
+            const pipeRes = await fetch(`/api/integrations/${realId}/pipefy`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     pipefyOrgId: companyConfig.pipefyOrgId,
                     pipefyPipeId: companyConfig.pipefyPipeId,
-                    pipefyToken: companyConfig.pipefyToken
+                    pipefyToken: companyConfig.pipefyToken,
+                    settings: {
+                        wonPhase: companyConfig.wonPhase,
+                        wonPhaseId: companyConfig.wonPhaseId,
+                        lostPhase: companyConfig.lostPhase,
+                        lostPhaseId: companyConfig.lostPhaseId,
+                        qualifiedPhase: companyConfig.qualifiedPhase,
+                        qualifiedPhaseId: companyConfig.qualifiedPhaseId,
+                        valueField: companyConfig.valueField,
+                        lossReasonField: companyConfig.lossReasonField
+                    }
                 })
             });
+            if (!pipeRes.ok) console.warn("Pipefy Integration Save Warning:", await pipeRes.text());
         }
 
         // Meta Ads (Manual Token)
         if (companyConfig.metaAdAccountId || companyConfig.metaToken) {
-            await fetch(`/api/integrations/${realId}/meta`, {
+            const metaRes = await fetch(`/api/integrations/${realId}/meta`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -299,7 +274,11 @@ export async function saveCompanyConfig(companyConfig) {
                     metaToken: companyConfig.metaToken
                 })
             });
+            if (!metaRes.ok) console.warn("Meta Integration Save Warning:", await metaRes.text());
         }
+
+        // Return the REAL company ID and data so the UI can update
+        return { ...companyConfig, id: realId };
 
     } catch (e) {
         console.error("Error saving company config via API:", e);

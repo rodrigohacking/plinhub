@@ -39,7 +39,7 @@ export function DashboardSales({ company, data }) {
         window.history.pushState({}, '', url);
     };
     const [currentPage, setCurrentPage] = useState(1);
-    const [itemsPerPage, setItemsPerPage] = useState(10);
+    const [itemsPerPage, setItemsPerPage] = useState(5);
     const [sortOption, setSortOption] = useState('date-desc'); // date-desc, date-asc, value-desc, value-asc
     const [filterChannel, setFilterChannel] = useState('all');
     const [filterInsuranceType, setFilterInsuranceType] = useState('all');
@@ -83,9 +83,13 @@ export function DashboardSales({ company, data }) {
         const qualifiedCount = leadsCreatedCount - lostCount;
 
         // 4. Vendas Fechadas
-        // Definition: Phase "Fechamento - Ganho" (ID 338889923) or "Apólice Fechada" (ID 338889934)
-        // CHANGED: Use `relevantDeals` (Activity View) to match user request: "All deals that reached Won status in this period", regardless of creation date.
-        const wonDeals = relevantDeals.filter(d => ['338889923', '338889934'].includes(String(d.phaseId)) || d.status === 'won');
+        // Definition: Phase "Fechamento - Ganho" (ID 338889923) or "Apólice Fechada" (ID 338889934) or "Enviado ao Cliente" (User Request)
+        // CHANGED: Added 'Enviado ao Cliente' check via phaseName (normalized)
+        const wonDeals = relevantDeals.filter(d => {
+            const phaseMatches = ['338889923', '338889934'].includes(String(d.phaseId));
+            const nameMatches = d.phaseName === 'Enviado ao Cliente' || d.phaseName === 'Enviado ao cliente';
+            return phaseMatches || nameMatches || d.status === 'won';
+        });
         const wonCount = wonDeals.length;
 
         // Goals Logic
@@ -99,7 +103,8 @@ export function DashboardSales({ company, data }) {
             count: data.goals?.length,
             currentMonth,
             companyId: company.id,
-            found: goalData
+            found: goalData,
+            allGoals: data.goals // Debug all goals
         });
 
         const goals = {
@@ -141,6 +146,41 @@ export function DashboardSales({ company, data }) {
         };
     }, [createdDeals, relevantDeals, data.goals, company.id]);
 
+    // ANDAR SPECIFIC: Insurance Stats (Global)
+    const insuranceStats = useMemo(() => {
+        const stats = {};
+
+        // 1. Count Created (Total Opportunities)
+        createdDeals.forEach(d => {
+            const type = d.insuranceType || 'Não Identificado';
+            if (!stats[type]) stats[type] = { name: type, total: 0, won: 0, open: 0 };
+            stats[type].total++;
+        });
+
+        // 2. Count Won (From metrics.wonDeals logic - which is reliable per user request)
+        metrics.wonDeals.forEach(d => {
+            const type = d.insuranceType || 'Não Identificado';
+            if (!stats[type]) stats[type] = { name: type, total: 0, won: 0, open: 0 }; // Should exist from step 1 usually, but metrics.wonDeals might have older created deals?
+            // Note: If a deal was won this month but created 6 months ago, it counts as WON result, but might not be in 'createdDeals' (cohort) depending on filter.
+            // If we want STRICT "Cohort Conversion" (Won from Created in this period), we must filter `metrics.wonDeals` by creation date overlap.
+            // If we want "Activity Conversion" (Won this month / Created this month), it's a proxy.
+
+            // User Ex: "Seguro condominial: 10% conversão" usually implies Cohort or Proxy.
+            // Let's increment 'won' blindly here implies "Activity Proxy".
+            stats[type].won++;
+            stats[type].wonValue = (stats[type].wonValue || 0) + d.amount; // Accumulate Value
+        });
+
+        return Object.values(stats)
+            .map(s => ({
+                ...s,
+                conversion: s.total ? (s.won / s.total) * 100 : 0,
+                avgTicket: s.won ? s.wonValue / s.won : 0 // Calculate Avg Ticket
+            }))
+            .sort((a, b) => b.won - a.won); // Sort by Won Volume
+    }, [createdDeals, metrics.wonDeals]);
+
+
     // SDR Agreggations
     const sdrStats = useMemo(() => {
         const map = {};
@@ -153,7 +193,11 @@ export function DashboardSales({ company, data }) {
                 won: 0,         // Deals Won (Won in period)
                 wonValue: 0,    // Revenue (Won in period)
                 daysSum: 0,
-                lostReasons: {}
+                won: 0,         // Deals Won (Won in period)
+                wonValue: 0,    // Revenue (Won in period)
+                daysSum: 0,
+                lostReasons: {},
+                insuranceBreakdown: {} // New: Per SDR Product Stats
             };
         };
 
@@ -161,16 +205,29 @@ export function DashboardSales({ company, data }) {
         createdDeals.forEach(d => {
             initSeller(d.seller);
             map[d.seller].total++;
+
+            // Insurance Breakdown (Created)
+            const type = d.insuranceType || 'Outros';
+            if (!map[d.seller].insuranceBreakdown[type]) map[d.seller].insuranceBreakdown[type] = { total: 0, won: 0 };
+            map[d.seller].insuranceBreakdown[type].total++;
         });
 
         // 3. Pass: Count Sales/Revenue (from relevantDeals - filtering for WON)
         // We use relevantDeals because it matches the timeframe for "Activity/Result"
         relevantDeals.forEach(d => {
-            if (d.status === 'won' || ['338889923', '338889934'].includes(String(d.phaseId))) {
+            const phaseMatches = ['338889923', '338889934'].includes(String(d.phaseId));
+            const nameMatches = d.phaseName === 'Enviado ao Cliente' || d.phaseName === 'Enviado ao cliente';
+
+            if (d.status === 'won' || phaseMatches || nameMatches) {
                 initSeller(d.seller);
                 map[d.seller].won++;
                 map[d.seller].wonValue += d.amount;
                 map[d.seller].daysSum += (d.daysToClose || 0);
+
+                // Insurance Breakdown (Won)
+                const type = d.insuranceType || 'Outros';
+                if (!map[d.seller].insuranceBreakdown[type]) map[d.seller].insuranceBreakdown[type] = { total: 0, won: 0 };
+                map[d.seller].insuranceBreakdown[type].won++;
             }
             // Optional: Track Lost Reasons from relevantDeals too (Deals lost IN this period)
             if (d.status === 'lost') {
@@ -180,11 +237,13 @@ export function DashboardSales({ company, data }) {
             }
         });
 
-        return Object.values(map).map(s => ({
-            ...s,
-            conversion: s.total ? (s.won / s.total) * 100 : 0, // Sales / Leads
-            avgTime: s.won ? s.daysSum / s.won : 0
-        })).sort((a, b) => b.wonValue - a.wonValue);
+        return Object.values(map)
+            .filter(s => s.name !== 'Rodrigo Lopes') // Exclude specific non-seller users
+            .map(s => ({
+                ...s,
+                conversion: s.total ? (s.won / s.total) * 100 : 0, // Sales / Leads
+                avgTime: s.won ? s.daysSum / s.won : 0
+            })).sort((a, b) => b.wonValue - a.wonValue);
 
     }, [createdDeals, relevantDeals]);
 
@@ -296,7 +355,7 @@ export function DashboardSales({ company, data }) {
                         <div className="h-full bg-red-500" style={{ width: `${Math.min(metrics.churnRate, 100)}%` }}></div>
                     </div>
                     <p className="text-xs text-gray-400 mt-3 font-bold uppercase">
-                        {metrics.churnRate.toFixed(0)}% Churn de Oportunidades
+                        {metrics.churnRate.toFixed(0)}% Perdidos
                     </p>
                 </div>
             </div>
@@ -312,7 +371,7 @@ export function DashboardSales({ company, data }) {
                             <CircleDollarSign className="w-8 h-8" />
                         </div>
                         <div>
-                            <p className="text-gray-500 dark:text-gray-400 text-sm font-bold uppercase tracking-wide">Faturamento Total</p>
+                            <p className="text-gray-500 dark:text-gray-400 text-sm font-bold uppercase tracking-wide">Apólices Fechadas</p>
                             <h3 className="text-xl md:text-2xl lg:text-4xl font-black text-gray-900 dark:text-white mt-1 break-all">{formatCurrency(metrics.wonValue)}</h3>
                         </div>
                     </div>
@@ -415,46 +474,86 @@ export function DashboardSales({ company, data }) {
                 </div>
             </div>
 
-            {/* ANDAR SPECIFIC: Insurance Type Breakdown */}
             {(String(company.pipefyPipeId) === '306438109' || (company.name || '').toLowerCase().includes('andar')) && (
-                <div className="bg-white dark:bg-[#111] p-6 rounded-3xl border border-gray-100 dark:border-white/5 shadow-xl h-[400px] mt-6">
-                    <div className="mb-6">
-                        <h3 className="text-xl font-bold text-gray-900 dark:text-white">Vendas por Tipo de Seguro</h3>
-                        <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">Distribuição por produto</p>
-                    </div>
-                    <ResponsiveContainer width="100%" height={260}>
-                        <PieChart>
-                            <Pie
-                                data={(() => {
-                                    const counts = {};
-                                    // Use 'wonDeals' to show breakdown of actual sales
-                                    metrics.wonDeals.forEach(d => {
-                                        const type = d.insuranceType || 'Não Identificado';
-                                        counts[type] = (counts[type] || 0) + 1;
-                                    });
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
+                    {/* Existing Pie Chart */}
+                    <div className="bg-white dark:bg-[#111] p-6 rounded-3xl border border-gray-100 dark:border-white/5 shadow-xl h-[400px]">
+                        <div className="mb-6">
+                            <h3 className="text-xl font-bold text-gray-900 dark:text-white">Vendas por Tipo de Seguro</h3>
+                            <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">Distribuição de volume</p>
+                        </div>
+                        <ResponsiveContainer width="100%" height={260}>
+                            <PieChart>
+                                <Pie
+                                    data={(() => {
+                                        const counts = {};
+                                        // Use 'wonDeals' to show breakdown of actual sales
+                                        metrics.wonDeals.forEach(d => {
+                                            const type = d.insuranceType || 'Não Identificado';
+                                            counts[type] = (counts[type] || 0) + 1;
+                                        });
 
-                                    return Object.keys(counts).map(k => ({ name: k, value: counts[k] })).sort((a, b) => b.value - a.value);
-                                })()}
-                                cx="50%"
-                                cy="50%"
-                                innerRadius={60}
-                                outerRadius={90}
-                                paddingAngle={5}
-                                dataKey="value"
-                            >
-                                {[...Array(10)].map((_, index) => (
-                                    <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
-                                ))}
-                            </Pie>
-                            <Tooltip />
-                            <Legend
-                                verticalAlign={isMobile ? 'bottom' : 'middle'}
-                                align={isMobile ? 'center' : 'right'}
-                                layout={isMobile ? 'horizontal' : 'vertical'}
-                                wrapperStyle={{ fontSize: '12px', paddingTop: isMobile ? '20px' : '0' }}
-                            />
-                        </PieChart>
-                    </ResponsiveContainer>
+                                        return Object.keys(counts).map(k => ({ name: k, value: counts[k] })).sort((a, b) => b.value - a.value);
+                                    })()}
+                                    cx="50%"
+                                    cy="50%"
+                                    innerRadius={60}
+                                    outerRadius={90}
+                                    paddingAngle={5}
+                                    dataKey="value"
+                                >
+                                    {[...Array(10)].map((_, index) => (
+                                        <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                                    ))}
+                                </Pie>
+                                <Tooltip />
+                                <Legend
+                                    verticalAlign={isMobile ? 'bottom' : 'middle'}
+                                    align={isMobile ? 'center' : 'right'}
+                                    layout={isMobile ? 'horizontal' : 'vertical'}
+                                    wrapperStyle={{ fontSize: '12px', paddingTop: isMobile ? '20px' : '0' }}
+                                />
+                            </PieChart>
+                        </ResponsiveContainer>
+                    </div>
+
+                    {/* NEW: Conversion by Type Table */}
+                    <div className="bg-white dark:bg-[#111] p-6 rounded-3xl border border-gray-100 dark:border-white/5 shadow-xl h-[400px] overflow-hidden flex flex-col">
+                        <div className="mb-6">
+                            <h3 className="text-xl font-bold text-gray-900 dark:text-white">Conversão por Seguro</h3>
+                            <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">Eficiência por produto (Vendas / Leads)</p>
+                        </div>
+                        <div className="overflow-y-auto flex-1 pr-2">
+                            <table className="w-full text-sm text-left">
+                                <thead className="text-xs text-gray-400 uppercase border-b border-gray-100 dark:border-white/5 bg-gray-50/50 dark:bg-white/5">
+                                    <tr>
+                                        <th className="px-3 py-3">Produto</th>
+                                        <th className="px-3 py-3 text-right">Leads</th>
+                                        <th className="px-3 py-3 text-right">Vendas</th>
+                                        <th className="px-3 py-3 text-right">Ticket Médio</th>
+                                        <th className="px-3 py-3 text-right">Conv.</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100 dark:divide-white/5">
+                                    {insuranceStats.map((stat, i) => (
+                                        <tr key={i} className="hover:bg-gray-50 dark:hover:bg-white/5">
+                                            <td className="px-3 py-3 font-medium text-gray-900 dark:text-white text-xs">{stat.name}</td>
+                                            <td className="px-3 py-3 text-right text-gray-500">{stat.total}</td>
+                                            <td className="px-3 py-3 text-right text-green-600 font-bold">{stat.won}</td>
+                                            <td className="px-3 py-3 text-right text-gray-700 dark:text-gray-300 font-medium">{formatCurrency(stat.avgTicket)}</td>
+                                            <td className="px-3 py-3 text-right">
+                                                <span className={`px-2 py-1 rounded-full text-xs font-bold ${stat.conversion >= 10 ? 'bg-green-100 text-green-700' :
+                                                    stat.conversion >= 5 ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-600'
+                                                    }`}>
+                                                    {stat.conversion.toFixed(1)}%
+                                                </span>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
                 </div>
             )}
 
@@ -718,7 +817,8 @@ export function DashboardSales({ company, data }) {
                         const count = sdrStats.length || 1;
                         const revenueGoal = metrics.goals.revenue || 60000;
                         const individualGoal = metrics.goals.sdrGoals?.[sdr.name]?.revenue || (revenueGoal / count);
-                        const percent = Math.min((sdr.wonValue / (individualGoal || 1)) * 100, 100);
+                        const percent = (sdr.wonValue / (individualGoal || 1)) * 100;
+                        const visualPercent = Math.min(percent, 100);
 
                         let rankColor = "bg-gray-100 dark:bg-white/10 text-gray-600 dark:text-gray-400";
                         let rankBorder = "border-transparent";
@@ -758,9 +858,39 @@ export function DashboardSales({ company, data }) {
                                     <div className="w-full bg-gray-100 dark:bg-white/10 h-2.5 rounded-full overflow-hidden">
                                         <div
                                             className={`h-full rounded-full ${barColor} shadow-lg`}
-                                            style={{ width: `${percent}%` }}
+                                            style={{ width: `${visualPercent}%` }}
                                         ></div>
                                     </div>
+
+                                    {/* ANDAR SPECIFIC: Product Conversion Breakdown */}
+                                    {(String(company.pipefyPipeId) === '306438109' || (company.name || '').toLowerCase().includes('andar')) && (
+                                        <div className="mt-4 pt-3 border-t border-gray-100 dark:border-white/5">
+                                            <p className="text-xs font-bold text-gray-500 uppercase mb-2">Conversão por Produto</p>
+                                            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                                                {Object.entries(sdr.insuranceBreakdown || {})
+                                                    .map(([type, stats]) => ({
+                                                        type,
+                                                        ...stats,
+                                                        // Fix: If total is 0 but we have sales (backlog), assume 100% for display (or relative to won)
+                                                        conv: (stats.total || stats.won) ? (stats.won / (stats.total || stats.won)) * 100 : 0
+                                                    }))
+                                                    .filter(i => i.total > 0 || i.won > 0) // Show if created OR sold
+                                                    .sort((a, b) => b.won - a.won)
+                                                    .slice(0, 4) // Show top 4
+                                                    .map((item, i) => (
+                                                        <div key={i} className="bg-gray-50 dark:bg-white/5 rounded-lg p-2 text-xs">
+                                                            <div className="font-semibold text-gray-700 dark:text-gray-300 truncate mb-1">{item.type}</div>
+                                                            <div className="flex justify-between items-end">
+                                                                {/* <span className="text-gray-400">{item.won}/{item.total}</span> */}
+                                                                <span className={`font-bold ${item.conv > 10 ? 'text-green-600' : 'text-blue-500'}`}>
+                                                                    {item.conv.toFixed(0)}%
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         );
@@ -1111,7 +1241,7 @@ export function DashboardSales({ company, data }) {
                                             </RadialBarChart>
                                         </ResponsiveContainer>
                                         <div className="absolute inset-0 flex items-center justify-center flex-col pt-4">
-                                            <span className="text-3xl font-black text-[#FD295E]">{Math.min(((metrics.wonValue / metrics.goals.revenue) * 100), 100).toFixed(0)}%</span>
+                                            <span className="text-3xl font-black text-[#FD295E]">{((metrics.wonValue / metrics.goals.revenue) * 100).toFixed(0)}%</span>
                                         </div>
                                     </div>
                                     <div className="flex-1 space-y-4">
@@ -1159,7 +1289,7 @@ export function DashboardSales({ company, data }) {
                                             </RadialBarChart>
                                         </ResponsiveContainer>
                                         <div className="absolute inset-0 flex items-center justify-center flex-col pt-4">
-                                            <span className="text-3xl font-black text-emerald-600">{Math.min(((metrics.wonCount / metrics.goals.deals) * 100), 100).toFixed(0)}%</span>
+                                            <span className="text-3xl font-black text-emerald-600">{((metrics.wonCount / metrics.goals.deals) * 100).toFixed(0)}%</span>
                                         </div>
                                     </div>
                                     <div className="flex-1 space-y-4">
@@ -1207,7 +1337,7 @@ export function DashboardSales({ company, data }) {
                                             </RadialBarChart>
                                         </ResponsiveContainer>
                                         <div className="absolute inset-0 flex items-center justify-center flex-col pt-4">
-                                            <span className="text-3xl font-black text-purple-600">{Math.min(((metrics.leadsCreatedCount / metrics.goals.leads) * 100), 100).toFixed(0)}%</span>
+                                            <span className="text-3xl font-black text-purple-600">{((metrics.leadsCreatedCount / metrics.goals.leads) * 100).toFixed(0)}%</span>
                                         </div>
                                     </div>
                                     <div className="flex-1 space-y-4">
@@ -1238,7 +1368,8 @@ export function DashboardSales({ company, data }) {
                                     const revenueGoal = metrics.goals.revenue || 60000;
                                     const individualGoal = metrics.goals.sdrGoals?.[sdr.name]?.revenue || (revenueGoal / count);
 
-                                    const percent = Math.min((sdr.wonValue / (individualGoal || 1)) * 100, 100);
+                                    const percent = (sdr.wonValue / (individualGoal || 1)) * 100;
+                                    const visualPercent = Math.min(percent, 100);
 
                                     return (
                                         <div key={idx} className="group">
@@ -1260,7 +1391,7 @@ export function DashboardSales({ company, data }) {
                                             <div className="h-3 w-full bg-gray-100 dark:bg-white/5 rounded-full overflow-hidden">
                                                 <div
                                                     className="h-full bg-[#FD295E] rounded-full shadow-[0_0_10px_rgba(253,41,94,0.4)] transition-all duration-1000 group-hover:bg-[#e11d48]"
-                                                    style={{ width: `${percent}%` }}
+                                                    style={{ width: `${visualPercent}%` }}
                                                 ></div>
                                             </div>
                                         </div>

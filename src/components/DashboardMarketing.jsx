@@ -21,7 +21,7 @@ export function DashboardMarketing({ company, data }) {
         let invest = 0, leads = 0, clicks = 0, imps = 0, reach = 0;
         const channelMap = {}; // Channel Performance Map
 
-        const companyCampaigns = data.campaigns.filter(c => c.companyId === company.id);
+        const companyCampaigns = data.campaigns.filter(c => String(c.companyId) === String(company.id));
 
         // Filter: REVERTED Objective Filter (User wants to see Total Spend even for non-lead campaigns)
         // Discrepancy (422 vs 258) was due to excluding 'OUTCOME_TRAFFIC' campaigns.
@@ -56,7 +56,12 @@ export function DashboardMarketing({ company, data }) {
         });
 
         // B. Process Legacy/Seed Data (Campaign Level approximation)
-        const validLegacy = filterByDateRange(legacyCampaigns, dateRange, 'startDate');
+        // BUG FIX: Legacy campaigns only have Lifetime Totals. Including them based on 'startDate' in a specific
+        // monthly view causes massive inflation (adding lifetime spend to a single month).
+        // Solution: Only include legacy data if viewing "all-time".
+        const validLegacy = dateRange === 'all-time'
+            ? filterByDateRange(legacyCampaigns, dateRange, 'startDate')
+            : [];
 
         validLegacy.forEach(c => {
             invest += c.investment;

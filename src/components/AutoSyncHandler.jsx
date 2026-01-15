@@ -8,6 +8,9 @@ export function AutoSyncHandler() {
 
     useEffect(() => {
         const runAutoSync = async () => {
+            console.log("[AutoSync] PAUSED for debugging.");
+            return;
+
             // 1. Get Local Data
             let localCompanies = getCompaniesConfig();
 

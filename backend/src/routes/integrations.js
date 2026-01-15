@@ -19,7 +19,7 @@ router.get('/:companyId', async (req, res) => {
             .from('Integration')
             .select(`
                 id, type, isActive, lastSync,
-                pipefyOrgId, pipefyPipeId,
+                pipefyOrgId, pipefyPipeId, settings,
                 metaAdAccountId, metaAccountName, metaStatus, metaTokenExpiry,
                 createdAt, updatedAt
             `)
@@ -40,7 +40,7 @@ router.get('/:companyId', async (req, res) => {
 router.post('/:companyId/pipefy', async (req, res) => {
     try {
         const { companyId } = req.params;
-        const { pipefyOrgId, pipefyPipeId, pipefyToken } = req.body;
+        const { pipefyOrgId, pipefyPipeId, pipefyToken, settings } = req.body;
 
         // Prisma: upsert
         // Supabase: upsert (requires conflict on unique keys)
@@ -61,7 +61,9 @@ router.post('/:companyId/pipefy', async (req, res) => {
             type: 'pipefy', // Unique key comb
             pipefyOrgId,
             pipefyPipeId,
-            pipefyToken: encrypt(pipefyToken),
+            // Prevent double encryption: Check if it looks like 'iv:content'
+            pipefyToken: (pipefyToken && pipefyToken.includes(':')) ? pipefyToken : encrypt(pipefyToken),
+            settings: settings || {}, // Save settings (phases, fields)
             isActive: true,
             updatedAt: new Date()
         };

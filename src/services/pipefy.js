@@ -25,7 +25,11 @@ const KNOWN_ROBUST_CONFIGS = {
 };
 
 export async function fetchPipefyDeals(orgId, pipeId, token, userConfig = {}) {
-  if (!token || !pipeId) return [];
+  console.log(`[Pipefy] Starting fetch for Org: ${orgId}, Pipe: ${pipeId}`);
+  if (!token || !pipeId) {
+    console.warn('[Pipefy] Missing Token or PipeID');
+    return [];
+  }
 
   // ZERO-CONFIG LOGIC: Override user config if Pipe ID is known
   let config = { ...userConfig };
@@ -242,10 +246,13 @@ export async function fetchPipefyDeals(orgId, pipeId, token, userConfig = {}) {
       const normPhaseName = normalize(phaseName);
 
       // Configured IDs and Names
-      const CFG_LOST_ID = (config.lostPhaseId || '').trim();
+      // Support multiple IDs via comma separation
+      const parseIds = (str) => (str || '').split(',').map(s => s.trim()).filter(Boolean);
+
+      const CFG_LOST_IDS = parseIds(config.lostPhaseId);
       const CFG_LOST_NAME_NORM = config.lostPhase ? normalize(config.lostPhase) : null;
 
-      const CFG_WON_ID = (config.wonPhaseId || '').trim();
+      const CFG_WON_IDS = parseIds(config.wonPhaseId);
       const CFG_WON_NAME_NORM = config.wonPhase ? normalize(config.wonPhase) : null;
 
       const CFG_QUAL_ID = (config.qualifiedPhaseId || '').trim();
@@ -253,7 +260,7 @@ export async function fetchPipefyDeals(orgId, pipeId, token, userConfig = {}) {
 
       // A. LOST (Priority Logic as per Spec)
       if (phaseId === '338889931' || // Explicit ID from Spec
-        (CFG_LOST_ID && phaseId === CFG_LOST_ID) ||
+        CFG_LOST_IDS.includes(phaseId) ||
         (CFG_LOST_NAME_NORM && normPhaseName === CFG_LOST_NAME_NORM) || /* Exact Config Match */
         normPhaseName.includes('perdido') ||
         normPhaseName.includes('negocio perdido') ||
@@ -264,17 +271,16 @@ export async function fetchPipefyDeals(orgId, pipeId, token, userConfig = {}) {
 
 
       // B. WON
-      else if ((CFG_WON_ID && phaseId === CFG_WON_ID) ||
+      else if (
+        CFG_WON_IDS.includes(phaseId) ||
         (CFG_WON_NAME_NORM && normPhaseName === CFG_WON_NAME_NORM) || /* Exact Config Match */
-        phaseId === '338889923' || // Fechamento - Ganho
-        phaseId === '338889934' || // Apólice Fechada
         normPhaseName.includes('ganho') ||
-        normPhaseName.includes('won') ||
         normPhaseName.includes('vendido') ||
-        normPhaseName.includes('apolice fechada') ||
-        normPhaseName.includes('apolice emitida') || // Insurance specific
-        normPhaseName.includes('emitido') ||         // Insurance specific
+        normPhaseName.includes('fechado') ||
         normPhaseName.includes('contrato assinado') ||
+        normPhaseName.includes('apolice emitida') || // Insurance Specific
+        normPhaseName.includes('implantacao') || // Onboarding
+        normPhaseName.includes('enviado ao cliente') || // User Request: explicit acceptance
         normPhaseName.includes('assinado')) {
         status = 'won';
       }
@@ -309,9 +315,16 @@ export async function fetchPipefyDeals(orgId, pipeId, token, userConfig = {}) {
           dealDate = explicitDateField.value.split("T")[0];
         } else {
           // ACCRUAL LOGIC: Use finish date for Won deals.
-          // Fallback to updated_at to capture "Move to Won Phase" for long-cycle deals
-          // NOTE: Edits to old Won deals will bump them to current month. Use "Finish" in Pipefy to freeze the date.
-          dealDate = card.finished_at || card.updated_at || createdDate;
+
+          // SPECIAL CASE: "Enviado ao Cliente" is an active phase (no finished_at).
+          // We MUST NOT use updated_at, otherwise any edit brings the deal to "Today".
+          // We use createdDate to anchor it to its origin, effectively filtering out old "zombie" deals.
+          const currentPhaseName = normalize(card.current_phase?.name || '');
+          if (currentPhaseName.includes('enviado ao cliente')) {
+            dealDate = createdDate;
+          } else {
+            dealDate = card.finished_at || card.updated_at || createdDate;
+          }
         }
       } else {
         // ACTIVE LOGIC: Use last update or creation for in-progress deals
@@ -416,11 +429,29 @@ export async function fetchPipefyDeals(orgId, pipeId, token, userConfig = {}) {
         // Insurance Type (Andar)
         insuranceType: (() => {
           if (!card.fields) return null;
+
+          // STRICT FIX: Prioritize "QUAL O TIPO DE SEGURO?"
+          // User explicitly requested to IGNORE "Tipo de seguro:" (which usually contains internal IDs like 'seguro_condominio')
+          // and use "Qual o tipo de seguro?" (which contains 'Condominial').
+
           const typeField = card.fields.find(f => {
             const n = normalize(f.name);
-            return n.includes('tipo de seguro') || n.includes('qual o tipo de seguro') || n === 'produto';
+            // Must contain "qual" to distinguish from the generic/internal field
+            return n.includes('qual o tipo de seguro') || n === 'produto';
           });
-          return typeField ? typeField.value : null;
+
+          if (!typeField || !typeField.value) return null;
+
+          // CLEANING LOGIC: Remove ["..."] artifacts if present
+          let val = typeField.value;
+          if (typeof val === 'string') {
+            // Check if it looks like a JSON array or has quotes
+            if (val.startsWith('[') || val.includes('"')) {
+              // Try explicit replace of [" "] first as it's the common case
+              val = val.replace(/[\[\]"]/g, '').trim();
+            }
+          }
+          return val;
         })()
       };
     }); // End of map
@@ -433,6 +464,7 @@ export async function fetchPipefyDeals(orgId, pipeId, token, userConfig = {}) {
       phasesFound: phases.length
     };
     console.log(`[Pipefy Debug] Fetch Complete. Raw: ${allEdges.length}, Active(Depth Limit): ${mappedDeals.length}, Won: ${summary.won}`);
+    console.log('[Pipefy Debug] Sample Deal:', mappedDeals[0]);
 
     return {
       deals: mappedDeals,
@@ -444,7 +476,45 @@ export async function fetchPipefyDeals(orgId, pipeId, token, userConfig = {}) {
     };
 
   } catch (error) {
-    console.error('Pipefy Fetch Error:', error);
+    console.error('Pipefy Query:', queryFields); // Log the query to see if it's malformed
     throw error; // Propagate error to AdminSettings
+  }
+}
+
+/**
+ * Fetch Pipe Structure (Phases and Fields) for Configuration Dropdowns
+ */
+export async function getPipeDetails(pipeId, token) {
+  if (!token || !pipeId) throw new Error('Token e Pipe ID são obrigatórios.');
+
+  const query = `
+    {
+      pipe(id: ${pipeId}) {
+        phases { id name }
+        start_form_fields { id label }
+        labels { id name }
+      }
+    }
+  `;
+
+  try {
+    const res = await fetch(PIPEFY_API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({ query })
+    });
+
+    const json = await res.json();
+    if (json.errors) throw new Error(json.errors[0].message);
+
+    return {
+      phases: json.data.pipe.phases || [],
+      fields: json.data.pipe.start_form_fields || [], // Note: These are start form fields. 
+      // ideally we want phase fields too, but typically "Value" is in start form or a shared field.
+      // For simplicity, we'll stick to phases for now as that's the main pain point (IDs).
+    };
+  } catch (error) {
+    console.error("Error fetching pipe details:", error);
+    throw error;
   }
 }

@@ -7,6 +7,32 @@ export function Forms({ company, data, type, onSuccess }) {
     const [formData, setFormData] = useState({});
     const [selectedSdr, setSelectedSdr] = useState('');
 
+    // Pre-fill existing goals
+    React.useEffect(() => {
+        if (type === 'set-goals' && data.goals) {
+            const currentMonth = new Date().toISOString().slice(0, 7);
+            const existing = data.goals.find(g => String(g.companyId) === String(company.id) && g.month === currentMonth);
+
+            if (existing) {
+                const sdrState = {};
+                if (existing.sdrGoals) {
+                    Object.entries(existing.sdrGoals).forEach(([name, goal]) => {
+                        sdrState[`sdr_goal_rev_${name}`] = goal.revenue;
+                        sdrState[`sdr_goal_qty_${name}`] = goal.deals;
+                    });
+                }
+
+                setFormData(prev => ({
+                    ...prev,
+                    revenue_goal: existing.revenue,
+                    deals_goal: existing.deals,
+                    leads_goal: existing.leads,
+                    ...sdrState
+                }));
+            }
+        }
+    }, [type, data.goals, company.id]);
+
     const handleSubmit = (e) => {
         e.preventDefault();
         const timestamp = new Date().toISOString();
@@ -42,7 +68,7 @@ export function Forms({ company, data, type, onSuccess }) {
             if (!data.goals) data.goals = [];
 
             const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
-            const goalIndex = data.goals.findIndex(g => g.companyId === company.id && g.month === currentMonth);
+            const goalIndex = data.goals.findIndex(g => String(g.companyId) === String(company.id) && g.month === currentMonth);
 
             // Extract SDR Goals
             // Extract SDR Goals
@@ -196,18 +222,18 @@ export function Forms({ company, data, type, onSuccess }) {
                                 <label className="block text-sm font-bold text-gray-900 dark:text-white mb-2">Meta de Receita (MRR)</label>
                                 <div className="relative">
                                     <span className="absolute left-3 top-3.5 text-gray-400 text-sm">R$</span>
-                                    <input required type="number" name="revenue_goal" onChange={handleChange} className="w-full pl-10 p-3 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white bg-white dark:bg-[#1a1a1a] focus:ring-2 focus:ring-[#FD295E] outline-none transition-all" placeholder="60.000,00" />
+                                    <input required type="number" name="revenue_goal" value={formData.revenue_goal || ''} onChange={handleChange} className="w-full pl-10 p-3 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white bg-white dark:bg-[#1a1a1a] focus:ring-2 focus:ring-[#FD295E] outline-none transition-all" placeholder="60.000,00" />
                                 </div>
                             </div>
                             <div>
                                 <label className="block text-sm font-bold text-gray-900 dark:text-white mb-2">Meta de Vendas (Qtd)</label>
-                                <input required type="number" name="deals_goal" onChange={handleChange} className="w-full p-3 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white bg-white dark:bg-[#1a1a1a] focus:ring-2 focus:ring-[#FD295E] outline-none transition-all" placeholder="16" />
+                                <input required type="number" name="deals_goal" value={formData.deals_goal || ''} onChange={handleChange} className="w-full p-3 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white bg-white dark:bg-[#1a1a1a] focus:ring-2 focus:ring-[#FD295E] outline-none transition-all" placeholder="16" />
                             </div>
                         </div>
 
                         <div>
                             <label className="block text-sm font-bold text-gray-900 dark:text-white mb-2">Meta de Leads (Marketing)</label>
-                            <input required type="number" name="leads_goal" onChange={handleChange} className="w-full p-3 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white bg-white dark:bg-[#1a1a1a] focus:ring-2 focus:ring-[#FD295E] outline-none transition-all" placeholder="150" />
+                            <input required type="number" name="leads_goal" value={formData.leads_goal || ''} onChange={handleChange} className="w-full p-3 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white bg-white dark:bg-[#1a1a1a] focus:ring-2 focus:ring-[#FD295E] outline-none transition-all" placeholder="150" />
                         </div>
 
                         {/* Individual SDR Goals */}
@@ -249,6 +275,7 @@ export function Forms({ company, data, type, onSuccess }) {
                                                     <input
                                                         type="number"
                                                         name={`sdr_goal_rev_${sdr}`}
+                                                        value={formData[`sdr_goal_rev_${sdr}`] || ''}
                                                         onChange={handleChange}
                                                         placeholder="15.000"
                                                         className="w-full p-2 border border-gray-200 dark:border-white/10 rounded-lg text-sm bg-white dark:bg-[#111] focus:ring-1 focus:ring-[#FD295E] outline-none"
@@ -259,6 +286,7 @@ export function Forms({ company, data, type, onSuccess }) {
                                                     <input
                                                         type="number"
                                                         name={`sdr_goal_qty_${sdr}`}
+                                                        value={formData[`sdr_goal_qty_${sdr}`] || ''}
                                                         onChange={handleChange}
                                                         placeholder="4"
                                                         className="w-full p-2 border border-gray-200 dark:border-white/10 rounded-lg text-sm bg-white dark:bg-[#111] focus:ring-1 focus:ring-[#FD295E] outline-none"
