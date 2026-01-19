@@ -21,7 +21,7 @@ router.get('/:companyId', async (req, res) => {
         let query = supabase
             .from('Metric')
             .select('*')
-            .eq('companyId', parseInt(companyId))
+            .eq('companyId', companyId)
             .gte('date', startDateStr)
             .lte('date', endDate)
             .order('date', { ascending: false });
@@ -47,25 +47,30 @@ router.get('/:companyId', async (req, res) => {
 router.get('/:companyId/unified', async (req, res) => {
     try {
         const { range = '30d', tag = 'all' } = req.query;
-        let { companyId } = req.params;
-
+        // The original code had `let { companyId: companyIdInput } = req.params;` and `let company;`
+        // The instruction implies removing a 'numericId' calculation.
+        // Based on the provided 'Code Edit' snippet, the `companyIdInput` and `company` declarations are removed,
+        // and `companyId` is directly used from `req.params`.
+        // This effectively removes any logic that would convert or validate `companyId` as a numeric ID.
+        const { companyId } = req.params; // Use companyId directly from params
         let company;
-        let numericId = parseInt(companyId);
 
-        if (!isNaN(numericId)) {
-            const { data } = await supabase.from('Company').select('id, name').eq('id', numericId).single();
-            company = data;
-        }
+        // Verify if it's a UUID or if we need to search by name
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(companyId);
 
-        if (!company) {
-            // Try searching by name if ID fails
-            // Supabase 'ilike' for case-insensitive contains
-            const { data } = await supabase.from('Company')
+        // let companyId = companyIdInput; // This will be the ID used for queries - this line is now redundant
+
+        if (isUuid) {
+            const { data: companyData } = await supabase.from('Company').select('id, name').eq('id', companyId).single();
+            company = companyData;
+        } else {
+            // Try searching by name if it's not a UUID
+            const { data: companyData } = await supabase.from('Company')
                 .select('id, name')
                 .or(`name.ilike.%${companyId}%,name.ilike.%${decodeURIComponent(companyId)}%`)
                 .limit(1)
                 .single();
-            company = data;
+            company = companyData;
         }
 
         if (!company) {
@@ -158,20 +163,54 @@ router.get('/:companyId/unified', async (req, res) => {
         const safePipefyMetrics = pipefyMetrics || [];
 
         // Aggregate totals
-        const metaTotal = safeMetaMetrics.reduce((acc, m) => ({
-            spend: acc.spend + (m.spend || 0),
-            impressions: acc.impressions + (m.impressions || 0),
-            clicks: acc.clicks + (m.clicks || 0),
-            conversions: acc.conversions + (m.conversions || 0)
-        }), { spend: 0, impressions: 0, clicks: 0, conversions: 0 });
+        // Aggregate totals
+        const metaTotal = safeMetaMetrics.reduce((acc, m) => {
+            if (tag === 'all') {
+                const VALID_LABELS = ['condominial', 'rc_sindico', 'automovel', 'residencial'];
+                const label = (m.label || '').toLowerCase();
+                const isValid = VALID_LABELS.some(vl => label.includes(vl));
+                if (!isValid) return acc;
+            }
+            return {
+                spend: acc.spend + (m.spend || 0),
+                impressions: acc.impressions + (m.impressions || 0),
+                clicks: acc.clicks + (m.clicks || 0),
+                conversions: acc.conversions + (m.conversions || 0)
+            };
+        }, { spend: 0, impressions: 0, clicks: 0, conversions: 0 });
 
         // Aggregate totals for the period
-        const pipefyTotal = safePipefyMetrics.reduce((acc, m) => ({
-            leadsEntered: acc.leadsEntered + (m.cardsCreated || 0),
-            leadsQualified: acc.leadsQualified + (m.cardsQualified || 0),
-            salesClosed: acc.salesClosed + (m.cardsConverted || 0),
-            leadsLost: acc.leadsLost + (m.cardsLost || 0)
-        }), { leadsEntered: 0, leadsQualified: 0, salesClosed: 0, leadsLost: 0 });
+        // Aggregate totals for the period
+        // RULE: For "Geral" (all), ONLY sum specific products: condominial, rc_sindico, automovel, residencial
+        const VALID_LABELS = ['condominial', 'rc_sindico', 'automovel', 'residencial'];
+
+        const pipefyTotal = safePipefyMetrics.reduce((acc, m) => {
+            // Filter logic
+            if (tag === 'all') {
+                const label = (m.label || '').toLowerCase();
+                // Check if label matches any valid product (exact or partial match if needed, assuming exact for now based on "registros com os labels")
+                // The user said "soma apenas dos registros com os labels: condominial, rc_sindico, automovel e residencial"
+                // Labels in DB might be uppercase or have variations, let's normalize.
+                const isValid = VALID_LABELS.some(vl => label.includes(vl));
+                if (!isValid) return acc;
+            }
+
+            return {
+                leadsEntered: acc.leadsEntered + (m.cardsCreated || 0),
+                leadsQualified: acc.leadsQualified + (m.cardsQualified || 0),
+                salesClosed: acc.salesClosed + (m.cardsConverted || 0),
+                leadsLost: acc.leadsLost + (m.cardsLost || 0)
+            };
+        }, { leadsEntered: 0, leadsQualified: 0, salesClosed: 0, leadsLost: 0 });
+
+        // User Request: "Metas Fixas... meta de investimento total no Geral seja de R$ 5.500,00"
+        if (tag === 'all') {
+            // We can inject this into the response or handle it in the frontend. 
+            // Since this is the aggregation logic, let's ensure we respect the filtering for Meta Ads too if needed?
+            // "A aba 'Geral' está exibindo métricas erradas... porque está somando dados irrelevantes da tabela Metric"
+            // This applies to Meta metrics too? "CPL de R$ 1,28" implies Meta Spend / Pipefy Leads.
+            // If we filter Pipefy Leads, we MUST filter Meta Spend too to get correct CPL.
+        }
 
         // Get lifetime totals from the latest sync record
         // We look for one record, ordered by date desc
@@ -253,7 +292,7 @@ router.get('/:companyId/unified', async (req, res) => {
 
         res.json({
             metaAds: {
-                total: metaTotal,
+                total: { ...metaTotal, goal: tag === 'all' ? 5500 : null },
                 daily: safeMetaMetrics
             },
             pipefy: {

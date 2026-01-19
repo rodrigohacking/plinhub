@@ -8,13 +8,18 @@ class SyncService {
      * Sync all metrics for a company
      */
     async syncCompanyMetrics(companyIdInput) {
-        let companyId = parseInt(companyIdInput);
+        let companyId = companyIdInput;
 
-        // Resolve company if ID is not found or companyIdInput is a string
-        if (isNaN(companyId)) {
+        // Verify if it's a UUID or if we need to search by name
+        // Simple check: if it lacks hyphens, assumes it might be a name search string 
+        // (unless it's a perfectly formatted UUID without hyphens, but standard is with hyphens)
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(companyIdInput);
+
+        if (!isUuid) {
+            // Try to find by name
             const { data: company } = await supabase.from('Company')
                 .select('id')
-                .or(`name.ilike.%${companyIdInput}%`)
+                .ilike('name', `%${companyIdInput}%`)
                 .limit(1)
                 .single();
 
@@ -80,6 +85,15 @@ class SyncService {
     async syncMetaAds(companyId, integration) {
         const accessToken = decrypt(integration.metaAccessToken);
         const adAccountId = integration.metaAdAccountId;
+
+        // Get company name for campaign filtering
+        const { data: company } = await supabase
+            .from('Company')
+            .select('name')
+            .eq('id', companyId)
+            .single();
+
+        const companyName = company?.name || null;
 
         // Get last 30 days
         const endDate = new Date();
@@ -149,6 +163,65 @@ class SyncService {
         await supabase.from('Integration').update({ lastSync: new Date() }).eq('id', integration.id);
 
         await this.logSync(companyId, 'meta_ads', 'success', 'Metrics synced successfully', 1);
+
+        // --- NEW: Sync Campaign Data (Daily Breakdown) ---
+        try {
+            console.log(`Syncing campaigns for company ${companyId}...`);
+
+            // 1. Delete old campaign records for this period (to avoid duplicates)
+            const { error: deleteError } = await supabase
+                .from('campaigns')
+                .delete()
+                .eq('company_id', companyId)
+                .gte('start_date', startDate.toISOString())
+                .lte('start_date', endDate.toISOString());
+
+            if (deleteError) {
+                console.error("Error cleaning old campaigns:", deleteError);
+            }
+
+            // 2. Fetch daily campaign insights WITH COMPANY NAME FILTER
+            const campaignInsights = await metaAdsService.getCampaignInsights(
+                adAccountId,
+                accessToken,
+                {
+                    startDate: startDate.toISOString().split('T')[0],
+                    endDate: endDate.toISOString().split('T')[0]
+                },
+                [], // filtering
+                companyName // Pass company name for filtering
+            );
+
+            // 3. Insert new campaign records
+            if (campaignInsights.length > 0) {
+                const campaignRows = campaignInsights.map(c => ({
+                    company_id: companyId,
+                    name: c.campaign_name,
+                    investment: c.spend,
+                    clicks: c.clicks,
+                    impressions: c.impressions,
+                    leads: c.leads,
+                    conversions: c.conversions,
+                    start_date: c.date,
+                    end_date: c.date, // Daily stats, so start=end
+                    channel: 'meta_ads'
+                }));
+
+                const { error: insertError } = await supabase
+                    .from('campaigns')
+                    .insert(campaignRows);
+
+                if (insertError) {
+                    throw new Error(`Campaign insert failed: ${insertError.message}`);
+                }
+
+                console.log(`Synced ${campaignRows.length} campaign records.`);
+            }
+        } catch (campError) {
+            console.error("Campaign sync error:", campError);
+            // Log warning but don't fail the main sync (account level worked)
+            await this.logSync(companyId, 'meta_ads', 'warning', `Campaign sync error: ${campError.message}`);
+        }
 
         return { success: true };
     }

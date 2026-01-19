@@ -24,12 +24,14 @@ const KNOWN_ROBUST_CONFIGS = {
   }
 };
 
-export async function fetchPipefyDeals(orgId, pipeId, token, userConfig = {}) {
+// Backend Proxy handles Auth now
+export async function fetchPipefyDeals(orgId, pipeId, token, userConfig = {}, searchTerm = null) {
   console.log(`[Pipefy] Starting fetch for Org: ${orgId}, Pipe: ${pipeId}`);
-  if (!token || !pipeId) {
-    console.warn('[Pipefy] Missing Token or PipeID');
+  if (!pipeId) {
+    console.warn('[Pipefy] Missing PipeID');
     return [];
   }
+  // Token is properly optional now as backend handles it, but we keep the arg for signature compatibility
 
   // ZERO-CONFIG LOGIC: Override user config if Pipe ID is known
   let config = { ...userConfig };
@@ -125,7 +127,7 @@ export async function fetchPipefyDeals(orgId, pipeId, token, userConfig = {}) {
           const q = `
                     {
                         phase(id: ${phase.id}) {
-                            cards(first: 50, after: ${cursor ? `"${cursor}"` : null}) {
+                            cards(first: 50, after: ${cursor ? `"${cursor}"` : null}${searchTerm ? `, search: {title: "${searchTerm}"}` : ''}) {
                                 edges {
                                     node {
                                         id
@@ -507,11 +509,14 @@ export async function getPipeDetails(pipeId, token) {
     const json = await res.json();
     if (json.errors) throw new Error(json.errors[0].message);
 
+    if (!json.data || !json.data.pipe) {
+      throw new Error(`Pipe com ID ${pipeId} não encontrado ou acesso negado.`);
+    }
+
     return {
       phases: json.data.pipe.phases || [],
-      fields: json.data.pipe.start_form_fields || [], // Note: These are start form fields. 
-      // ideally we want phase fields too, but typically "Value" is in start form or a shared field.
-      // For simplicity, we'll stick to phases for now as that's the main pain point (IDs).
+      fields: json.data.pipe.start_form_fields || [],
+      labels: json.data.pipe.labels || []
     };
   } catch (error) {
     console.error("Error fetching pipe details:", error);

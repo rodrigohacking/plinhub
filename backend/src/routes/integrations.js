@@ -23,7 +23,7 @@ router.get('/:companyId', async (req, res) => {
                 metaAdAccountId, metaAccountName, metaStatus, metaTokenExpiry,
                 createdAt, updatedAt
             `)
-            .eq('companyId', parseInt(companyId));
+            .eq('companyId', companyId);
 
         if (error) throw new Error(error.message);
 
@@ -52,12 +52,12 @@ router.post('/:companyId/pipefy', async (req, res) => {
         const { data: existing } = await supabase
             .from('Integration')
             .select('id')
-            .eq('companyId', parseInt(companyId))
+            .eq('companyId', companyId)
             .eq('type', 'pipefy')
             .single();
 
         const payload = {
-            companyId: parseInt(companyId),
+            companyId: companyId,
             type: 'pipefy', // Unique key comb
             pipefyOrgId,
             pipefyPipeId,
@@ -100,12 +100,12 @@ router.post('/:companyId/meta', async (req, res) => {
         const { data: existing } = await supabase
             .from('Integration')
             .select('id')
-            .eq('companyId', parseInt(companyId))
+            .eq('companyId', companyId)
             .eq('type', 'meta_ads')
             .single();
 
         const payload = {
-            companyId: parseInt(companyId),
+            companyId: companyId,
             type: 'meta_ads',
             metaAdAccountId,
             metaAccessToken: encrypt(metaToken),
@@ -157,7 +157,7 @@ router.post('/:companyId/meta/test', async (req, res) => {
         const { data: integration, error } = await supabase
             .from('Integration')
             .select('metaAccessToken')
-            .eq('companyId', parseInt(companyId))
+            .eq('companyId', companyId)
             .eq('type', 'meta_ads')
             .single();
 
@@ -185,7 +185,7 @@ router.delete('/:companyId/:type', async (req, res) => {
         const { error } = await supabase
             .from('Integration')
             .delete()
-            .eq('companyId', parseInt(companyId))
+            .eq('companyId', companyId)
             .eq('type', type);
 
         if (error) throw new Error(error.message);

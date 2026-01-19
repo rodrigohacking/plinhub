@@ -40,6 +40,10 @@ class PipefyService {
     const MAX_PAGES = 200; // 10000 cards max
 
     while (hasPreviousPage && pagesFetched < MAX_PAGES) {
+      // NOTE: Using 'search' argument in allCards if looking for specific titles
+      // Verify if API supports 'search: { title: "..." }' or similar if needed.
+      // Standard Pipefy API 'allCards' doesn't support deep field filtering easily,
+      // but let's assume standard pagination for now.
       const query = `
         query($pipeId: ID!, $cursor: String) {
           pipe(id: $pipeId) {

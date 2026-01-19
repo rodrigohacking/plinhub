@@ -193,9 +193,6 @@ export function DashboardSales({ company, data }) {
                 won: 0,         // Deals Won (Won in period)
                 wonValue: 0,    // Revenue (Won in period)
                 daysSum: 0,
-                won: 0,         // Deals Won (Won in period)
-                wonValue: 0,    // Revenue (Won in period)
-                daysSum: 0,
                 lostReasons: {},
                 insuranceBreakdown: {} // New: Per SDR Product Stats
             };

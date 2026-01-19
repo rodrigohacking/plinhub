@@ -1,39 +1,101 @@
 import React, { useState } from 'react';
 import { toast } from 'sonner';
-import { saveData } from '../lib/storage';
-import { Lock, Save } from 'lucide-react';
+import { saveData, saveMetric } from '../lib/storage';
+import { Lock, Save, Target, Megaphone } from 'lucide-react';
+
+const PRODUCT_DEFAULTS = {
+    'all': { spend: 5000, cpc: 15 },
+    'condominial': { spend: 2500, cpc: 30 },
+    'rc_sindico': { spend: 1500, cpc: 25 },
+    'automovel': { spend: 1000, cpc: 10 },
+    'residencial': { spend: 500, cpc: 10 }
+};
 
 export function Forms({ company, data, type, onSuccess }) {
     const [formData, setFormData] = useState({});
     const [selectedSdr, setSelectedSdr] = useState('');
 
+    // Marketing Goals State
+    const [goalType, setGoalType] = useState('sales'); // 'sales' | 'marketing'
+    const [selectedProduct, setSelectedProduct] = useState('');
+
     // Pre-fill existing goals
     React.useEffect(() => {
-        if (type === 'set-goals' && data.goals) {
-            const currentMonth = new Date().toISOString().slice(0, 7);
-            const existing = data.goals.find(g => String(g.companyId) === String(company.id) && g.month === currentMonth);
+        if (type === 'set-goals') {
+            // 1. Sales Goals Logic
+            if (goalType === 'sales' && data.goals) {
+                const currentMonth = new Date().toISOString().slice(0, 7);
+                const existing = data.goals.find(g => String(g.companyId) === String(company.id) && g.month === currentMonth);
 
-            if (existing) {
-                const sdrState = {};
-                if (existing.sdrGoals) {
-                    Object.entries(existing.sdrGoals).forEach(([name, goal]) => {
-                        sdrState[`sdr_goal_rev_${name}`] = goal.revenue;
-                        sdrState[`sdr_goal_qty_${name}`] = goal.deals;
-                    });
+                if (existing) {
+                    const sdrState = {};
+                    if (existing.sdrGoals) {
+                        Object.entries(existing.sdrGoals).forEach(([name, goal]) => {
+                            sdrState[`sdr_goal_rev_${name}`] = goal.revenue;
+                            sdrState[`sdr_goal_qty_${name}`] = goal.deals;
+                        });
+                    }
+
+                    setFormData(prev => ({
+                        ...prev,
+                        revenue_goal: existing.revenue,
+                        deals_goal: existing.deals,
+                        leads_goal: existing.leads,
+                        ...sdrState
+                    }));
                 }
 
-                setFormData(prev => ({
-                    ...prev,
-                    revenue_goal: existing.revenue,
-                    deals_goal: existing.deals,
-                    leads_goal: existing.leads,
-                    ...sdrState
-                }));
+                // Load marketing goals for non-insurance companies (Apolar)
+                if (!company?.name?.toLowerCase().includes('andar')) {
+                    const relevantMetrics = (data.metrics || []).filter(m =>
+                        String(m.companyId) === String(company.id) &&
+                        m.label === 'all' &&
+                        m.source === 'manual'
+                    );
+                    const latestMetric = relevantMetrics.sort((a, b) => new Date(b.date) - new Date(a.date))[0];
+
+                    if (latestMetric) {
+                        setFormData(prev => ({
+                            ...prev,
+                            marketing_investment_goal: latestMetric.spend,
+                            marketing_cpl_goal: latestMetric.cpc
+                        }));
+                    }
+                }
+            }
+
+            // 2. Marketing Product Goals Logic
+            else if (goalType === 'marketing' && selectedProduct) {
+                // Find latest metric for this product
+                const relevantMetrics = (data.metrics || []).filter(m =>
+                    String(m.companyId) === String(company.id) &&
+                    m.label === selectedProduct
+                );
+                // Sort by date DESC
+                const latestMetric = relevantMetrics.sort((a, b) => new Date(b.date) - new Date(a.date))[0];
+
+                if (latestMetric) {
+                    setFormData(prev => ({
+                        ...prev,
+                        marketing_spend: latestMetric.spend,
+                        marketing_cpc: latestMetric.cpc
+                    }));
+                } else {
+                    // Use Defaults
+                    const def = PRODUCT_DEFAULTS[selectedProduct];
+                    if (def) {
+                        setFormData(prev => ({
+                            ...prev,
+                            marketing_spend: def.spend,
+                            marketing_cpc: def.cpc
+                        }));
+                    }
+                }
             }
         }
-    }, [type, data.goals, company.id]);
+    }, [type, data.goals, data.metrics, company.id, goalType, selectedProduct]);
 
-    const handleSubmit = (e) => {
+    const handleSubmit = async (e) => {
         e.preventDefault();
         const timestamp = new Date().toISOString();
 
@@ -50,6 +112,8 @@ export function Forms({ company, data, type, onSuccess }) {
                 status: 'concluída'
             };
             data.sales.unshift(newSale); // Add to top
+            saveData(data);
+            onSuccess();
         } else if (type === 'add-campaign') {
             const newCamp = {
                 id: `camp_new_${Date.now()}`,
@@ -63,65 +127,121 @@ export function Forms({ company, data, type, onSuccess }) {
                 channel: formData.channel || 'Outros'
             };
             data.campaigns.unshift(newCamp);
+            saveData(data);
+            onSuccess();
         } else if (type === 'set-goals') {
-            // Real implementation: Save to data.goals
-            if (!data.goals) data.goals = [];
 
-            const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
-            const goalIndex = data.goals.findIndex(g => String(g.companyId) === String(company.id) && g.month === currentMonth);
+            if (goalType === 'sales') {
+                // --- Save Sales Goals (Local Storage Logic) ---
+                if (!data.goals) data.goals = [];
+                const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
+                const goalIndex = data.goals.findIndex(g => String(g.companyId) === String(company.id) && g.month === currentMonth);
 
-            // Extract SDR Goals
-            // Extract SDR Goals
-            const sdrGoalsFromForm = {};
-            Object.keys(formData).forEach(key => {
-                if (key.startsWith('sdr_goal_rev_')) {
-                    const sdrName = key.replace('sdr_goal_rev_', '');
-                    if (!sdrGoalsFromForm[sdrName]) sdrGoalsFromForm[sdrName] = {};
-                    sdrGoalsFromForm[sdrName].revenue = parseFloat(formData[key]) || 0;
+                // Extract SDR Goals
+                const sdrGoalsFromForm = {};
+                Object.keys(formData).forEach(key => {
+                    if (key.startsWith('sdr_goal_rev_')) {
+                        const sdrName = key.replace('sdr_goal_rev_', '');
+                        if (!sdrGoalsFromForm[sdrName]) sdrGoalsFromForm[sdrName] = {};
+                        sdrGoalsFromForm[sdrName].revenue = parseFloat(formData[key]) || 0;
+                    }
+                    if (key.startsWith('sdr_goal_qty_')) {
+                        const sdrName = key.replace('sdr_goal_qty_', '');
+                        if (!sdrGoalsFromForm[sdrName]) sdrGoalsFromForm[sdrName] = {};
+                        sdrGoalsFromForm[sdrName].deals = parseInt(formData[key]) || 0;
+                    }
+                });
+
+                // Merge with existing goals
+                const existingGoal = goalIndex >= 0 ? data.goals[goalIndex] : {};
+                const finalSdrGoals = { ...(existingGoal.sdrGoals || {}) };
+
+                Object.keys(sdrGoalsFromForm).forEach(sdr => {
+                    finalSdrGoals[sdr] = { ...(finalSdrGoals[sdr] || {}), ...sdrGoalsFromForm[sdr] };
+                });
+
+                const newGoal = {
+                    companyId: company.id,
+                    month: currentMonth,
+                    revenue: formData.revenue_goal ? parseFloat(formData.revenue_goal) : (existingGoal.revenue || 0),
+                    deals: formData.deals_goal ? parseInt(formData.deals_goal) : (existingGoal.deals || 0),
+                    leads: formData.leads_goal ? parseInt(formData.leads_goal) : (existingGoal.leads || 0),
+                    sdrGoals: finalSdrGoals,
+                    updatedAt: timestamp
+                };
+
+                if (goalIndex >= 0) {
+                    data.goals[goalIndex] = { ...data.goals[goalIndex], ...newGoal };
+                } else {
+                    data.goals.push(newGoal);
                 }
-                if (key.startsWith('sdr_goal_qty_')) {
-                    const sdrName = key.replace('sdr_goal_qty_', '');
-                    if (!sdrGoalsFromForm[sdrName]) sdrGoalsFromForm[sdrName] = {};
-                    sdrGoalsFromForm[sdrName].deals = parseInt(formData[key]) || 0;
+
+                saveData(data);
+
+                // Save marketing goals for non-insurance companies (Apolar)
+                if (!company?.name?.toLowerCase().includes('andar') &&
+                    (formData.marketing_investment_goal || formData.marketing_cpl_goal)) {
+                    try {
+                        const metricParams = {
+                            companyId: company.id,
+                            label: 'all',
+                            source: 'manual',
+                            date: timestamp,
+                            spend: parseFloat(formData.marketing_investment_goal || 0),
+                            cpc: parseFloat(formData.marketing_cpl_goal || 0),
+                        };
+
+                        await saveMetric(metricParams);
+
+                        // Optimistic Update
+                        if (!data.metrics) data.metrics = [];
+                        data.metrics.push(metricParams);
+                    } catch (err) {
+                        console.error('Error saving marketing goals:', err);
+                    }
                 }
-            });
 
-            // Merge with existing goals
-            const existingGoal = goalIndex >= 0 ? data.goals[goalIndex] : {};
-            const finalSdrGoals = { ...(existingGoal.sdrGoals || {}) };
+                toast.success('Metas de Vendas atualizadas! 🚀', {
+                    style: { background: '#10b981', color: 'white', border: 'none' },
+                });
+                onSuccess();
 
-            // Update only modified SDRs
-            Object.keys(sdrGoalsFromForm).forEach(sdr => {
-                finalSdrGoals[sdr] = { ...(finalSdrGoals[sdr] || {}), ...sdrGoalsFromForm[sdr] };
-            });
-
-            const newGoal = {
-                companyId: company.id,
-                month: currentMonth,
-                // Use form data if present, otherwise fallback to existing
-                revenue: formData.revenue_goal ? parseFloat(formData.revenue_goal) : (existingGoal.revenue || 0),
-                deals: formData.deals_goal ? parseInt(formData.deals_goal) : (existingGoal.deals || 0),
-                leads: formData.leads_goal ? parseInt(formData.leads_goal) : (existingGoal.leads || 0),
-                sdrGoals: finalSdrGoals,
-                updatedAt: timestamp
-            };
-
-            if (goalIndex >= 0) {
-                data.goals[goalIndex] = { ...data.goals[goalIndex], ...newGoal };
             } else {
-                data.goals.push(newGoal);
+                // --- Save Marketing Product Goals (Supabase Metric) ---
+                if (!selectedProduct) {
+                    toast.error("Selecione um produto.");
+                    return;
+                }
+
+                try {
+                    const metricParams = {
+                        companyId: company.id,
+                        label: selectedProduct, // 'condominial', etc
+                        source: 'manual',
+                        date: timestamp, // Unique timestamp acts as "current version" effectively
+                        spend: parseFloat(formData.marketing_spend || 0),
+                        cpc: parseFloat(formData.marketing_cpc || 0), // Using CPC column for CPL Goal
+                    };
+
+                    await saveMetric(metricParams);
+
+                    // Optimistic Update Local Data
+                    if (!data.metrics) data.metrics = [];
+                    data.metrics.push(metricParams);
+                    // No need to saveData() for metrics as they are fetched from DB, but we update in-memory for immediate UI reflect
+                    // (Though if user refreshes, it fetches from DB).
+
+                    toast.success(`Metas de ${selectedProduct} salvas!`, {
+                        description: 'Novas metas de marketing definidas.',
+                        style: { background: '#10b981', color: 'white', border: 'none' }
+                    });
+                    onSuccess();
+                } catch (err) {
+                    toast.error("Erro ao salvar metas.");
+                    console.error(err);
+                }
             }
-
-            console.log("Goals Saved:", newGoal);
-            toast.success('Metas atualizadas com sucesso! 🚀', {
-                description: 'O Dashboard foi sincronizado com as novas metas.',
-                style: { background: '#10b981', color: 'white', border: 'none' }, // Custom style for extra pop
-            });
         }
-
-        saveData(data);
-        onSuccess();
-        // Removed alert for better UX, usually handled by parent or toast
     };
 
     const handleChange = (e) => {
@@ -137,6 +257,7 @@ export function Forms({ company, data, type, onSuccess }) {
             </h2>
 
             <form onSubmit={handleSubmit} className="space-y-4">
+                {/* --- ADD SALE FORM --- */}
                 {type === 'add-sale' && (
                     <>
                         <div className="grid grid-cols-2 gap-4">
@@ -165,6 +286,7 @@ export function Forms({ company, data, type, onSuccess }) {
                     </>
                 )}
 
+                {/* --- ADD CAMPAIGN FORM --- */}
                 {type === 'add-campaign' && (
                     <>
                         <div>
@@ -207,6 +329,7 @@ export function Forms({ company, data, type, onSuccess }) {
                     </>
                 )}
 
+                {/* --- SET GOALS FORM --- */}
                 {type === 'set-goals' && (
                     <>
                         <div className="p-4 bg-orange-50 dark:bg-orange-900/10 border border-orange-100 dark:border-orange-500/20 rounded-xl mb-4">
@@ -216,87 +339,226 @@ export function Forms({ company, data, type, onSuccess }) {
                             </p>
                         </div>
 
-                        {/* Global Goals */}
-                        <div className="grid grid-cols-2 gap-6 pb-6 border-b border-gray-100 dark:border-white/5 mb-6">
-                            <div>
-                                <label className="block text-sm font-bold text-gray-900 dark:text-white mb-2">Meta de Receita (MRR)</label>
-                                <div className="relative">
-                                    <span className="absolute left-3 top-3.5 text-gray-400 text-sm">R$</span>
-                                    <input required type="number" name="revenue_goal" value={formData.revenue_goal || ''} onChange={handleChange} className="w-full pl-10 p-3 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white bg-white dark:bg-[#1a1a1a] focus:ring-2 focus:ring-[#FD295E] outline-none transition-all" placeholder="60.000,00" />
+                        {/* Top Goal Type Switcher */}
+                        <div className="flex p-1 bg-gray-100 dark:bg-white/5 rounded-xl mb-6">
+                            <button
+                                type="button"
+                                onClick={() => setGoalType('sales')}
+                                className={`flex-1 flex items-center justify-center gap-2 py-2 text-sm font-medium rounded-lg transition-all ${goalType === 'sales' ? 'bg-white dark:bg-[#1a1a1a] shadow text-[#FD295E]' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700'}`}
+                            >
+                                <Target className="w-4 h-4" />
+                                Vendas (Geral)
+                            </button>
+                            {/* Only show Marketing tab for insurance companies (Andar) */}
+                            {company?.name?.toLowerCase().includes('andar') && (
+                                <button
+                                    type="button"
+                                    onClick={() => setGoalType('marketing')}
+                                    className={`flex-1 flex items-center justify-center gap-2 py-2 text-sm font-medium rounded-lg transition-all ${goalType === 'marketing' ? 'bg-white dark:bg-[#1a1a1a] shadow text-[#FD295E]' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700'}`}
+                                >
+                                    <Megaphone className="w-4 h-4" />
+                                    Marketing (Por Produto)
+                                </button>
+                            )}
+                        </div>
+
+                        {/* SALES GOALS CONTENT */}
+                        {goalType === 'sales' && (
+                            <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+                                <div className="grid grid-cols-2 gap-6 pb-6 border-b border-gray-100 dark:border-white/5 mb-6">
+                                    <div>
+                                        <label className="block text-sm font-bold text-gray-900 dark:text-white mb-2">Meta de Receita (MRR)</label>
+                                        <div className="relative">
+                                            <span className="absolute left-3 top-3.5 text-gray-400 text-sm">R$</span>
+                                            <input
+                                                type="number"
+                                                name="revenue_goal"
+                                                value={formData.revenue_goal || ''}
+                                                onChange={handleChange}
+                                                className="w-full pl-10 p-3 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white bg-white dark:bg-[#1a1a1a] focus:ring-2 focus:ring-[#FD295E] outline-none transition-all"
+                                                placeholder="60.000,00"
+                                            />
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-bold text-gray-900 dark:text-white mb-2">Meta de Vendas (Qtd)</label>
+                                        <input
+                                            type="number"
+                                            name="deals_goal"
+                                            value={formData.deals_goal || ''}
+                                            onChange={handleChange}
+                                            className="w-full p-3 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white bg-white dark:bg-[#1a1a1a] focus:ring-2 focus:ring-[#FD295E] outline-none transition-all"
+                                            placeholder="16"
+                                        />
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-900 dark:text-white mb-2">Meta de Leads (Marketing)</label>
+                                    <input
+                                        type="number"
+                                        name="leads_goal"
+                                        value={formData.leads_goal || ''}
+                                        onChange={handleChange}
+                                        className="w-full p-3 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white bg-white dark:bg-[#1a1a1a] focus:ring-2 focus:ring-[#FD295E] outline-none transition-all"
+                                        placeholder="150"
+                                    />
+                                </div>
+
+                                {/* Marketing Goals for non-insurance companies (Apolar) */}
+                                {!company?.name?.toLowerCase().includes('andar') && (
+                                    <div className="grid grid-cols-2 gap-6 pt-6 border-t border-gray-100 dark:border-white/5 mt-6">
+                                        <div>
+                                            <label className="block text-sm font-bold text-gray-900 dark:text-white mb-2">Meta de Investimento (Marketing)</label>
+                                            <div className="relative">
+                                                <span className="absolute left-3 top-3.5 text-gray-400 text-sm">R$</span>
+                                                <input
+                                                    type="number"
+                                                    name="marketing_investment_goal"
+                                                    value={formData.marketing_investment_goal || ''}
+                                                    onChange={handleChange}
+                                                    className="w-full pl-10 p-3 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white bg-white dark:bg-[#1a1a1a] focus:ring-2 focus:ring-[#FD295E] outline-none transition-all"
+                                                    placeholder="3.000,00"
+                                                />
+                                            </div>
+                                            <p className="text-xs text-gray-500 mt-1">Valor alvo para investimento mensal em Meta Ads</p>
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-bold text-gray-900 dark:text-white mb-2">Meta de CPL (Custo por Lead)</label>
+                                            <div className="relative">
+                                                <span className="absolute left-3 top-3.5 text-gray-400 text-sm">R$</span>
+                                                <input
+                                                    type="number"
+                                                    name="marketing_cpl_goal"
+                                                    value={formData.marketing_cpl_goal || ''}
+                                                    onChange={handleChange}
+                                                    className="w-full pl-10 p-3 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white bg-white dark:bg-[#1a1a1a] focus:ring-2 focus:ring-[#FD295E] outline-none transition-all"
+                                                    placeholder="50,00"
+                                                />
+                                            </div>
+                                            <p className="text-xs text-gray-500 mt-1">Custo máximo desejado por lead</p>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Individual SDR Goals */}
+                                <div className="pt-6 border-t border-gray-100 dark:border-white/5 mt-6">
+                                    <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4">Metas Individuais (SDRs)</h3>
+                                    <div className="mb-6">
+                                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Selecione o Vendedor</label>
+                                        <select
+                                            value={selectedSdr}
+                                            onChange={(e) => setSelectedSdr(e.target.value)}
+                                            className="w-full p-3 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white bg-white dark:bg-[#1a1a1a] focus:ring-2 focus:ring-[#FD295E] outline-none transition-all"
+                                        >
+                                            <option value="">Selecione...</option>
+                                            <option value="all">Ver Todos</option>
+                                            {Array.from(new Set(data.sales.filter(s => s.companyId === company.id).map(s => s.seller))).filter(s => s !== 'Sistema' && s !== 'SDR').sort().map((sdr, idx) => (
+                                                <option key={idx} value={sdr}>{sdr}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+
+                                    <div className="space-y-4">
+                                        {Array.from(new Set(data.sales.filter(s => s.companyId === company.id).map(s => s.seller)))
+                                            .filter(s => s !== 'Sistema' && s !== 'SDR')
+                                            .filter(s => {
+                                                if (!selectedSdr) return false;
+                                                if (selectedSdr === 'all') return true;
+                                                return s === selectedSdr;
+                                            })
+                                            .map((sdr, idx) => (
+                                                <div key={idx} className="bg-gray-50 dark:bg-white/5 p-4 rounded-xl flex flex-col md:flex-row items-center gap-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                                                    <div className="w-full md:w-1/3">
+                                                        <p className="font-bold text-gray-700 dark:text-gray-200">{sdr}</p>
+                                                        <p className="text-xs text-gray-400">Vendedor</p>
+                                                    </div>
+                                                    <div className="flex-1 w-full grid grid-cols-2 gap-4">
+                                                        <div>
+                                                            <label className="block text-xs font-semibold text-gray-500 mb-1">Meta R$</label>
+                                                            <input
+                                                                type="number"
+                                                                name={`sdr_goal_rev_${sdr}`}
+                                                                value={formData[`sdr_goal_rev_${sdr}`] || ''}
+                                                                onChange={handleChange}
+                                                                placeholder="15.000"
+                                                                className="w-full p-2 border border-gray-200 dark:border-white/10 rounded-lg text-sm bg-white dark:bg-[#111] focus:ring-1 focus:ring-[#FD295E] outline-none"
+                                                            />
+                                                        </div>
+                                                        <div>
+                                                            <label className="block text-xs font-semibold text-gray-500 mb-1">Meta Qtd</label>
+                                                            <input
+                                                                type="number"
+                                                                name={`sdr_goal_qty_${sdr}`}
+                                                                value={formData[`sdr_goal_qty_${sdr}`] || ''}
+                                                                onChange={handleChange}
+                                                                placeholder="4"
+                                                                className="w-full p-2 border border-gray-200 dark:border-white/10 rounded-lg text-sm bg-white dark:bg-[#111] focus:ring-1 focus:ring-[#FD295E] outline-none"
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                    </div>
                                 </div>
                             </div>
-                            <div>
-                                <label className="block text-sm font-bold text-gray-900 dark:text-white mb-2">Meta de Vendas (Qtd)</label>
-                                <input required type="number" name="deals_goal" value={formData.deals_goal || ''} onChange={handleChange} className="w-full p-3 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white bg-white dark:bg-[#1a1a1a] focus:ring-2 focus:ring-[#FD295E] outline-none transition-all" placeholder="16" />
-                            </div>
-                        </div>
+                        )}
 
-                        <div>
-                            <label className="block text-sm font-bold text-gray-900 dark:text-white mb-2">Meta de Leads (Marketing)</label>
-                            <input required type="number" name="leads_goal" value={formData.leads_goal || ''} onChange={handleChange} className="w-full p-3 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white bg-white dark:bg-[#1a1a1a] focus:ring-2 focus:ring-[#FD295E] outline-none transition-all" placeholder="150" />
-                        </div>
+                        {/* MARKETING PRODUCT GOALS CONTENT */}
+                        {goalType === 'marketing' && (
+                            <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+                                <div className="mb-6">
+                                    <label className="block text-sm font-bold text-gray-900 dark:text-white mb-2">Produto</label>
+                                    <select
+                                        value={selectedProduct}
+                                        onChange={(e) => setSelectedProduct(e.target.value)}
+                                        className="w-full p-3 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white bg-white dark:bg-[#1a1a1a] focus:ring-2 focus:ring-[#FD295E] outline-none transition-all"
+                                    >
+                                        <option value="">Selecione o produto...</option>
+                                        <option value="all">Geral</option>
+                                        <option value="condominial">Condominial</option>
+                                        <option value="rc_sindico">RC Síndico</option>
+                                        <option value="automovel">Automóvel</option>
+                                        <option value="residencial">Residencial</option>
+                                    </select>
+                                </div>
 
-                        {/* Individual SDR Goals */}
-                        <div className="pt-6 border-t border-gray-100 dark:border-white/5">
-                            <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4">Metas Individuais (SDRs)</h3>
-
-                            <div className="mb-6">
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Selecione o Vendedor para Definir a Meta</label>
-                                <select
-                                    value={selectedSdr}
-                                    onChange={(e) => setSelectedSdr(e.target.value)}
-                                    className="w-full p-3 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white bg-white dark:bg-[#1a1a1a] focus:ring-2 focus:ring-[#FD295E] outline-none transition-all"
-                                >
-                                    <option value="">Selecione um vendedor...</option>
-                                    <option value="all">Ver Todos</option>
-                                    {Array.from(new Set(data.sales.filter(s => s.companyId === company.id).map(s => s.seller))).filter(s => s !== 'Sistema' && s !== 'SDR').sort().map((sdr, idx) => (
-                                        <option key={idx} value={sdr}>{sdr}</option>
-                                    ))}
-                                </select>
-                            </div>
-
-                            <div className="space-y-4">
-                                {Array.from(new Set(data.sales.filter(s => s.companyId === company.id).map(s => s.seller)))
-                                    .filter(s => s !== 'Sistema' && s !== 'SDR')
-                                    .filter(s => {
-                                        if (!selectedSdr) return false;
-                                        if (selectedSdr === 'all') return true;
-                                        return s === selectedSdr;
-                                    })
-                                    .map((sdr, idx) => (
-                                        <div key={idx} className="bg-gray-50 dark:bg-white/5 p-4 rounded-xl flex flex-col md:flex-row items-center gap-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                                            <div className="w-full md:w-1/3">
-                                                <p className="font-bold text-gray-700 dark:text-gray-200">{sdr}</p>
-                                                <p className="text-xs text-gray-400">Vendedor</p>
+                                {selectedProduct && (
+                                    <div className="grid grid-cols-2 gap-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                                        <div>
+                                            <label className="block text-sm font-bold text-gray-900 dark:text-white mb-2">Investimento Meta</label>
+                                            <div className="relative">
+                                                <span className="absolute left-3 top-3.5 text-gray-400 text-sm">R$</span>
+                                                <input
+                                                    required
+                                                    type="number"
+                                                    name="marketing_spend"
+                                                    value={formData.marketing_spend || ''}
+                                                    onChange={handleChange}
+                                                    className="w-full pl-10 p-3 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white bg-white dark:bg-[#1a1a1a] focus:ring-2 focus:ring-[#FD295E] outline-none transition-all"
+                                                />
                                             </div>
-                                            <div className="flex-1 w-full grid grid-cols-2 gap-4">
-                                                <div>
-                                                    <label className="block text-xs font-semibold text-gray-500 mb-1">Meta R$</label>
-                                                    <input
-                                                        type="number"
-                                                        name={`sdr_goal_rev_${sdr}`}
-                                                        value={formData[`sdr_goal_rev_${sdr}`] || ''}
-                                                        onChange={handleChange}
-                                                        placeholder="15.000"
-                                                        className="w-full p-2 border border-gray-200 dark:border-white/10 rounded-lg text-sm bg-white dark:bg-[#111] focus:ring-1 focus:ring-[#FD295E] outline-none"
-                                                    />
-                                                </div>
-                                                <div>
-                                                    <label className="block text-xs font-semibold text-gray-500 mb-1">Meta Qtd</label>
-                                                    <input
-                                                        type="number"
-                                                        name={`sdr_goal_qty_${sdr}`}
-                                                        value={formData[`sdr_goal_qty_${sdr}`] || ''}
-                                                        onChange={handleChange}
-                                                        placeholder="4"
-                                                        className="w-full p-2 border border-gray-200 dark:border-white/10 rounded-lg text-sm bg-white dark:bg-[#111] focus:ring-1 focus:ring-[#FD295E] outline-none"
-                                                    />
-                                                </div>
-                                            </div>
+                                            <p className="text-xs text-gray-500 mt-1">Valor alvo para o investimento mensal.</p>
                                         </div>
-                                    ))}
+                                        <div>
+                                            <label className="block text-sm font-bold text-gray-900 dark:text-white mb-2">Meta de CPL (Custo por Lead)</label>
+                                            <div className="relative">
+                                                <span className="absolute left-3 top-3.5 text-gray-400 text-sm">R$</span>
+                                                <input
+                                                    required
+                                                    type="number"
+                                                    name="marketing_cpc"
+                                                    value={formData.marketing_cpc || ''}
+                                                    onChange={handleChange}
+                                                    className="w-full pl-10 p-3 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white bg-white dark:bg-[#1a1a1a] focus:ring-2 focus:ring-[#FD295E] outline-none transition-all"
+                                                />
+                                            </div>
+                                            <p className="text-xs text-gray-500 mt-1">Custo máximo desejado por lead.</p>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
-                        </div>
+                        )}
                     </>
                 )}
 

@@ -1,7 +1,7 @@
 
 const META_API_URL = 'https://graph.facebook.com/v19.0';
 
-export async function fetchMetaCampaigns(adAccountId, token) {
+export async function fetchMetaCampaigns(adAccountId, token, productFilter = null) {
     if (!token || !adAccountId) return [];
 
     // Remove 'act_' if present to avoid doubling
@@ -18,8 +18,21 @@ export async function fetchMetaCampaigns(adAccountId, token) {
         // Query Params:
         // - effective_status: include PAUSED campaigns (default is ACTIVE only often)
         // - limit: 500 to catch everything
-        const query = `fields=${fields}&effective_status=['ACTIVE','PAUSED']&limit=500&access_token=${token}`;
-        const response = await fetch(`${META_API_URL}/act_${actId}/campaigns?${query}`, {
+        // FIXED: Enforce specific Account ID as per requirement
+        const TARGET_ACT_ID = '631649546531729';
+
+        let query = `fields=${fields}&limit=500&access_token=${token}`;
+
+        if (productFilter) {
+            const filtering = [{
+                field: 'campaign.name',
+                operator: 'CONTAIN',
+                value: productFilter
+            }];
+            query += `&filtering=${encodeURIComponent(JSON.stringify(filtering))}`;
+        }
+
+        const response = await fetch(`${META_API_URL}/act_${TARGET_ACT_ID}/campaigns?${query}`, {
             signal: controller.signal
         });
         clearTimeout(timeoutId);
@@ -88,6 +101,6 @@ export async function fetchMetaCampaigns(adAccountId, token) {
 
     } catch (error) {
         console.error('Meta Fetch Error:', error);
-        return [];
+        throw error; // Propagate error to caller (AdminSettings) to show in UI
     }
 }

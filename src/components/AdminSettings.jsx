@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { toast } from 'sonner';
-import { Save, AlertCircle, CheckCircle, Play, Building, Upload, Lock, Unlock, Key, Eye, EyeOff, Users, UserPlus, Trash2, Shield } from 'lucide-react';
+import { Building, Key, Save, Trash2, CheckCircle, AlertCircle, Eye, EyeOff, Upload, Shield, Lock, Unlock, Play, ChevronRight, X, Users, UserPlus } from 'lucide-react';
+import { PipeFinder } from './PipeFinder';
+import { GlassCard } from './GlassCard';
+import { SectionHeader } from './SectionHeader';
 import { fetchPipefyDeals, getPipeDetails } from '../services/pipefy';
 import { fetchMetaCampaigns } from '../services/meta';
 import { getCompaniesConfig, saveCompanyConfig, getAdminPin, setAdminPin, checkAdminPin } from '../lib/storage';
@@ -474,21 +477,8 @@ export function AdminSettings({ company, onSave }) {
         }
     };
 
-    // Helper for Glass Cards
-    const GlassCard = ({ children, className = '' }) => (
-        <div className={`bg-white dark:bg-[#1a1a1a] rounded-3xl border border-gray-100 dark:border-white/5 shadow-xl shadow-gray-200/50 dark:shadow-black/50 overflow-hidden ${className}`}>
-            {children}
-        </div>
-    );
+    // Helper components (GlassCard, SectionHeader) are now imported
 
-    const SectionHeader = ({ icon: Icon, title, color = "text-gray-900" }) => (
-        <div className="flex items-center gap-3 mb-6 pb-4 border-b border-gray-100 dark:border-white/5">
-            <div className={`w-10 h-10 rounded-xl flex items-center justify-center bg-gray-50 dark:bg-white/5 ${color}`}>
-                <Icon className="w-5 h-5" />
-            </div>
-            <h2 className="text-lg font-bold text-gray-900 dark:text-white">{title}</h2>
-        </div>
-    );
 
     const handleNewPinSave = () => {
         if (newPin.length < 4) return;
@@ -714,6 +704,7 @@ export function AdminSettings({ company, onSave }) {
                                 </div>
                             </div>
 
+
                             <div className="space-y-2 relative group">
                                 <label className="text-xs font-bold text-gray-500 uppercase tracking-wider ml-1">Access Token</label>
                                 <div className="relative">
@@ -721,6 +712,10 @@ export function AdminSettings({ company, onSave }) {
                                     <button onClick={() => setShowToken(!showToken)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-white transition-colors">{showToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}</button>
                                 </div>
                             </div>
+
+                            {/* PipeFinder Helper */}
+                            <PipeFinder token={config.pipefyToken} />
+
                         </div>
 
                         {/* ADVANCED MAPPING AREA */}

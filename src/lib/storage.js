@@ -10,7 +10,8 @@ export const INITIAL_DATA = {
     companies: [],
     sales: [],
     campaigns: [],
-    goals: []
+    goals: [],
+    metrics: []
 };
 
 // Helper to generate random dates
@@ -457,6 +458,50 @@ export async function getData() {
         console.error("Supabase API Error:", err);
     }
 
+    // 2.5 Fetch Metrics (Targets/Goals) from Supabase 'Metric' table
+    // Required for new Marketing Dashboard Product Tabs
+    let dbMetrics = [];
+    try {
+        if (dbCompanies && dbCompanies.length > 0) {
+            const companyIds = dbCompanies.map(c => c.id);
+            const { data: metricsData, error: metricsError } = await supabase
+                .from('Metric')
+                .select('*')
+                .in('companyId', companyIds);
+
+            if (metricsError) {
+                console.warn("[getData] Failed to fetch Metrics:", metricsError);
+            } else {
+                dbMetrics = metricsData || [];
+                console.log(`[getData] Fetched ${dbMetrics.length} metrics/targets.`);
+            }
+        }
+    } catch (e) {
+        console.warn("[getData] Error fetching metrics:", e);
+    }
+
+    // 2.6 Fetch Campaigns from Supabase (Source of Truth for Meta Ads)
+    // Replaces direct frontend API calls
+    let dbCampaigns = [];
+    try {
+        if (dbCompanies && dbCompanies.length > 0) {
+            const companyIds = dbCompanies.map(c => c.id);
+            const { data: campData, error: campError } = await supabase
+                .from('campaigns')
+                .select('*')
+                .in('company_id', companyIds);
+
+            if (campError) {
+                console.warn("[getData] Failed to fetch campaigns from DB:", campError);
+            } else {
+                dbCampaigns = campData || [];
+                console.log(`[getData] Fetched ${dbCampaigns.length} campaign records from DB.`);
+            }
+        }
+    } catch (e) {
+        console.warn("[getData] Error fetching campaigns:", e);
+    }
+
     // 3. Format DB Companies for Frontend
     // Ensure IDs are consistent (DB sends strings/numbers, frontend needs to handle them)
     // PLUS: ONE-TIME DATA MIGRATION CHECK
@@ -618,14 +663,28 @@ export async function getData() {
             }
         }
 
-        // Try Meta Ads
-        if (effectiveCompany.metaToken && effectiveCompany.metaAdAccountId) {
-            try {
-                const metaCampaigns = await fetchMetaCampaigns(effectiveCompany.metaAdAccountId, effectiveCompany.metaToken);
-                apiCampaigns = metaCampaigns.map(c => ({ ...c, companyId: company.id }));
-            } catch (e) {
-                console.warn(`Failed to load Meta data for company ${company.id}`, e);
+        // Try Meta Ads (From DB now)
+        // We filter the pre-fetched dbCampaigns
+        if (dbCampaigns.length > 0) {
+            const relevant = dbCampaigns.filter(c => String(c.company_id) === String(company.id));
+            if (relevant.length > 0) {
+                apiCampaigns = relevant.map(c => ({
+                    id: c.id,
+                    companyId: c.company_id,
+                    name: c.name,
+                    startDate: c.start_date, // Map snake_case to camelCase
+                    endDate: c.end_date,
+                    investment: Number(c.investment || 0),
+                    leads: Number(c.leads || 0),
+                    impressions: Number(c.impressions || 0),
+                    clicks: Number(c.clicks || 0),
+                    channel: c.channel || 'Meta Ads'
+                }));
             }
+        } else if (effectiveCompany.metaToken && effectiveCompany.metaAdAccountId) {
+            // Fallback: If DB is empty but we have tokens, maybe Sync hasn't run? 
+            // We could try direct fetch, but let's stick to DB to enforce new architecture.
+            console.log(`[getData] No DB campaigns for ${company.name}, waiting for backend sync.`);
         }
 
         return {
@@ -645,7 +704,28 @@ export async function getData() {
         localData.campaigns = localData.campaigns.filter(c => String(c.companyId) !== String(companyId)).concat(campaigns);
     });
 
+    // Merge Metrics (Replace existing for these companies)
+    if (dbMetrics.length > 0) {
+        const fetchedCompanyIds = new Set(dbMetrics.map(m => String(m.companyId)));
+        localData.metrics = localData.metrics.filter(m => !fetchedCompanyIds.has(String(m.companyId))).concat(dbMetrics);
+    }
+
     return localData;
+}
+
+// Save Metric (Marketing Goals) to Supabase
+export async function saveMetric(metric) {
+    try {
+        const { error } = await supabase
+            .from('Metric')
+            .upsert(metric, { onConflict: 'companyId, source, date, label' });
+
+        if (error) throw error;
+        return true;
+    } catch (e) {
+        console.error("Error saving metric:", e);
+        throw e;
+    }
 }
 
 export function saveData(data) {

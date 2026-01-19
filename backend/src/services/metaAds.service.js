@@ -60,9 +60,11 @@ class MetaAdsService {
      */
     async getInsights(adAccountId, accessToken, dateRange) {
         const { startDate, endDate } = dateRange;
+        // Ensure act_ prefix
+        const actId = adAccountId.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
 
         try {
-            const response = await axios.get(`${META_API_BASE}/${adAccountId}/insights`, {
+            const response = await axios.get(`${META_API_BASE}/${actId}/insights`, {
                 params: {
                     access_token: accessToken,
                     time_range: JSON.stringify({
@@ -123,6 +125,112 @@ class MetaAdsService {
             throw new Error(`Failed to fetch insights: ${error.message}`);
         }
     }
+
+    /**
+     * Get campaign-level insights (daily breakdown)
+     */
+    async getCampaignInsights(adAccountId, accessToken, dateRange, filtering = [], companyName = null) {
+        const { startDate, endDate } = dateRange;
+
+        // Use the provided adAccountId (don't override)
+        const actId = adAccountId.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
+
+        try {
+            let allData = [];
+            let url = `${META_API_BASE}/${actId}/insights`;
+
+            // Add campaign name filter if company name is provided
+            const filters = [...filtering];
+            if (companyName) {
+                // Filter campaigns by company name (e.g., "APOLAR", "ANDAR")
+                const companyIdentifier = companyName.toUpperCase().includes('APOLAR') ? 'APOLAR' :
+                    companyName.toUpperCase().includes('ANDAR') ? 'ANDAR' : null;
+
+                if (companyIdentifier) {
+                    filters.push({
+                        field: 'campaign.name',
+                        operator: 'CONTAIN',
+                        value: companyIdentifier
+                    });
+                }
+            }
+
+            let params = {
+                access_token: accessToken,
+                time_range: JSON.stringify({
+                    since: startDate,
+                    until: endDate
+                }),
+                fields: [
+                    'campaign_id',
+                    'campaign_name',
+                    'spend',
+                    'impressions',
+                    'clicks',
+                    'actions',
+                    'date_start',
+                    'date_stop'
+                ].join(','),
+                level: 'campaign',     // Break down by campaign
+                time_increment: 1,      // Break down by day
+                limit: 100,             // Maximize page size
+            };
+
+            // Only add filtering if there are filters
+            if (filters.length > 0) {
+                params.filtering = JSON.stringify(filters);
+            }
+
+            while (true) {
+                const response = await axios.get(url, { params });
+                const data = response.data.data;
+                if (data) {
+                    allData.push(...data);
+                }
+
+                if (response.data.paging && response.data.paging.next) {
+                    url = response.data.paging.next;
+                    params = {}; // Next URL already contains params
+                } else {
+                    break;
+                }
+            }
+
+            // Normalize and map data
+            return allData.map(item => {
+                // Extract leads/conversions
+                // Common lead event types: 'lead', 'offsite_conversion.fb_pixel_lead', 'on_facebook_lead'
+                let leads = 0;
+                let conversions = 0;
+
+                if (item.actions) {
+                    item.actions.forEach(action => {
+                        if (['lead', 'offsite_conversion.fb_pixel_lead', 'on_facebook_lead'].includes(action.action_type)) {
+                            leads += parseInt(action.value || 0);
+                        }
+                        if (action.action_type === 'offsite_conversion.fb_pixel_purchase' || action.action_type === 'purchase') {
+                            conversions += parseInt(action.value || 0);
+                        }
+                    });
+                }
+
+                return {
+                    campaign_id: item.campaign_id,
+                    campaign_name: item.campaign_name,
+                    date: item.date_start,
+                    spend: parseFloat(item.spend || 0),
+                    impressions: parseInt(item.impressions || 0),
+                    clicks: parseInt(item.clicks || 0),
+                    leads,
+                    conversions
+                };
+            });
+
+        } catch (error) {
+            throw new Error(`Failed to fetch campaign insights: ${error.message}`);
+        }
+    }
+
 
     /**
      * Get account status

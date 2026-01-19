@@ -12,11 +12,14 @@ router.post('/:companyId/force', async (req, res) => {
         const { companyId } = req.params;
 
         let company;
-        let numericId = parseInt(companyId);
-
-        if (!isNaN(numericId)) {
-            const { data } = await supabase.from('Company').select('*').eq('id', numericId).single();
-            company = data;
+        if (company) {
+            // Already have company
+        } else {
+            // Try searching by name if ID search failed or logic isn't appropriate for UUID
+            // Actually, Supabase .eq('id', uuid) works. 
+            // We can just try to find by ID first.
+            const { data } = await supabase.from('Company').select('*').eq('id', companyId).single();
+            if (data) company = data;
         }
 
         if (!company) {
@@ -55,7 +58,7 @@ router.get('/:companyId/logs', async (req, res) => {
         const { data: logs, error } = await supabase
             .from('SyncLog')
             .select('*')
-            .eq('companyId', parseInt(companyId))
+            .eq('companyId', companyId)
             .order('createdAt', { ascending: false })
             .limit(parseInt(limit));
 

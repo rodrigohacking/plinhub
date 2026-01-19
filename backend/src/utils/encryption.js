@@ -19,8 +19,34 @@ function encrypt(text) {
  */
 function decrypt(ciphertext) {
     if (!ciphertext) return null;
-    const bytes = CryptoJS.AES.decrypt(ciphertext, ENCRYPTION_KEY);
-    return bytes.toString(CryptoJS.enc.Utf8);
+
+    let result = ciphertext;
+    let attempts = 0;
+
+    // Recursive Decryption Loop:
+    // If the result starts with 'U2Fsd' (Salted__ base64), it implies another layer of encryption.
+    // We loop to peel back layers (e.g. Trigger Encrypt + Manual Encrypt).
+    // We stop if it looks like a JWT (eyJ) or if we hit the limit.
+    while (result && typeof result === 'string' && result.startsWith('U2Fsd') && attempts < 5) {
+        attempts++;
+        try {
+            const bytes = CryptoJS.AES.decrypt(result, ENCRYPTION_KEY);
+            const decrypted = bytes.toString(CryptoJS.enc.Utf8);
+
+            if (decrypted && decrypted.length > 0) {
+                result = decrypted;
+            } else {
+                // If decryption fails/returns empty (wrong key or bad data), stop and return last good state (or original)
+                // But usually bytes.toString() is empty on failure.
+                break;
+            }
+        } catch (e) {
+            console.error(`[EncryptionUtil] Decrypt attempt ${attempts} failed:`, e.message);
+            break;
+        }
+    }
+
+    return result;
 }
 
 module.exports = {

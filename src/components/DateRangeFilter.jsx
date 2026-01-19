@@ -2,17 +2,20 @@ import React from 'react';
 import { Calendar } from 'lucide-react';
 import { cn } from '../lib/utils';
 
-export function DateRangeFilter({ value, onChange }) {
-    const options = [
-        { label: 'Todo o Período', value: 'all-time' },
-        { label: 'Mês Atual', value: 'this-month' },
-        { label: 'Mês Anterior', value: 'last-month' },
-        { label: 'Últimos 3 Meses', value: 'last-3-months' },
-        { label: 'Últimos 6 Meses', value: 'last-6-months' },
-        { label: 'Este Ano', value: 'this-year' },
-        { label: 'Data Exata...', value: 'custom' },
-    ];
+const options = [
+    { label: 'Todo o Período', value: 'all-time' },
+    { label: 'Hoje', value: 'today' },
+    { label: 'Ontem', value: 'yesterday' },
+    { label: 'Últimos 7 Dias', value: 'last-7-days' },
+    { label: 'Últimos 30 Dias', value: 'last-30-days' },
+    { label: 'Mês Atual', value: 'this-month' },
+    { label: 'Mês Anterior', value: 'last-month' },
+    { label: 'Últimos 3 Meses', value: 'last-3-months' },
+    { label: 'Este Ano', value: 'this-year' },
+    { label: 'Data Exata...', value: 'custom' },
+];
 
+export function DateRangeFilter({ value, onChange }) {
     const isCustom = value?.startsWith('custom:');
     const [startDate, setStartDate] = React.useState('');
     const [endDate, setEndDate] = React.useState('');
@@ -26,7 +29,7 @@ export function DateRangeFilter({ value, onChange }) {
                 setEndDate(parts[2]);
             }
         }
-    }, []);
+    }, [value, isCustom]);
 
     const handleSelectChange = (e) => {
         const val = e.target.value;
@@ -102,10 +105,48 @@ export function filterByDateRange(items, range, dateField = 'date') {
             d = new Date(dateVal);
         }
 
+        // Check if date is valid
+        if (isNaN(d.getTime())) return false;
+
         const m = d.getMonth();
         const y = d.getFullYear();
 
+        // Fix: Use End Of Today for upper bound comparison to capture today's data even if current time is AM
+        const endOfToday = new Date(now);
+        endOfToday.setHours(23, 59, 59, 999);
+
         switch (range) {
+            case 'today': {
+                const startOfToday = new Date(now);
+                startOfToday.setHours(0, 0, 0, 0);
+
+                const endOfTodayLocal = new Date(now);
+                endOfTodayLocal.setHours(23, 59, 59, 999);
+
+                return d >= startOfToday && d <= endOfTodayLocal;
+            }
+            case 'yesterday': {
+                const yesterday = new Date(now);
+                yesterday.setDate(yesterday.getDate() - 1);
+                yesterday.setHours(0, 0, 0, 0);
+
+                const yesterdayEnd = new Date(yesterday);
+                yesterdayEnd.setHours(23, 59, 59, 999);
+
+                return d >= yesterday && d <= yesterdayEnd;
+            }
+            case 'last-7-days': {
+                const start7 = new Date(now);
+                start7.setDate(now.getDate() - 7);
+                start7.setHours(0, 0, 0, 0);
+                return d >= start7 && d <= endOfToday;
+            }
+            case 'last-30-days': {
+                const start30 = new Date(now);
+                start30.setDate(now.getDate() - 30);
+                start30.setHours(0, 0, 0, 0);
+                return d >= start30 && d <= endOfToday;
+            }
             case 'all-time':
                 return true;
             case 'this-month':
@@ -121,14 +162,14 @@ export function filterByDateRange(items, range, dateField = 'date') {
                 start3.setMonth(start3.getMonth() - 2); // Current + 2 prev = 3
                 start3.setDate(1);
                 start3.setHours(0, 0, 0, 0);
-                return d >= start3 && d <= now;
+                return d >= start3 && d <= endOfToday;
             }
             case 'last-6-months': {
                 const start6 = new Date(now);
                 start6.setMonth(start6.getMonth() - 5);
                 start6.setDate(1);
                 start6.setHours(0, 0, 0, 0);
-                return d >= start6 && d <= now;
+                return d >= start6 && d <= endOfToday;
             }
             case 'this-year':
                 return y === currentYear;

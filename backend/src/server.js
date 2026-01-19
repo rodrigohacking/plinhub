@@ -68,15 +68,43 @@ app.get('/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Proxy Route for Pipefy (Bypassing CORS)
+// Proxy Route for Pipefy (Bypassing CORS + Backend OAuth Injection)
 app.post('/api/pipefy', async (req, res) => {
     try {
-        const { query } = req.body;
-        const authHeader = req.headers.authorization;
+        const { query, variables } = req.body;
+        // Check for Backend Auth Config
+        // Check for Backend Auth Config
+        const clientId = process.env.PIPEFY_CLIENT_ID;
+        const clientSecret = process.env.PIPEFY_CLIENT_SECRET;
+        const persistentToken = process.env.PIPEFY_TOKEN; // User requested override
 
-        if (!authHeader) {
-            console.warn('[Proxy] Missing Auth Header');
-            return res.status(401).json({ error: 'Missing Authorization header' });
+        let token = req.headers.authorization?.replace('Bearer ', '');
+
+        // PRIORITY 1: Persistent PAT (If set, ALWAYS use it)
+        if (persistentToken) {
+            token = persistentToken;
+        }
+        // PRIORITY 2: OAuth (If configured)
+        else if (clientId && clientSecret) {
+            try {
+                if (!global.pipefyAccessToken) {
+                    console.log('[Proxy] Fetching new Pipefy Token...');
+                    const authRes = await axios.post('https://app.pipefy.com/oauth/token', {
+                        client_id: clientId,
+                        client_secret: clientSecret
+                    });
+                    global.pipefyAccessToken = authRes.data.access_token;
+                }
+                token = global.pipefyAccessToken;
+            } catch (authErr) {
+                console.error('[Proxy] Auth Failed:', authErr.response?.data || authErr.message);
+                // Allow fallback to client token if this fails
+            }
+        }
+
+        if (!token) {
+            console.warn('[Proxy] Missing Auth Token (Client not sent & No Backend Config)');
+            return res.status(401).json({ error: 'Missing Authorization' });
         }
 
         if (!query) {
@@ -84,10 +112,10 @@ app.post('/api/pipefy', async (req, res) => {
         }
 
         const response = await axios.post('https://api.pipefy.com/graphql',
-            { query },
+            { query, variables },
             {
                 headers: {
-                    'Authorization': authHeader,
+                    'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
                 }
             }
@@ -100,6 +128,11 @@ app.post('/api/pipefy', async (req, res) => {
         const data = error.response?.data || error.message;
 
         console.error(`[Pipefy Proxy] Error ${status}:`, JSON.stringify(data).slice(0, 300));
+
+        // If 401, maybe token expired? Clear global cache
+        if (status === 401) {
+            global.pipefyAccessToken = null;
+        }
 
         res.status(status).json({
             error: {
