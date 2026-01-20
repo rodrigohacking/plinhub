@@ -4,7 +4,7 @@ import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
     LineChart, Line, Legend, Cell, PieChart, Pie
 } from 'recharts';
-import { DollarSign, UserPlus, Target, MousePointer, TrendingUp, Filter, Instagram, Globe, Search, Users, Ban, CircleDollarSign, PieChart as PieChartIcon } from 'lucide-react';
+import { DollarSign, UserPlus, Target, MousePointer, TrendingUp, Filter, Instagram, Globe, Search, Users, Ban, CircleDollarSign, PieChart as PieChartIcon, Leaf } from 'lucide-react';
 import { KPICard } from './KPICard';
 import { formatCurrency, formatNumber, formatPercent, cn } from '../lib/utils';
 import { DateRangeFilter, filterByDateRange } from './DateRangeFilter';
@@ -12,6 +12,7 @@ import { DateRangeFilter, filterByDateRange } from './DateRangeFilter';
 export function DashboardMarketing({ company, data }) {
     const [dateRange, setDateRange] = useState('this-month');
     const [activeTab, setActiveTab] = useState('geral');
+    const [creativesTab, setCreativesTab] = useState('creatives'); // 'creatives' or 'campaigns'
 
     // Determine if company sells insurance products
     const isInsuranceCompany = company?.name?.toLowerCase().includes('andar');
@@ -126,9 +127,40 @@ export function DashboardMarketing({ company, data }) {
             }
         };
 
-        const createdDeals = filterByProduct(filteredByDate);
-        const wonDeals = filterByProduct(filteredByDateClosed.filter(d => d.status === 'won' || ['338889923', '338889934'].includes(String(d.phaseId)) || normalize(d.phaseName).includes('enviado ao cliente')));
-        const qualifiedDeals = filterByProduct(filteredByDate.filter(d => d.status === 'qualified' || d.status === 'won'));
+        // META ADS Filter Logic - Apply to ALL tabs
+        const filterByMetaAds = (deals) => {
+            return deals.filter(d => {
+                const hasMetaTag = d.labels?.some(label =>
+                    label?.toUpperCase().includes('META ADS') ||
+                    label?.toUpperCase() === 'META ADS'
+                );
+                return hasMetaTag;
+            });
+        };
+
+        // Apply both product and META ADS filters
+        const createdDealsFiltered = filterByProduct(filteredByDate);
+        const createdDeals = filterByMetaAds(createdDealsFiltered);
+
+        const wonDealsFiltered = filterByProduct(
+            filteredByDateClosed.filter(d => {
+                const pName = normalize(d.phaseName);
+                return d.status === 'won' ||
+                    ['338889923', '338889934'].includes(String(d.phaseId)) ||
+                    pName.includes('enviado ao cliente') ||
+                    pName.includes('apolice fechada') ||
+                    pName.includes('fechamento - ganho');
+            })
+        );
+        const wonDeals = wonDealsFiltered;
+
+        const qualifiedDealsFiltered = filterByProduct(
+            filteredByDate.filter(d =>
+                d.status === 'qualified' ||
+                d.status === 'won'
+            )
+        );
+        const qualifiedDeals = filterByMetaAds(qualifiedDealsFiltered);
 
         const leadsRealized = createdDeals.length;
         const qualifiedRealized = qualifiedDeals.length;
@@ -196,12 +228,54 @@ export function DashboardMarketing({ company, data }) {
             },
             roi,
             investmentPrc,
-            cplPrc
+            cplPrc,
+            wonDeals // Expose wonDeals for consistency
         };
 
     }, [data, company.id, dateRange, activeTab]);
 
     const { targets, realized, roi, investmentPrc, cplPrc } = metrics;
+
+    // Top Performers Logic (UTM based)
+    const topPerformers = useMemo(() => {
+        const type = creativesTab === 'creatives' ? 'utm_content' : 'utm_campaign';
+
+        // 1. Use wonDeals (Total 88) but FILTER strictly by Tag for this chart
+        // User Request: "só quero vendas que tenham a tag META ADS"
+        const relevantSales = (metrics.wonDeals || []).filter(d =>
+            d.labels?.some(label =>
+                label?.toUpperCase().includes('META ADS') ||
+                label?.toUpperCase() === 'META ADS'
+            )
+        );
+
+        // 2. Aggregate
+        const stats = {};
+        relevantSales.forEach(s => {
+            // Get raw UTM value
+            let key = s[type];
+
+            // Clean up common pipefy artifacts if present (e.g. ["value"])
+            if (key && typeof key === 'string') {
+                if (key.startsWith('["') && key.endsWith('"]')) {
+                    key = key.replace('["', '').replace('"]', '');
+                }
+            }
+
+            if (!key) key = 'Não Identificado'; // Include deals without UTMs
+
+            if (!stats[key]) {
+                stats[key] = { name: key, count: 0, revenue: 0 };
+            }
+            stats[key].count += 1;
+            stats[key].revenue += (s.amount || 0);
+        });
+
+        // 3. Convert to array and sort
+        return Object.values(stats)
+            .sort((a, b) => b.revenue - a.revenue)
+            .slice(0, 5); // Top 5
+    }, [data, company.id, dateRange, creativesTab]);
 
     // Animation Variants
     const tabVariants = {
@@ -268,7 +342,7 @@ export function DashboardMarketing({ company, data }) {
 
                     {/* ADDITIONAL METRICS - Show in Geral tab for all companies */}
                     {activeTab === 'geral' && (
-                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-7 gap-4">
                             {/* Investimento */}
                             <div className="bg-white dark:bg-[#111] p-6 rounded-2xl shadow-lg border border-gray-100 dark:border-white/5">
                                 <div className="flex items-center gap-2 mb-3">
@@ -282,10 +356,31 @@ export function DashboardMarketing({ company, data }) {
                             <div className="bg-white dark:bg-[#111] p-6 rounded-2xl shadow-lg border border-gray-100 dark:border-white/5">
                                 <div className="flex items-center gap-2 mb-3">
                                     <UserPlus className="w-5 h-5 text-blue-500" />
-                                    <p className="text-xs font-bold text-gray-400 uppercase">Leads Gerados</p>
+                                    <p className="text-xs font-bold text-gray-400 uppercase">Leads</p>
                                 </div>
                                 <p className="text-2xl font-black text-gray-900 dark:text-white">
                                     {formatNumber(realized.leads)}
+                                </p>
+                            </div>
+
+                            {/* Leads Orgânicos */}
+                            <div className="bg-white dark:bg-[#111] p-6 rounded-2xl shadow-lg border border-gray-100 dark:border-white/5">
+                                <div className="flex items-center gap-2 mb-3">
+                                    <Leaf className="w-5 h-5 text-green-500" />
+                                    <p className="text-xs font-bold text-gray-400 uppercase">Leads Orgânicos</p>
+                                </div>
+                                <p className="text-2xl font-black text-gray-900 dark:text-white">
+                                    {(() => {
+                                        const organicLeads = data?.sales?.filter(s => {
+                                            const isCurrentCompany = String(s.companyId) === String(company.id);
+                                            const isInRange = filterByDateRange([s], dateRange, 'createdAt').length > 0;
+                                            const hasOrganicTag = s.labels?.some(label =>
+                                                label?.toUpperCase().includes('ORGÂNICO IG')
+                                            );
+                                            return isCurrentCompany && isInRange && hasOrganicTag;
+                                        }).length || 0;
+                                        return formatNumber(organicLeads);
+                                    })()}
                                 </p>
                             </div>
 
@@ -293,7 +388,7 @@ export function DashboardMarketing({ company, data }) {
                             <div className="bg-white dark:bg-[#111] p-6 rounded-2xl shadow-lg border border-gray-100 dark:border-white/5">
                                 <div className="flex items-center gap-2 mb-3">
                                     <Target className="w-5 h-5 text-emerald-500" />
-                                    <p className="text-xs font-bold text-gray-400 uppercase">Custo por Lead</p>
+                                    <p className="text-xs font-bold text-gray-400 uppercase">CPL</p>
                                 </div>
                                 <p className="text-2xl font-black text-gray-900 dark:text-white">{formatCurrency(realized.cpl)}</p>
                             </div>
@@ -307,12 +402,13 @@ export function DashboardMarketing({ company, data }) {
                                 <p className="text-2xl font-black text-gray-900 dark:text-white">
                                     {(() => {
                                         const metaSales = data?.sales?.filter(s => {
-                                            const isInRange = filterByDateRange([s], dateRange, 'createdAt').length > 0;
+                                            const isCurrentCompany = String(s.companyId) === String(company.id);
+                                            const isInRange = filterByDateRange([s], dateRange, 'wonDate').length > 0;
                                             const isWon = s.status === 'won' || ['338889923', '338889934'].includes(String(s.phaseId));
                                             const hasMetaTag = s.labels?.some(label =>
                                                 label?.toUpperCase().includes('META ADS') || label?.toUpperCase() === 'META ADS'
                                             );
-                                            return isInRange && isWon && hasMetaTag;
+                                            return isCurrentCompany && isInRange && isWon && hasMetaTag;
                                         }).length || 0;
 
                                         return metaSales > 0 ? formatCurrency(realized.investment / metaSales) : formatCurrency(0);
@@ -325,54 +421,57 @@ export function DashboardMarketing({ company, data }) {
                             <div className="bg-white dark:bg-[#111] p-6 rounded-2xl shadow-lg border border-gray-100 dark:border-white/5">
                                 <div className="flex items-center gap-2 mb-3">
                                     <Instagram className="w-5 h-5 text-purple-500" />
-                                    <p className="text-xs font-bold text-gray-400 uppercase">Vendas (Meta)</p>
+                                    <p className="text-xs font-bold text-gray-400 uppercase">Vendas</p>
                                 </div>
                                 <p className="text-2xl font-black text-gray-900 dark:text-white">
                                     {data?.sales?.filter(s => {
-                                        const isInRange = filterByDateRange([s], dateRange, 'createdAt').length > 0;
+                                        const isCurrentCompany = String(s.companyId) === String(company.id);
+                                        const isInRange = filterByDateRange([s], dateRange, 'wonDate').length > 0;
                                         const isWon = s.status === 'won' || ['338889923', '338889934'].includes(String(s.phaseId));
                                         const hasMetaTag = s.labels?.some(label =>
                                             label?.toUpperCase().includes('META ADS') || label?.toUpperCase() === 'META ADS'
                                         );
-                                        return isInRange && isWon && hasMetaTag;
+                                        return isCurrentCompany && isInRange && isWon && hasMetaTag;
                                     }).length || 0}
                                 </p>
-                                <p className="text-xs text-gray-400 mt-1">Via Facebook/Instagram</p>
                             </div>
 
                             {/* Leads Perdidos */}
                             <div className="bg-white dark:bg-[#111] p-6 rounded-2xl shadow-lg border border-gray-100 dark:border-white/5">
                                 <div className="flex items-center gap-2 mb-3">
                                     <Ban className="w-5 h-5 text-red-500" />
-                                    <p className="text-xs font-bold text-gray-400 uppercase">Leads Perdidos</p>
+                                    <p className="text-xs font-bold text-gray-400 uppercase">Perdidos</p>
                                 </div>
                                 <p className="text-3xl font-black text-red-500">
                                     {data?.sales?.filter(s => {
+                                        const isCurrentCompany = String(s.companyId) === String(company.id);
                                         const isInRange = filterByDateRange([s], dateRange, 'createdAt').length > 0;
                                         const isLost = s.status?.toLowerCase().includes('perdido') || s.status?.toLowerCase().includes('lost');
                                         const hasMetaTag = s.labels?.some(label =>
                                             label?.toUpperCase().includes('META ADS') || label?.toUpperCase() === 'META ADS'
                                         );
-                                        return isInRange && isLost && hasMetaTag;
+                                        return isCurrentCompany && isInRange && isLost && hasMetaTag;
                                     }).length || 0}
                                 </p>
                                 <p className="text-xs text-red-400 mt-1">
-                                    Churn de Oportunidades: {(() => {
+                                    Churn: {(() => {
                                         const metaLeads = data?.sales?.filter(s => {
+                                            const isCurrentCompany = String(s.companyId) === String(company.id);
                                             const isInRange = filterByDateRange([s], dateRange, 'createdAt').length > 0;
                                             const hasMetaTag = s.labels?.some(label =>
                                                 label?.toUpperCase().includes('META ADS') || label?.toUpperCase() === 'META ADS'
                                             );
-                                            return isInRange && hasMetaTag;
+                                            return isCurrentCompany && isInRange && hasMetaTag;
                                         }).length || 0;
 
                                         const metaLost = data?.sales?.filter(s => {
+                                            const isCurrentCompany = String(s.companyId) === String(company.id);
                                             const isInRange = filterByDateRange([s], dateRange, 'createdAt').length > 0;
                                             const isLost = s.status?.toLowerCase().includes('perdido') || s.status?.toLowerCase().includes('lost');
                                             const hasMetaTag = s.labels?.some(label =>
                                                 label?.toUpperCase().includes('META ADS') || label?.toUpperCase() === 'META ADS'
                                             );
-                                            return isInRange && isLost && hasMetaTag;
+                                            return isCurrentCompany && isInRange && isLost && hasMetaTag;
                                         }).length || 0;
 
                                         return metaLeads > 0 ? ((metaLost / metaLeads) * 100).toFixed(1) : 0;
@@ -382,9 +481,10 @@ export function DashboardMarketing({ company, data }) {
                         </div>
                     )}
 
-                    {/* Funil de Conversão - Show in Geral tab for all companies */}
+                    {/* Grid wrapper for Funil & Top Criativos - ONLY VISIBLE IN GERAL TAB */}
                     {activeTab === 'geral' && (
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
                             {/* Funil de Conversão */}
                             <div className="bg-white dark:bg-[#111] p-8 rounded-3xl shadow-xl border border-gray-100 dark:border-white/5">
                                 <div className="flex items-center gap-3 mb-6">
@@ -397,29 +497,18 @@ export function DashboardMarketing({ company, data }) {
 
                                 <div className="space-y-4">
                                     {/* Impressões */}
-                                    <div>
-                                        <div className="flex justify-between items-center mb-2">
-                                            <span className="text-sm font-medium text-gray-600 dark:text-gray-300">Impressões</span>
-                                            <span className="text-sm font-bold text-gray-900 dark:text-white">{formatNumber(realized.impressions || 0)}</span>
-                                        </div>
-                                        <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                                            <div className="bg-blue-500 h-2 rounded-full" style={{ width: '100%' }}></div>
-                                        </div>
+                                    <div className="p-4 bg-gray-50 dark:bg-white/5 rounded-xl flex justify-between items-center">
+                                        <span className="text-sm font-medium text-gray-600 dark:text-gray-300">Impressões</span>
+                                        <span className="text-xl font-bold text-gray-900 dark:text-white">{formatNumber(realized.impressions || 0)}</span>
                                     </div>
 
                                     {/* Cliques */}
-                                    <div>
-                                        <div className="flex justify-between items-center mb-2">
+                                    <div className="p-4 bg-gray-50 dark:bg-white/5 rounded-xl">
+                                        <div className="flex justify-between items-center">
                                             <span className="text-sm font-medium text-gray-600 dark:text-gray-300">Cliques</span>
-                                            <span className="text-sm font-bold text-gray-900 dark:text-white">{formatNumber(realized.clicks || 0)}</span>
+                                            <span className="text-xl font-bold text-gray-900 dark:text-white">{formatNumber(realized.clicks || 0)}</span>
                                         </div>
-                                        <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                                            <div
-                                                className="bg-indigo-500 h-2 rounded-full"
-                                                style={{ width: `${realized.impressions > 0 ? (realized.clicks / realized.impressions * 100) : 0}%` }}
-                                            ></div>
-                                        </div>
-                                        <p className="text-xs text-gray-400 mt-1">
+                                        <p className="text-xs text-gray-400 mt-1 text-right">
                                             CTR: {realized.impressions > 0 ? ((realized.clicks / realized.impressions) * 100).toFixed(2) : 0}%
                                         </p>
                                     </div>
@@ -436,21 +525,66 @@ export function DashboardMarketing({ company, data }) {
                                 </div>
                                 <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">Anúncios que geraram receita</p>
 
-                                <div className="flex gap-4">
-                                    <button className="px-4 py-2 bg-gray-100 dark:bg-white/5 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 border-b-2 border-blue-500">
+                                <div className="flex gap-4 mb-6">
+                                    <button
+                                        onClick={() => setCreativesTab('creatives')}
+                                        className={cn(
+                                            "px-4 py-2 rounded-lg text-sm font-medium transition-colors",
+                                            creativesTab === 'creatives'
+                                                ? "bg-gray-100 dark:bg-white/5 text-gray-700 dark:text-gray-300 border-b-2 border-blue-500"
+                                                : "text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/5"
+                                        )}
+                                    >
                                         Criativos
                                     </button>
-                                    <button className="px-4 py-2 text-sm font-medium text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/5 rounded-lg">
+                                    <button
+                                        onClick={() => setCreativesTab('campaigns')}
+                                        className={cn(
+                                            "px-4 py-2 rounded-lg text-sm font-medium transition-colors",
+                                            creativesTab === 'campaigns'
+                                                ? "bg-gray-100 dark:bg-white/5 text-gray-700 dark:text-gray-300 border-b-2 border-blue-500"
+                                                : "text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/5"
+                                        )}
+                                    >
                                         Campanhas
                                     </button>
                                 </div>
 
-                                <div className="mt-6 flex items-center justify-center h-32 bg-gray-50 dark:bg-white/5 rounded-xl">
-                                    <Instagram className="w-12 h-12 text-gray-300 dark:text-gray-600" />
-                                </div>
+                                {topPerformers.length > 0 ? (
+                                    <div className="space-y-4">
+                                        {topPerformers.map((item, index) => (
+                                            <div key={index} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-white/5 rounded-xl">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="w-8 h-8 flex items-center justify-center bg-white dark:bg-white/10 rounded-full font-bold text-sm text-gray-500">
+                                                        #{index + 1}
+                                                    </div>
+                                                    <div>
+                                                        <p className="font-bold text-gray-900 dark:text-white text-sm line-clamp-1" title={item.name}>
+                                                            {item.name}
+                                                        </p>
+                                                        <p className="text-xs text-gray-400">{item.count} venda{item.count !== 1 ? 's' : ''}</p>
+                                                    </div>
+                                                </div>
+                                                <p className="font-bold text-emerald-600 text-sm whitespace-nowrap">
+                                                    {formatCurrency(item.revenue)}
+                                                </p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <div className="mt-6 flex flex-col items-center justify-center h-32 bg-gray-50 dark:bg-white/5 rounded-xl">
+                                        <Instagram className="w-12 h-12 text-gray-300 dark:text-gray-600 mb-2" />
+                                        <p className="text-sm text-gray-400 dark:text-gray-500">
+                                            {creativesTab === 'creatives'
+                                                ? 'Nenhum criativo com vendas no período'
+                                                : 'Nenhuma campanha com vendas no período'}
+                                        </p>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     )}
+
 
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
@@ -530,7 +664,9 @@ export function DashboardMarketing({ company, data }) {
 
                                 {/* Volume Vendas */}
                                 <div className="p-4 bg-emerald-50/50 dark:bg-emerald-900/10 rounded-2xl border border-emerald-100 dark:border-white/5">
-                                    <p className="text-xs font-bold text-emerald-600/70 uppercase mb-2">Volume Total em Apólices</p>
+                                    <p className="text-xs font-bold text-emerald-600/70 uppercase mb-2">
+                                        {company?.name?.toLowerCase().includes('apolar') ? 'Volume Total em Contratos' : 'Volume Total em Apólices'}
+                                    </p>
                                     <p className="text-3xl font-black text-emerald-600 dark:text-emerald-400">{formatCurrency(realized.volume)}</p>
                                 </div>
 
@@ -562,8 +698,8 @@ export function DashboardMarketing({ company, data }) {
                         Dados filtrados para: {TABS.find(t => t.id === activeTab)?.label}
                     </div>
 
-                </motion.div>
-            </AnimatePresence>
-        </div>
+                </motion.div >
+            </AnimatePresence >
+        </div >
     );
 }

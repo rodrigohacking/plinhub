@@ -24,19 +24,52 @@ export default async function handler(req) {
 
     try {
         const body = await req.json();
-        const authHeader = req.headers.get('authorization');
+        let token = req.headers.get('authorization'); // Default: Client provided token
 
-        if (!authHeader) {
-            return new Response(JSON.stringify({ error: 'Missing Authorization header' }), {
+        // OAuth2 Override (Priority)
+        const clientId = process.env.PIPEFY_CLIENT_ID;
+        const clientSecret = process.env.PIPEFY_CLIENT_SECRET;
+
+        if (clientId && clientSecret) {
+            try {
+                // Exchange Client Credentials for Token
+                const authRes = await fetch('https://app.pipefy.com/oauth/token', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        grant_type: 'client_credentials',
+                        client_id: clientId,
+                        client_secret: clientSecret
+                    })
+                });
+
+                if (authRes.ok) {
+                    const authData = await authRes.json();
+                    if (authData.access_token) {
+                        token = `Bearer ${authData.access_token}`;
+                    } else {
+                        console.error('OAuth success but no access_token:', authData);
+                    }
+                } else {
+                    console.error('OAuth Failed:', await authRes.text());
+                }
+            } catch (authError) {
+                console.error('OAuth Request Error:', authError);
+            }
+        }
+
+        if (!token) {
+            return new Response(JSON.stringify({ error: 'Missing Authorization (No Token or OAuth configured)' }), {
                 status: 401,
                 headers: { 'Content-Type': 'application/json' },
             });
         }
 
+        // Forward to Pipefy GraphQL
         const pipefyRes = await fetch('https://api.pipefy.com/graphql', {
             method: 'POST',
             headers: {
-                'Authorization': authHeader,
+                'Authorization': token,
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify(body),

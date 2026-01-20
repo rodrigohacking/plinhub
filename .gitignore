@@ -5,3 +5,27 @@ dist
 .env
 .DS_Store
 coverage
+
+# Debug Scripts
+debug_*
+backend/debug_*
+backend/check_*
+backend/test_*
+backend/simulate_*
+backend/restore_*
+backend/analyze_*
+backend/get_*
+backend/inspect_*
+backend/investigate_*
+backend/search_*
+backend/show_*
+backend/verify_*
+backend/update_*
+backend/seed_*
+backend/set_*
+backend/list_*
+backend/migration_*
+backend/fix_*
+# Env
+.env
+.env.local

@@ -129,6 +129,65 @@ export function DashboardSales({ company, data }) {
         // Definition: (Lost / Leads Entraram) * 100
         const churnRate = leadsCreatedCount ? (lostCount / leadsCreatedCount) * 100 : 0;
 
+        // SDR Conversion Metrics - Phase-based counts (Conditional by Company)
+        const isAndar = String(company.pipefyPipeId) === '306438109' || (company.name || '').toLowerCase().includes('andar');
+
+        let qualifiedPhaseCount, scheduledMeetingCount, proposalSentCount;
+        let qualifiedToMeetingRate, meetingToProposalRate, proposalToContractRate;
+
+        if (isAndar) {
+            // ANDAR SEGUROS
+            // Qualificado: 338889917
+            const qualifiedDeals = relevantDeals.filter(d => String(d.phaseId) === '338889917');
+            qualifiedPhaseCount = qualifiedDeals.length;
+
+            // Proposta: 338889933
+            const proposalDeals = relevantDeals.filter(d => String(d.phaseId) === '338889933');
+            proposalSentCount = proposalDeals.length;
+
+            // No "Reunião Agendada" for Andar
+            scheduledMeetingCount = 0;
+
+            // Conversion Rates for Andar (only 2 intermediate metrics)
+            qualifiedToMeetingRate = 0; // Not used for Andar
+            meetingToProposalRate = 0; // Not used for Andar
+
+            // Qualificado → Proposta (for Andar)
+            const qualifiedToProposalRate = qualifiedPhaseCount ? (proposalSentCount / qualifiedPhaseCount) * 100 : 0;
+
+            // Proposta → Contrato
+            proposalToContractRate = proposalSentCount ? (wonCount / proposalSentCount) * 100 : 0;
+
+            // Store for return
+            qualifiedToMeetingRate = qualifiedToProposalRate; // Reuse this variable for Andar's "Qualificado → Proposta"
+        } else {
+            // APOLAR (and other companies)
+            // Qualificado: 333620205
+            const qualifiedDeals = relevantDeals.filter(d => String(d.phaseId) === '333620205');
+            qualifiedPhaseCount = qualifiedDeals.length;
+
+            // Reunião Agendada: 333789248
+            const scheduledMeetingDeals = relevantDeals.filter(d => String(d.phaseId) === '333789248');
+            scheduledMeetingCount = scheduledMeetingDeals.length;
+
+            // Proposta Enviada: 333789257
+            const proposalSentDeals = relevantDeals.filter(d => String(d.phaseId) === '333789257');
+            proposalSentCount = proposalSentDeals.length;
+
+            // Conversion Rates for Apolar
+            // Qualificado → Reunião Agendada
+            qualifiedToMeetingRate = qualifiedPhaseCount ? (scheduledMeetingCount / qualifiedPhaseCount) * 100 : 0;
+
+            // Reunião Agendada → Proposta Enviada
+            meetingToProposalRate = scheduledMeetingCount ? (proposalSentCount / scheduledMeetingCount) * 100 : 0;
+
+            // Proposta → Contrato
+            proposalToContractRate = proposalSentCount ? (wonCount / proposalSentCount) * 100 : 0;
+        }
+
+        // Lead Novo → Qualificado (same for both companies)
+        const leadToQualifiedRate = leadsCreatedCount ? (qualifiedCount / leadsCreatedCount) * 100 : 0;
+
         return {
             newCount: newDeals.length,
             qualifiedCount, // Calculated formula
@@ -142,7 +201,15 @@ export function DashboardSales({ company, data }) {
             avgClosingTime,
             leadsCreatedCount, // "Leads Entraram"
             wonDeals, // Exposing Array for Table
-            goals // Dynamic Goals
+            goals, // Dynamic Goals
+            // SDR Conversion Metrics
+            leadToQualifiedRate,
+            qualifiedToMeetingRate,
+            meetingToProposalRate,
+            proposalToContractRate,
+            qualifiedPhaseCount,
+            scheduledMeetingCount,
+            proposalSentCount
         };
     }, [createdDeals, relevantDeals, data.goals, company.id]);
 
@@ -368,7 +435,9 @@ export function DashboardSales({ company, data }) {
                             <CircleDollarSign className="w-8 h-8" />
                         </div>
                         <div>
-                            <p className="text-gray-500 dark:text-gray-400 text-sm font-bold uppercase tracking-wide">Apólices Fechadas</p>
+                            <p className="text-gray-500 dark:text-gray-400 text-sm font-bold uppercase tracking-wide">
+                                {(company.name || '').toLowerCase().includes('apolar') ? 'Contratos Fechados' : 'Apólices Fechadas'}
+                            </p>
                             <h3 className="text-xl md:text-2xl lg:text-4xl font-black text-gray-900 dark:text-white mt-1 break-all">{formatCurrency(metrics.wonValue)}</h3>
                         </div>
                     </div>
@@ -421,76 +490,160 @@ export function DashboardSales({ company, data }) {
                     </ResponsiveContainer>
                 </div>
 
-                <div className="bg-white dark:bg-[#111] p-6 rounded-3xl border border-gray-100 dark:border-white/5 shadow-xl h-[400px]">
-                    <div className="mb-6">
-                        <h3 className="text-xl font-bold text-gray-900 dark:text-white">Origem das Vendas</h3>
-                        <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">Distribuição por canal de aquisição</p>
-                    </div>
-                    <ResponsiveContainer width="100%" height={260}>
-                        <PieChart>
-                            <Pie
-                                data={(() => {
-                                    const counts = {};
-                                    createdDeals.forEach(d => {
-                                        counts[d.channel] = (counts[d.channel] || 0) + 1;
-                                    });
+                {/* Origem dos Leads - Conditional Display */}
+                {(company.name || '').toLowerCase().includes('apolar') || !(String(company.pipefyPipeId) === '306438109' || (company.name || '').toLowerCase().includes('andar')) ? (
+                    // TABLE FORMAT (Apolar and other non-insurance companies)
+                    <div className="bg-white dark:bg-[#111] p-6 rounded-3xl border border-gray-100 dark:border-white/5 shadow-xl h-[400px] flex flex-col">
+                        <div className="mb-6">
+                            <h3 className="text-xl font-bold text-gray-900 dark:text-white">Origem dos Leads</h3>
+                            <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">Distribuição por canal de aquisição</p>
+                        </div>
+                        <div className="overflow-x-auto overflow-y-auto flex-1">
+                            {(() => {
+                                // Calculate metrics per channel
+                                const channelMetrics = {};
 
-                                    // Group small values into "Outros"
-                                    let data = Object.keys(counts).map(k => ({ name: k, value: counts[k] })).sort((a, b) => b.value - a.value);
-
-                                    if (data.length > 5) {
-                                        const top5 = data.slice(0, 5);
-                                        const others = data.slice(5).reduce((acc, curr) => acc + curr.value, 0);
-                                        if (others > 0) {
-                                            top5.push({ name: 'Outros', value: others });
-                                        }
-                                        return top5;
+                                // Count leads per channel
+                                createdDeals.forEach(d => {
+                                    const channel = d.channel || 'Não Identificado';
+                                    if (!channelMetrics[channel]) {
+                                        channelMetrics[channel] = {
+                                            leads: 0,
+                                            sales: 0,
+                                            totalValue: 0
+                                        };
                                     }
-                                    return data;
-                                })()}
-                                cx="50%"
-                                cy="50%"
-                                innerRadius={60}
-                                outerRadius={90}
-                                paddingAngle={5}
-                                dataKey="value"
-                            >
-                                {[...Array(6)].map((_, index) => (
-                                    <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
-                                ))}
-                            </Pie>
-                            <Tooltip />
-                            <Legend
-                                verticalAlign={isMobile ? 'bottom' : 'middle'}
-                                align={isMobile ? 'center' : 'right'}
-                                layout={isMobile ? 'horizontal' : 'vertical'}
-                                wrapperStyle={{ fontSize: '12px', paddingTop: isMobile ? '20px' : '0' }}
-                            />
-                        </PieChart>
-                    </ResponsiveContainer>
-                </div>
-            </div>
+                                    channelMetrics[channel].leads += 1;
+                                });
 
-            {(String(company.pipefyPipeId) === '306438109' || (company.name || '').toLowerCase().includes('andar')) && (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
-                    {/* Existing Pie Chart */}
+                                // Count sales per channel
+                                metrics.wonDeals.forEach(d => {
+                                    const channel = d.channel || 'Não Identificado';
+                                    if (!channelMetrics[channel]) {
+                                        channelMetrics[channel] = {
+                                            leads: 0,
+                                            sales: 0,
+                                            totalValue: 0
+                                        };
+                                    }
+                                    channelMetrics[channel].sales += 1;
+                                    channelMetrics[channel].totalValue += d.amount || 0;
+                                });
+
+                                // Convert to array and sort by lead count
+                                const channelData = Object.entries(channelMetrics)
+                                    .map(([name, data]) => ({
+                                        name,
+                                        leads: data.leads,
+                                        sales: data.sales,
+                                        avgTicket: data.sales > 0 ? data.totalValue / data.sales : 0,
+                                        conversion: data.leads > 0 ? (data.sales / data.leads) * 100 : 0
+                                    }))
+                                    .sort((a, b) => b.leads - a.leads);
+
+                                // Color mapping for channels
+                                const channelColors = {
+                                    'META ADS': '#3b82f6',
+                                    'HARDROCK': '#06b6d4',
+                                    'DISCADOR': '#8b5cf6',
+                                    'BOT': '#a855f7',
+                                    'OUT': '#ec4899',
+                                    'ORGÂNICO IG': '#10b981',
+                                    'PARCEIROS': '#f59e0b',
+                                    'Outros': '#6b7280'
+                                };
+
+                                return (
+                                    <table className="w-full">
+                                        <thead>
+                                            <tr className="border-b border-gray-200 dark:border-white/10">
+                                                <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Canal</th>
+                                                <th className="text-right py-3 px-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Leads</th>
+                                                <th className="text-right py-3 px-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Vendas</th>
+                                                <th className="text-right py-3 px-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Ticket Médio</th>
+                                                <th className="text-right py-3 px-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Conversão</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {channelData.map((channel, index) => {
+                                                const color = channelColors[channel.name] || '#6b7280';
+
+                                                return (
+                                                    <tr
+                                                        key={channel.name}
+                                                        className="border-b border-gray-100 dark:border-white/5 hover:bg-gray-50 dark:hover:bg-white/5 transition-colors"
+                                                    >
+                                                        <td className="py-3 px-4">
+                                                            <div className="flex items-center gap-3">
+                                                                <div
+                                                                    className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                                                                    style={{ backgroundColor: color }}
+                                                                />
+                                                                <span className="font-semibold text-gray-900 dark:text-white text-sm">
+                                                                    {channel.name}
+                                                                </span>
+                                                            </div>
+                                                        </td>
+                                                        <td className="py-3 px-4 text-right">
+                                                            <span className="font-bold text-gray-900 dark:text-white text-sm">
+                                                                {formatNumber(channel.leads)}
+                                                            </span>
+                                                        </td>
+                                                        <td className="py-3 px-4 text-right">
+                                                            <span className="font-bold text-gray-900 dark:text-white text-sm">
+                                                                {formatNumber(channel.sales)}
+                                                            </span>
+                                                        </td>
+                                                        <td className="py-3 px-4 text-right">
+                                                            <span className="font-bold text-gray-900 dark:text-white text-sm">
+                                                                {formatCurrency(channel.avgTicket)}
+                                                            </span>
+                                                        </td>
+                                                        <td className="py-3 px-4 text-right">
+                                                            <span className={`inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-bold ${channel.conversion > 0
+                                                                ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
+                                                                : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
+                                                                }`}>
+                                                                {formatPercent(channel.conversion)}
+                                                            </span>
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
+                                        </tbody>
+                                    </table>
+                                );
+                            })()}
+                        </div>
+                    </div>
+                ) : (
+                    // PIE CHART (Andar Seguros)
                     <div className="bg-white dark:bg-[#111] p-6 rounded-3xl border border-gray-100 dark:border-white/5 shadow-xl h-[400px]">
                         <div className="mb-6">
-                            <h3 className="text-xl font-bold text-gray-900 dark:text-white">Vendas por Tipo de Seguro</h3>
-                            <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">Distribuição de volume</p>
+                            <h3 className="text-xl font-bold text-gray-900 dark:text-white">Origem das Vendas</h3>
+                            <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">Distribuição por canal de aquisição</p>
                         </div>
                         <ResponsiveContainer width="100%" height={260}>
                             <PieChart>
                                 <Pie
                                     data={(() => {
                                         const counts = {};
-                                        // Use 'wonDeals' to show breakdown of actual sales
-                                        metrics.wonDeals.forEach(d => {
-                                            const type = d.insuranceType || 'Não Identificado';
-                                            counts[type] = (counts[type] || 0) + 1;
+                                        createdDeals.forEach(d => {
+                                            counts[d.channel] = (counts[d.channel] || 0) + 1;
                                         });
 
-                                        return Object.keys(counts).map(k => ({ name: k, value: counts[k] })).sort((a, b) => b.value - a.value);
+                                        // Group small values into "Outros"
+                                        let data = Object.keys(counts).map(k => ({ name: k, value: counts[k] })).sort((a, b) => b.value - a.value);
+
+                                        if (data.length > 5) {
+                                            const top5 = data.slice(0, 5);
+                                            const others = data.slice(5).reduce((acc, curr) => acc + curr.value, 0);
+                                            if (others > 0) {
+                                                top5.push({ name: 'Outros', value: others });
+                                            }
+                                            return top5;
+                                        }
+                                        return data;
                                     })()}
                                     cx="50%"
                                     cy="50%"
@@ -499,7 +652,7 @@ export function DashboardSales({ company, data }) {
                                     paddingAngle={5}
                                     dataKey="value"
                                 >
-                                    {[...Array(10)].map((_, index) => (
+                                    {[...Array(6)].map((_, index) => (
                                         <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
                                     ))}
                                 </Pie>
@@ -513,7 +666,11 @@ export function DashboardSales({ company, data }) {
                             </PieChart>
                         </ResponsiveContainer>
                     </div>
+                )}
+            </div>
 
+            {(String(company.pipefyPipeId) === '306438109' || (company.name || '').toLowerCase().includes('andar')) && (
+                <div className="grid grid-cols-1 gap-6 mt-6">
                     {/* NEW: Conversion by Type Table */}
                     <div className="bg-white dark:bg-[#111] p-6 rounded-3xl border border-gray-100 dark:border-white/5 shadow-xl h-[400px] overflow-hidden flex flex-col">
                         <div className="mb-6">
@@ -1051,12 +1208,27 @@ export function DashboardSales({ company, data }) {
                     <h3 className="text-xl font-bold text-gray-900 dark:text-white">Conversão entre Etapas</h3>
                     <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">Eficiência do funil de vendas</p>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    {[
-                        { label: 'Lead Novo → Qualificado', val: 100 * (metrics.qualifiedCount / (metrics.leadsCreatedCount || 1)), color: '#3b82f6' },
-                        { label: 'Qualificado → Proposta', val: 75, color: '#8b5cf6' }, // Mock
-                        { label: 'Proposta → Contrato', val: 40, color: '#10b981' },
-                    ].map((gauge, idx) => (
+                <div className={`grid grid-cols-1 md:grid-cols-2 ${(String(company.pipefyPipeId) === '306438109' || (company.name || '').toLowerCase().includes('andar')) ? 'lg:grid-cols-3' : 'lg:grid-cols-4'} gap-6`}>
+                    {(() => {
+                        const isAndar = String(company.pipefyPipeId) === '306438109' || (company.name || '').toLowerCase().includes('andar');
+
+                        if (isAndar) {
+                            // ANDAR: 3 metrics
+                            return [
+                                { label: 'Lead Novo → Qualificado', val: metrics.leadToQualifiedRate, color: '#3b82f6' },
+                                { label: 'Qualificado → Proposta', val: metrics.qualifiedToMeetingRate, color: '#8b5cf6' },
+                                { label: 'Proposta → Contrato', val: metrics.proposalToContractRate, color: '#10b981' },
+                            ];
+                        } else {
+                            // APOLAR: 4 metrics
+                            return [
+                                { label: 'Lead Novo → Qualificado', val: metrics.leadToQualifiedRate, color: '#3b82f6' },
+                                { label: 'Qualificado → Reunião Agendada', val: metrics.qualifiedToMeetingRate, color: '#8b5cf6' },
+                                { label: 'Reunião Agendada → Proposta Enviada', val: metrics.meetingToProposalRate, color: '#f59e0b' },
+                                { label: 'Proposta → Contrato', val: metrics.proposalToContractRate, color: '#10b981' },
+                            ];
+                        }
+                    })().map((gauge, idx) => (
                         <div key={idx} className="bg-white dark:bg-[#111] p-8 rounded-3xl border border-gray-100 dark:border-white/5 shadow-xl flex flex-col items-center justify-center relative overflow-hidden">
                             <h3 className="text-xs font-bold uppercase text-gray-400 mb-4 tracking-wide">{gauge.label}</h3>
                             <div className="relative w-32 h-32 flex items-center justify-center">

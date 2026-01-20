@@ -1,4 +1,4 @@
-const PIPEFY_API_URL = '/api/pipefy'; // Backend Proxy (Robust)
+const PIPEFY_API_URL = typeof window === 'undefined' ? 'https://api.pipefy.com/graphql' : '/api/pipefy'; // Backend Proxy for Browser, Direct for Node
 
 const KNOWN_ROBUST_CONFIGS = {
   // ANDAR SEGUROS
@@ -319,14 +319,10 @@ export async function fetchPipefyDeals(orgId, pipeId, token, userConfig = {}, se
           // ACCRUAL LOGIC: Use finish date for Won deals.
 
           // SPECIAL CASE: "Enviado ao Cliente" is an active phase (no finished_at).
-          // We MUST NOT use updated_at, otherwise any edit brings the deal to "Today".
-          // We use createdDate to anchor it to its origin, effectively filtering out old "zombie" deals.
+          // User Request (2025-01-20): "são cards ATUALIZADOS nessa data e não criados"
+          // We must use updated_at to capture when they entered this phase/were modified.
           const currentPhaseName = normalize(card.current_phase?.name || '');
-          if (currentPhaseName.includes('enviado ao cliente')) {
-            dealDate = createdDate;
-          } else {
-            dealDate = card.finished_at || card.updated_at || createdDate;
-          }
+          dealDate = card.finished_at || card.updated_at || createdDate;
         }
       } else {
         // ACTIVE LOGIC: Use last update or creation for in-progress deals
@@ -385,17 +381,34 @@ export async function fetchPipefyDeals(orgId, pipeId, token, userConfig = {}, se
 
       if (card.fields && card.fields.length > 0) {
         card.fields.forEach(f => {
+          if (!f.value) return; // Skip empty fields to prevent overwriting valid data
+
           const n = normalize(f.name);
+
           // "Campanha" -> utm_campaign
-          if (n === 'campanha' || n.includes('campaign')) utm_campaign = f.value;
+          if (n === 'utm_campaign' || n === 'campaign' || n === 'campanha' || n.includes('campaign')) {
+            if (!utm_campaign || n === 'utm_campaign') utm_campaign = f.value;
+          }
+
           // "Conteúdo" -> utm_content
-          else if (n === 'conteudo' || n.includes('content') || n.includes('criativo')) utm_content = f.value;
+          else if (n === 'utm_content' || n === 'content' || n === 'conteudo' || n.includes('content') || n.includes('criativo') || n.includes('anuncio') || n.includes('creative') || n.includes('identificacao')) {
+            if (!utm_content || n === 'utm_content') utm_content = f.value;
+          }
+
           // "Termo" / "Público" -> utm_term
-          else if (n === 'termo' || n.includes('term') || n.includes('publico')) utm_term = f.value;
+          else if (n === 'utm_term' || n === 'term' || n === 'termo' || n.includes('term') || n.includes('publico')) {
+            if (!utm_term || n === 'utm_term') utm_term = f.value;
+          }
+
           // "Fonte" -> utm_source
-          else if (n === 'fonte' || n.includes('source') || n.includes('origem')) utm_source = f.value;
+          else if (n === 'utm_source' || n === 'source' || n === 'fonte' || n.includes('source') || n.includes('origem')) {
+            if (!utm_source || n === 'utm_source') utm_source = f.value;
+          }
+
           // "Meio" -> utm_medium
-          else if (n === 'meio' || n.includes('medium')) utm_medium = f.value;
+          else if (n === 'utm_medium' || n === 'medium' || n === 'meio' || n.includes('medium')) {
+            if (!utm_medium || n === 'utm_medium') utm_medium = f.value;
+          }
         });
       }
 
@@ -415,6 +428,7 @@ export async function fetchPipefyDeals(orgId, pipeId, token, userConfig = {}, se
         amount: amount,
         items: 1,
         channel: channel,
+        labels: card.labels ? card.labels.map(l => l.name) : [], // CRITICAL FIX: Preserve all labels
         seller: card.assignees[0]?.name || 'SDR',
         client: card.title,
         status: status,
