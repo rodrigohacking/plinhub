@@ -21,8 +21,10 @@ BigInt.prototype.toJSON = function () {
 const authRoutes = require('./routes/auth');
 const integrationRoutes = require('./routes/integrations');
 const metricsRoutes = require('./routes/metrics');
+const goalsRoutes = require('./routes/goals'); // Restore this
 const syncRoutes = require('./routes/sync');
 const companyRoutes = require('./routes/companies');
+const campaignsRoutes = require('./routes/campaigns'); // New Route
 
 // Jobs
 const { startCronJobs } = require('./jobs/dailySync.cron');
@@ -59,9 +61,11 @@ app.use(passport.session());
 app.use('/api/auth', authRoutes);
 app.use('/api/integrations', integrationRoutes);
 app.use('/api/metrics', metricsRoutes);
+app.use('/api/goals', goalsRoutes);
 app.use('/api/sync', syncRoutes);
-app.use('/api/companies', companyRoutes);
+app.use('/api/campaigns', campaignsRoutes);
 app.use('/api/invites', require('./routes/invite'));
+// Removed duplicate goalsRoutes usage
 
 // Health check
 app.get('/health', (req, res) => {
@@ -76,50 +80,61 @@ app.post('/api/pipefy', async (req, res) => {
         // Check for Backend Auth Config
         const clientId = process.env.PIPEFY_CLIENT_ID;
         const clientSecret = process.env.PIPEFY_CLIENT_SECRET;
-        const persistentToken = process.env.PIPEFY_TOKEN; // User requested override
+        const systemToken = process.env.PIPEFY_TOKEN ? (process.env.PIPEFY_TOKEN.startsWith('Bearer ') ? process.env.PIPEFY_TOKEN : `Bearer ${process.env.PIPEFY_TOKEN}`) : null;
 
+        // AUTH PRIORITY STRATEGY (Vercel Consistent)
+        // 1. Client Token (User/Company specific) - PRIORITY
         let token = req.headers.authorization?.replace('Bearer ', '');
-
-        // PRIORITY 1: Persistent PAT (If set, ALWAYS use it)
-        if (persistentToken) {
-            token = persistentToken;
-        }
-        // PRIORITY 2: OAuth (If configured)
-        else if (clientId && clientSecret) {
-            try {
-                if (!global.pipefyAccessToken) {
-                    console.log('[Proxy] Fetching new Pipefy Token...');
-                    const authRes = await axios.post('https://app.pipefy.com/oauth/token', {
-                        client_id: clientId,
-                        client_secret: clientSecret
-                    });
-                    global.pipefyAccessToken = authRes.data.access_token;
-                }
-                token = global.pipefyAccessToken;
-            } catch (authErr) {
-                console.error('[Proxy] Auth Failed:', authErr.response?.data || authErr.message);
-                // Allow fallback to client token if this fails
-            }
+        if (token && token.toLowerCase() !== 'undefined' && token.toLowerCase() !== 'null') {
+            // Keep it (it's valid)
+        } else {
+            token = null;
         }
 
-        if (!token) {
-            console.warn('[Proxy] Missing Auth Token (Client not sent & No Backend Config)');
-            return res.status(401).json({ error: 'Missing Authorization' });
+        // 2. System Overlord Token (Env Var) - FALLBACK
+        if (!token && systemToken) {
+            token = systemToken.replace('Bearer ', '');
         }
 
         if (!query) {
             return res.status(400).json({ error: 'Missing GraphQL query in body' });
         }
 
-        const response = await axios.post('https://api.pipefy.com/graphql',
-            { query, variables },
-            {
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
+        // Helper to perform fetch
+        const doFetch = async (accessToken) => {
+            if (!accessToken) throw new Error('No access token provided');
+
+            const authHeader = accessToken.startsWith('Bearer ') ? accessToken : `Bearer ${accessToken}`;
+
+            return axios.post('https://api.pipefy.com/graphql',
+                { query, variables },
+                {
+                    headers: {
+                        'Authorization': authHeader,
+                        'Content-Type': 'application/json'
+                    }
                 }
+            );
+        };
+
+        let response;
+        try {
+            // 1. Try with Candidate Token
+            response = await doFetch(token);
+        } catch (initialErr) {
+            // 2. RETRY STRATEGY
+            if (initialErr.response?.status === 401 && systemToken && token !== systemToken.replace('Bearer ', '')) {
+                console.warn('[Proxy] ⚠️ Client Token INVALID (401). Retrying with System Fallback...');
+                try {
+                    response = await doFetch(systemToken);
+                } catch (retryErr) {
+                    // Retry failed too? Throw the retry error (likely original was correct, token is just bad everywhere)
+                    throw retryErr;
+                }
+            } else {
+                throw initialErr; // Not 401, or no system token to try
             }
-        );
+        }
 
         res.json(response.data);
     } catch (error) {
@@ -128,11 +143,6 @@ app.post('/api/pipefy', async (req, res) => {
         const data = error.response?.data || error.message;
 
         console.error(`[Pipefy Proxy] Error ${status}:`, JSON.stringify(data).slice(0, 300));
-
-        // If 401, maybe token expired? Clear global cache
-        if (status === 401) {
-            global.pipefyAccessToken = null;
-        }
 
         res.status(status).json({
             error: {

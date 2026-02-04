@@ -2,6 +2,7 @@
 import { fetchPipefyDeals } from '../services/pipefy';
 import { fetchMetaCampaigns } from '../services/meta';
 import { supabase } from './supabase';
+import { toast } from 'sonner';
 
 export const STORAGE_KEY = 'plin_system_data_v4';
 const COMPANIES_CONFIG_KEY = 'plin_companies_config'; // New: Array of company configs
@@ -480,23 +481,67 @@ export async function getData() {
         console.warn("[getData] Error fetching metrics:", e);
     }
 
+    // 2.5.1 Fetch Goals (Source: 'goals' table)
+    try {
+        if (dbCompanies && dbCompanies.length > 0) {
+            const companyIds = dbCompanies.map(c => c.id);
+            const { data: goalsData, error: goalsError } = await supabase
+                .from('goals')
+                .select('*')
+                .in('companyId', companyIds);
+
+            if (goalsError) {
+                console.warn("[getData] Failed to fetch Goals:", goalsError);
+            } else {
+                const fetchedGoals = (goalsData || []).map(g => ({
+                    companyId: g.companyId,
+                    month: g.month,
+                    revenue: g.revenue || 0,
+                    deals: g.deals || 0,
+                    leads: g.leads || 0,
+                    created_at: g.created_at
+                }));
+
+                // Merge into localData.goals
+                // Overwrite local goals with DB goals if they exist for same month/company
+                const dbGoalKeys = new Set(fetchedGoals.map(g => `${g.companyId}-${g.month}`));
+
+                // Keep local goals that are NOT in DB (yet), add DB goals
+                localData.goals = localData.goals.filter(g => !dbGoalKeys.has(`${g.companyId}-${g.month}`));
+                localData.goals = localData.goals.concat(fetchedGoals);
+
+                console.log(`[getData] Fetched ${fetchedGoals.length} goals from DB.`);
+            }
+        }
+    } catch (e) {
+        console.warn("[getData] Error fetching goals:", e);
+    }
+
     // 2.6 Fetch Campaigns from Supabase (Source of Truth for Meta Ads)
     // Replaces direct frontend API calls
     let dbCampaigns = [];
     try {
         if (dbCompanies && dbCompanies.length > 0) {
-            const companyIds = dbCompanies.map(c => c.id);
-            const { data: campData, error: campError } = await supabase
-                .from('campaigns')
-                .select('*')
-                .in('company_id', companyIds);
+            console.log("Fetching campaigns via Backend API (Bypassing RLS)...");
 
-            if (campError) {
-                console.warn("[getData] Failed to fetch campaigns from DB:", campError);
-            } else {
-                dbCampaigns = campData || [];
-                console.log(`[getData] Fetched ${dbCampaigns.length} campaign records from DB.`);
-            }
+            // Fetch for each company (Limit 90 days by default)
+            const promises = dbCompanies.map(async (company) => {
+                try {
+                    const res = await fetch(`/api/campaigns/${company.id}?range=90d`);
+                    if (res.ok) {
+                        return await res.json();
+                    }
+                    console.warn(`Failed to fetch campaigns for ${company.name}: ${res.status}`);
+                    return [];
+                } catch (err) {
+                    console.warn(`Error fetching campaigns for ${company.name}`, err);
+                    return [];
+                }
+            });
+
+            const results = await Promise.all(promises);
+            dbCampaigns = results.flat();
+            console.log(`[getData] Fetched ${dbCampaigns.length} campaign records from API.`);
         }
     } catch (e) {
         console.warn("[getData] Error fetching campaigns:", e);
@@ -660,6 +705,7 @@ export async function getData() {
                 apiSales = pipefySales.map(s => ({ ...s, companyId: company.id }));
             } catch (e) {
                 console.warn(`Failed to load Pipefy data for company ${company.id}`, e);
+                toast.error(`Erro ao carregar Pipefy (${company.name}): ${e.message}`);
             }
         }
 
@@ -713,17 +759,59 @@ export async function getData() {
     return localData;
 }
 
-// Save Metric (Marketing Goals) to Supabase
+// Save Metric (Marketing Goals) to Supabase - via Backend API
 export async function saveMetric(metric) {
     try {
-        const { error } = await supabase
-            .from('Metric')
-            .upsert(metric, { onConflict: 'companyId, source, date, label' });
+        const response = await fetch('/api/metrics', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(metric)
+        });
 
-        if (error) throw error;
+        if (!response.ok) {
+            const errText = await response.text();
+            throw new Error(`API Error ${response.status}: ${errText}`);
+        }
+
         return true;
     } catch (e) {
         console.error("Error saving metric:", e);
+        throw e;
+    }
+}
+
+// Save Sales Goal to Supabase (using Backend API to bypass RLS)
+export async function saveSalesGoal(goal) {
+    try {
+        // Map Goal Schema to Metric Schema
+        const metric = {
+            companyId: goal.companyId,
+            source: 'sales_goal', // Distinct source
+            date: `${goal.month}-01`, // YYYY-MM-01
+            label: 'monthly',
+            revenue: goal.revenue,              // Faturamento
+            cardsConverted: goal.deals,         // Volume
+            cardsCreated: goal.leads,           // Leads
+            cardsByPhase: JSON.stringify(goal.sdrGoals || {}) // SDR Goals stored as JSON string
+        };
+
+        // Use Proxy to Backend (which has Service Role)
+        const response = await fetch('/api/metrics', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(metric)
+        });
+
+        if (!response.ok) {
+            const errText = await response.text();
+            console.error(`[saveSalesGoal] API Error: ${response.status} - ${errText}`);
+            throw new Error(`API Error ${response.status}: ${errText}`);
+        }
+
+        return true;
+    } catch (e) {
+        console.error("Error saving sales goal:", e);
+        // Re-throw with more detail if possible
         throw e;
     }
 }

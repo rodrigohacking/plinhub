@@ -89,100 +89,114 @@ export function DateRangeFilter({ value, onChange }) {
     );
 }
 
-// Helper to filter dates
-export function filterByDateRange(items, range, dateField = 'date') {
-    const now = new Date();
-    const currentMonth = now.getMonth();
-    const currentYear = now.getFullYear();
+// Internal Helper moved out
+// Internal Helper moved out
+function toBrazilYMD(val) {
+    if (!val) return null;
+    if (typeof val === 'string') {
+        // If YYYY-MM-DD already
+        if (val.match(/^\d{4}-\d{2}-\d{2}$/)) return val;
+        // If ISO string (YYYY-MM-DDTHH:mm:ss...), split and take date part
+        // This avoids timezone shifting (e.g. UTC midnight becoming previous day in Brazil)
+        // We assume the DB stores the "business date" at midnight UTC or similar.
+        if (val.includes('T')) return val.split('T')[0];
+    }
 
-    return items.filter(item => {
-        let dateVal = item[dateField];
-        let d;
-        // Fix: If dateVal is YYYY-MM-DD string, append T12:00:00 to prevent UTC shift
-        if (typeof dateVal === 'string' && dateVal.match(/^\d{4}-\d{2}-\d{2}$/)) {
-            d = new Date(dateVal + 'T12:00:00');
-        } else {
-            d = new Date(dateVal);
+    // Fallback for Date objects or other formats
+    const d = new Date(val);
+    if (isNaN(d.getTime())) return null;
+
+    // If it's a Date object, we might still want to be careful.
+    // Ideally we shouldn't reach here for Campaign dates which come as strings.
+    // But for 'new Date()' (system time), we usually want "Brazil Time".
+
+    const brazilShifted = new Date(d.getTime() - (3 * 60 * 60 * 1000));
+    const y = brazilShifted.getUTCFullYear();
+    const m = String(brazilShifted.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(brazilShifted.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+}
+
+// 3. Helper: Check if a single date is in range (Exported)
+export function isDateInSelectedRange(dateVal, range) {
+    if (!dateVal) return false;
+
+    const itemYMD = toBrazilYMD(dateVal);
+    if (!itemYMD) return false;
+
+    const now = new Date(); // Browser checks system time.
+    const todayYMD = toBrazilYMD(now);
+
+    const brazilNowShifted = new Date(now.getTime() - (3 * 60 * 60 * 1000));
+    const brazilYesterdayShifted = new Date(brazilNowShifted.getTime() - (24 * 60 * 60 * 1000));
+
+    const yYes = brazilYesterdayShifted.getUTCFullYear();
+    const mYes = String(brazilYesterdayShifted.getUTCMonth() + 1).padStart(2, '0');
+    const dYes = String(brazilYesterdayShifted.getUTCDate()).padStart(2, '0');
+    const yesterdayYMD = `${yYes}-${mYes}-${dYes}`;
+
+    switch (range) {
+        case 'today':
+            return itemYMD === todayYMD;
+
+        case 'yesterday':
+            return itemYMD === yesterdayYMD;
+
+        case 'last-7-days':
+        case 'last-30-days':
+        case 'last-3-months':
+        case 'last-6-months': {
+            const daysMap = {
+                'last-7-days': 7,
+                'last-30-days': 30,
+                'last-3-months': 90,
+                'last-6-months': 180
+            };
+            const days = daysMap[range];
+
+            const startShifted = new Date(brazilNowShifted.getTime() - (days * 24 * 60 * 60 * 1000));
+
+            const yStart = startShifted.getUTCFullYear();
+            const mStart = String(startShifted.getUTCMonth() + 1).padStart(2, '0');
+            const dStart = String(startShifted.getUTCDate()).padStart(2, '0');
+            const startYMD = `${yStart}-${mStart}-${dStart}`;
+
+            return itemYMD >= startYMD && itemYMD <= todayYMD;
         }
 
-        // Check if date is valid
-        if (isNaN(d.getTime())) return false;
+        case 'all-time':
+            return true;
 
-        const m = d.getMonth();
-        const y = d.getFullYear();
+        case 'this-month':
+            return itemYMD.slice(0, 7) === todayYMD.slice(0, 7);
 
-        // Fix: Use End Of Today for upper bound comparison to capture today's data even if current time is AM
-        const endOfToday = new Date(now);
-        endOfToday.setHours(23, 59, 59, 999);
+        case 'this-year':
+            return itemYMD.slice(0, 4) === todayYMD.slice(0, 4);
 
-        switch (range) {
-            case 'today': {
-                const startOfToday = new Date(now);
-                startOfToday.setHours(0, 0, 0, 0);
+        case 'last-month': {
+            const currentMonth = parseInt(todayYMD.split('-')[1]);
+            const currentYear = parseInt(todayYMD.split('-')[0]);
 
-                const endOfTodayLocal = new Date(now);
-                endOfTodayLocal.setHours(23, 59, 59, 999);
+            let lastM = currentMonth - 1;
+            let lastY = currentYear;
+            if (lastM === 0) { lastM = 12; lastY -= 1; }
 
-                return d >= startOfToday && d <= endOfTodayLocal;
-            }
-            case 'yesterday': {
-                const yesterday = new Date(now);
-                yesterday.setDate(yesterday.getDate() - 1);
-                yesterday.setHours(0, 0, 0, 0);
+            const targetPrefix = `${lastY}-${String(lastM).padStart(2, '0')}`;
+            return itemYMD.startsWith(targetPrefix);
+        }
 
-                const yesterdayEnd = new Date(yesterday);
-                yesterdayEnd.setHours(23, 59, 59, 999);
-
-                return d >= yesterday && d <= yesterdayEnd;
-            }
-            case 'last-7-days': {
-                const start7 = new Date(now);
-                start7.setDate(now.getDate() - 7);
-                start7.setHours(0, 0, 0, 0);
-                return d >= start7 && d <= endOfToday;
-            }
-            case 'last-30-days': {
-                const start30 = new Date(now);
-                start30.setDate(now.getDate() - 30);
-                start30.setHours(0, 0, 0, 0);
-                return d >= start30 && d <= endOfToday;
-            }
-            case 'all-time':
-                return true;
-            case 'this-month':
-                return m === currentMonth && y === currentYear;
-            case 'last-month': {
-                // Handle Jan -> Dec transition properly
-                const lastM = currentMonth === 0 ? 11 : currentMonth - 1;
-                const lastY = currentMonth === 0 ? currentYear - 1 : currentYear;
-                return m === lastM && y === lastY;
-            }
-            case 'last-3-months': {
-                const start3 = new Date(now);
-                start3.setMonth(start3.getMonth() - 2); // Current + 2 prev = 3
-                start3.setDate(1);
-                start3.setHours(0, 0, 0, 0);
-                return d >= start3 && d <= endOfToday;
-            }
-            case 'last-6-months': {
-                const start6 = new Date(now);
-                start6.setMonth(start6.getMonth() - 5);
-                start6.setDate(1);
-                start6.setHours(0, 0, 0, 0);
-                return d >= start6 && d <= endOfToday;
-            }
-            case 'this-year':
-                return y === currentYear;
-            default:
-                if (range?.startsWith('custom:')) {
-                    const parts = range.split(':');
-                    if (parts.length === 3) {
-                        const start = new Date(parts[1] + 'T00:00:00');
-                        const end = new Date(parts[2] + 'T23:59:59');
-                        return d >= start && d <= end;
-                    }
+        default:
+            if (range?.startsWith('custom:')) {
+                const parts = range.split(':');
+                if (parts.length === 3) {
+                    return itemYMD >= parts[1] && itemYMD <= parts[2];
                 }
-                return true;
-        }
-    });
+            }
+            return true;
+    }
+}
+
+// Optimized Brazil Date Filter (GMT-3 Strict & High Performance)
+export function filterByDateRange(items, range, dateField = 'date') {
+    return items.filter(item => isDateInSelectedRange(item[dateField], range));
 }

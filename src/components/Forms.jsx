@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { toast } from 'sonner';
-import { saveData, saveMetric } from '../lib/storage';
-import { Lock, Save, Target, Megaphone } from 'lucide-react';
+import { saveData, saveMetric, saveSalesGoal } from '../lib/storage';
+import { Lock, Save, Target, Megaphone, CheckCircle, Loader2 } from 'lucide-react';
 
 const PRODUCT_DEFAULTS = {
     'all': { spend: 5000, cpc: 15 },
@@ -19,13 +19,25 @@ export function Forms({ company, data, type, onSuccess }) {
     const [goalType, setGoalType] = useState('sales'); // 'sales' | 'marketing'
     const [selectedProduct, setSelectedProduct] = useState('');
 
+    // UI Feedback States
+    const [status, setStatus] = useState('idle'); // 'idle', 'saving', 'success'
+
     // Pre-fill existing goals
     React.useEffect(() => {
         if (type === 'set-goals') {
             // 1. Sales Goals Logic
             if (goalType === 'sales' && data.goals) {
-                const currentMonth = new Date().toISOString().slice(0, 7);
-                const existing = data.goals.find(g => String(g.companyId) === String(company.id) && g.month === currentMonth);
+                const currentMonth = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }).slice(0, 7);
+                const currentGoal = data.goals.find(g => String(g.companyId) === String(company.id) && g.month === currentMonth);
+
+                // Fallback to latest if current is missing
+                const latestGoal = !currentGoal
+                    ? data.goals
+                        .filter(g => String(g.companyId) === String(company.id) && g.month < currentMonth)
+                        .sort((a, b) => b.month.localeCompare(a.month))[0]
+                    : null;
+
+                const existing = currentGoal || latestGoal;
 
                 if (existing) {
                     const sdrState = {};
@@ -78,7 +90,8 @@ export function Forms({ company, data, type, onSuccess }) {
                     setFormData(prev => ({
                         ...prev,
                         marketing_spend: latestMetric.spend,
-                        marketing_cpc: latestMetric.cpc
+                        marketing_cpc: latestMetric.cpc,
+                        marketing_revenue: latestMetric.revenue // Pre-fill Revenue Goal
                     }));
                 } else {
                     // Use Defaults
@@ -98,6 +111,10 @@ export function Forms({ company, data, type, onSuccess }) {
     const handleSubmit = async (e) => {
         e.preventDefault();
         const timestamp = new Date().toISOString();
+        setStatus('saving');
+
+        // Artificial delay for UX perception (touch feel) if operation is too fast
+        const minDelay = new Promise(resolve => setTimeout(resolve, 600));
 
         if (type === 'add-sale') {
             const newSale = {
@@ -112,8 +129,12 @@ export function Forms({ company, data, type, onSuccess }) {
                 status: 'concluída'
             };
             data.sales.unshift(newSale); // Add to top
+            data.sales.unshift(newSale); // Add to top
             saveData(data);
+            await minDelay;
+            setStatus('success');
             onSuccess();
+            setTimeout(() => setStatus('idle'), 2000);
         } else if (type === 'add-campaign') {
             const newCamp = {
                 id: `camp_new_${Date.now()}`,
@@ -127,14 +148,18 @@ export function Forms({ company, data, type, onSuccess }) {
                 channel: formData.channel || 'Outros'
             };
             data.campaigns.unshift(newCamp);
+            data.campaigns.unshift(newCamp);
             saveData(data);
+            await minDelay;
+            setStatus('success');
             onSuccess();
+            setTimeout(() => setStatus('idle'), 2000);
         } else if (type === 'set-goals') {
 
             if (goalType === 'sales') {
                 // --- Save Sales Goals (Local Storage Logic) ---
                 if (!data.goals) data.goals = [];
-                const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
+                const currentMonth = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }).slice(0, 7); // YYYY-MM
                 const goalIndex = data.goals.findIndex(g => String(g.companyId) === String(company.id) && g.month === currentMonth);
 
                 // Extract SDR Goals
@@ -176,7 +201,26 @@ export function Forms({ company, data, type, onSuccess }) {
                     data.goals.push(newGoal);
                 }
 
-                saveData(data);
+                // Call Database Save via API Loop
+                try {
+                    // await saveSalesGoal(newGoal); // Legacy
+                    const response = await fetch('/api/goals', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(newGoal)
+                    });
+
+                    if (!response.ok) {
+                        const err = await response.text();
+                        throw new Error(err);
+                    }
+                    console.log("Goals saved to DB via API");
+                } catch (err) {
+                    console.error('Failed to save Sales Goal to DB:', err);
+                    toast.error('Erro ao salvar meta no banco de dados. Atualização local apenas.');
+                }
+
+                saveData(data); // Keep local backup as fallback
 
                 // Save marketing goals for non-insurance companies (Apolar)
                 if (!company?.name?.toLowerCase().includes('andar') &&
@@ -201,10 +245,18 @@ export function Forms({ company, data, type, onSuccess }) {
                     }
                 }
 
+                await minDelay;
+                setStatus('success');
+
                 toast.success('Metas de Vendas atualizadas! 🚀', {
                     style: { background: '#10b981', color: 'white', border: 'none' },
                 });
-                onSuccess();
+
+                // Allow user to see "Salvo!" on button before handling success transition
+                setTimeout(() => {
+                    onSuccess();
+                    setStatus('idle');
+                }, 1000);
 
             } else {
                 // --- Save Marketing Product Goals (Supabase Metric) ---
@@ -221,6 +273,7 @@ export function Forms({ company, data, type, onSuccess }) {
                         date: timestamp, // Unique timestamp acts as "current version" effectively
                         spend: parseFloat(formData.marketing_spend || 0),
                         cpc: parseFloat(formData.marketing_cpc || 0), // Using CPC column for CPL Goal
+                        revenue: parseFloat(formData.marketing_revenue || 0) // Saving Revenue Goal
                     };
 
                     await saveMetric(metricParams);
@@ -231,12 +284,20 @@ export function Forms({ company, data, type, onSuccess }) {
                     // No need to saveData() for metrics as they are fetched from DB, but we update in-memory for immediate UI reflect
                     // (Though if user refreshes, it fetches from DB).
 
+                    await minDelay;
+                    setStatus('success');
+
                     toast.success(`Metas de ${selectedProduct} salvas!`, {
                         description: 'Novas metas de marketing definidas.',
                         style: { background: '#10b981', color: 'white', border: 'none' }
                     });
-                    onSuccess();
+
+                    setTimeout(() => {
+                        onSuccess();
+                        setStatus('idle');
+                    }, 1000);
                 } catch (err) {
+                    setStatus('idle');
                     toast.error("Erro ao salvar metas.");
                     console.error(err);
                 }
@@ -350,16 +411,14 @@ export function Forms({ company, data, type, onSuccess }) {
                                 Vendas (Geral)
                             </button>
                             {/* Only show Marketing tab for insurance companies (Andar) */}
-                            {company?.name?.toLowerCase().includes('andar') && (
-                                <button
-                                    type="button"
-                                    onClick={() => setGoalType('marketing')}
-                                    className={`flex-1 flex items-center justify-center gap-2 py-2 text-sm font-medium rounded-lg transition-all ${goalType === 'marketing' ? 'bg-white dark:bg-[#1a1a1a] shadow text-[#FD295E]' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700'}`}
-                                >
-                                    <Megaphone className="w-4 h-4" />
-                                    Marketing (Por Produto)
-                                </button>
-                            )}
+                            <button
+                                type="button"
+                                onClick={() => setGoalType('marketing')}
+                                className={`flex-1 flex items-center justify-center gap-2 py-2 text-sm font-medium rounded-lg transition-all ${goalType === 'marketing' ? 'bg-white dark:bg-[#1a1a1a] shadow text-[#FD295E]' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700'}`}
+                            >
+                                <Megaphone className="w-4 h-4" />
+                                Marketing (Por Produto)
+                            </button>
                         </div>
 
                         {/* SALES GOALS CONTENT */}
@@ -405,41 +464,7 @@ export function Forms({ company, data, type, onSuccess }) {
                                     />
                                 </div>
 
-                                {/* Marketing Goals for non-insurance companies (Apolar) */}
-                                {!company?.name?.toLowerCase().includes('andar') && (
-                                    <div className="grid grid-cols-2 gap-6 pt-6 border-t border-gray-100 dark:border-white/5 mt-6">
-                                        <div>
-                                            <label className="block text-sm font-bold text-gray-900 dark:text-white mb-2">Meta de Investimento (Marketing)</label>
-                                            <div className="relative">
-                                                <span className="absolute left-3 top-3.5 text-gray-400 text-sm">R$</span>
-                                                <input
-                                                    type="number"
-                                                    name="marketing_investment_goal"
-                                                    value={formData.marketing_investment_goal || ''}
-                                                    onChange={handleChange}
-                                                    className="w-full pl-10 p-3 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white bg-white dark:bg-[#1a1a1a] focus:ring-2 focus:ring-[#FD295E] outline-none transition-all"
-                                                    placeholder="3.000,00"
-                                                />
-                                            </div>
-                                            <p className="text-xs text-gray-500 mt-1">Valor alvo para investimento mensal em Meta Ads</p>
-                                        </div>
-                                        <div>
-                                            <label className="block text-sm font-bold text-gray-900 dark:text-white mb-2">Meta de CPL (Custo por Lead)</label>
-                                            <div className="relative">
-                                                <span className="absolute left-3 top-3.5 text-gray-400 text-sm">R$</span>
-                                                <input
-                                                    type="number"
-                                                    name="marketing_cpl_goal"
-                                                    value={formData.marketing_cpl_goal || ''}
-                                                    onChange={handleChange}
-                                                    className="w-full pl-10 p-3 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white bg-white dark:bg-[#1a1a1a] focus:ring-2 focus:ring-[#FD295E] outline-none transition-all"
-                                                    placeholder="50,00"
-                                                />
-                                            </div>
-                                            <p className="text-xs text-gray-500 mt-1">Custo máximo desejado por lead</p>
-                                        </div>
-                                    </div>
-                                )}
+
 
                                 {/* Individual SDR Goals */}
                                 <div className="pt-6 border-t border-gray-100 dark:border-white/5 mt-6">
@@ -541,7 +566,22 @@ export function Forms({ company, data, type, onSuccess }) {
                                             <p className="text-xs text-gray-500 mt-1">Valor alvo para o investimento mensal.</p>
                                         </div>
                                         <div>
-                                            <label className="block text-sm font-bold text-gray-900 dark:text-white mb-2">Meta de CPL (Custo por Lead)</label>
+                                            <label className="block text-sm font-bold text-gray-900 dark:text-white mb-2">Meta de Faturamento</label>
+                                            <div className="relative">
+                                                <span className="absolute left-3 top-3.5 text-gray-400 text-sm">R$</span>
+                                                <input
+                                                    required
+                                                    type="number"
+                                                    name="marketing_revenue"
+                                                    value={formData.marketing_revenue || ''}
+                                                    onChange={handleChange}
+                                                    className="w-full pl-10 p-3 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white bg-white dark:bg-[#1a1a1a] focus:ring-2 focus:ring-[#FD295E] outline-none transition-all"
+                                                />
+                                            </div>
+                                            <p className="text-xs text-gray-500 mt-1">Valor alvo de retorno (ROAS).</p>
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-bold text-gray-900 dark:text-white mb-2">Meta de CPL</label>
                                             <div className="relative">
                                                 <span className="absolute left-3 top-3.5 text-gray-400 text-sm">R$</span>
                                                 <input
@@ -564,10 +604,31 @@ export function Forms({ company, data, type, onSuccess }) {
 
                 <button
                     type="submit"
-                    className="w-full py-4 bg-[#FD295E] hover:bg-[#e11d48] text-white font-bold rounded-xl shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2 mt-6"
+                    disabled={status !== 'idle'}
+                    className={`
+                        w-full py-4 font-bold rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 mt-6
+                        ${status === 'saving' ? 'bg-[#FD295E]/70 cursor-wait' : ''}
+                        ${status === 'success' ? 'bg-green-500 hover:bg-green-600' : 'bg-[#FD295E] hover:bg-[#e11d48]'}
+                        ${status === 'idle' ? 'hover:shadow-xl hover:scale-[1.02] active:scale-[0.98]' : ''} 
+                        text-white
+                    `}
                 >
-                    <Save className="w-5 h-5" />
-                    Salvar Alterações
+                    {status === 'saving' ? (
+                        <>
+                            <Loader2 className="w-5 h-5 animate-spin" />
+                            Salvando...
+                        </>
+                    ) : status === 'success' ? (
+                        <>
+                            <CheckCircle className="w-5 h-5 animate-in zoom-in spin-in-50 duration-300" />
+                            Salvo com Sucesso!
+                        </>
+                    ) : (
+                        <>
+                            <Save className="w-5 h-5" />
+                            Salvar Alterações
+                        </>
+                    )}
                 </button>
             </form>
         </div>

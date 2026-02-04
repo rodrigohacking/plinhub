@@ -93,18 +93,29 @@ export function DashboardSales({ company, data }) {
         const wonCount = wonDeals.length;
 
         // Goals Logic
-        const currentMonth = new Date().toISOString().slice(0, 7);
+        // Use Brazil Timezone for Current Month
+        const currentMonth = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }).slice(0, 7);
 
         // Robust finding with type safety
-        const goalData = data.goals?.find(g => String(g.companyId) === String(company.id) && g.month === currentMonth);
+        const currentGoal = data.goals?.find(g => String(g.companyId) === String(company.id) && g.month === currentMonth);
+
+        // Fallback: Find latest goal (Previous months)
+        const latestGoal = !currentGoal
+            ? (data.goals || [])
+                .filter(g => String(g.companyId) === String(company.id) && g.month < currentMonth)
+                .sort((a, b) => b.month.localeCompare(a.month))[0]
+            : null;
+
+        const goalData = currentGoal || latestGoal;
 
         console.log("DashboardSales: Goals Lookup", {
             hasGoals: !!data.goals,
             count: data.goals?.length,
             currentMonth,
             companyId: company.id,
-            found: goalData,
-            allGoals: data.goals // Debug all goals
+            found: !!goalData,
+            isFallback: !currentGoal && !!latestGoal,
+            usedGoal: goalData
         });
 
         const goals = {

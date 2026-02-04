@@ -196,4 +196,65 @@ router.delete('/:companyId/:type', async (req, res) => {
     }
 });
 
+/**
+ * LIVE FETCH Meta Ads (Real-time data)
+ * GET /api/integrations/:companyId/meta/live
+ */
+router.get('/:companyId/meta/live', async (req, res) => {
+    try {
+        const { companyId } = req.params;
+        const { days = 30 } = req.query; // Default to 30 days window for fetching
+
+        const { data: integration, error } = await supabase
+            .from('Integration')
+            .select('metaAccessToken, metaAdAccountId')
+            .eq('companyId', companyId)
+            .eq('type', 'meta_ads')
+            .single();
+
+        if (error || !integration) {
+            return res.status(404).json({ error: 'Integração Meta Ads não encontrada.' });
+        }
+
+        const accessToken = decrypt(integration.metaAccessToken);
+        const adAccountId = integration.metaAdAccountId;
+
+        // Calculate Date Range
+        const endDate = new Date(); // Today
+        const startDate = new Date();
+        startDate.setDate(startDate.getDate() - parseInt(days));
+
+        // Get Live Insights
+        // We use getCampaignInsights because that's what fills the dashboard tables/charts
+        const insights = await metaAdsService.getCampaignInsights(
+            adAccountId,
+            accessToken,
+            {
+                startDate: startDate.toISOString().split('T')[0],
+                endDate: endDate.toISOString().split('T')[0]
+            },
+            [], // filtering
+            null // company name
+        );
+
+        // BACKGROUND SYNC: Update Database asynchronously so next load is fast/cached
+        // We do this via the sync service to reuse logic (upsert campaigns, etc)
+        // Note: This relies on full SyncService logic which might be heavy.
+        // For now, let's just return the fresh data to UI.
+        // We can trigger a lightweight sync here if needed.
+
+        // Return structured data for Frontend
+        res.json({
+            success: true,
+            fetchedAt: new Date(),
+            range: { start: startDate, end: endDate },
+            data: insights
+        });
+
+    } catch (error) {
+        console.error('Meta Live Fetch Error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
 module.exports = router;

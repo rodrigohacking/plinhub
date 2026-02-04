@@ -306,6 +306,7 @@ export function AdminSettings({ company, onSave }) {
             }
 
             setStatus('success');
+            toast.success("Configurações salvas com sucesso!");
             setTimeout(() => {
                 setStatus('idle');
                 // Trigger the refresh callback if provided (IMPORTANT for App.jsx to reload data)

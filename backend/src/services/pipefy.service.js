@@ -94,6 +94,7 @@ class PipefyService {
       if (!pipeInfo) pipeInfo = response.data.pipe;
 
       const pageCards = response.data.allCards.edges.map(edge => edge.node);
+
       allCards = allCards.concat(pageCards);
 
       hasPreviousPage = response.data.allCards.pageInfo.hasPreviousPage;
@@ -188,6 +189,28 @@ class PipefyService {
 
       const createdDateStr = createdAt.toISOString().split('T')[0];
       const updatedDateStr = updatedAt.toISOString().split('T')[0];
+
+      // CUSTOM DATE LOGIC (Andar Seguros & others using this standard)
+      // If "Data de fechamento da Apólice" exists, use it as the sale date.
+      const customDateFields = ['Data de fechamento da Apólice', 'Data Venda', 'Data de Fechamento'];
+      const closingField = card.fields?.find(f => customDateFields.includes(f.name) && f.value);
+
+      if (closingField) {
+        // Pipefy dates are usually YYYY-MM-DD or DD/MM/YYYY. Let's try to parse.
+        // If YYYY-MM-DD (ISO)
+        if (closingField.value.match(/^\d{4}-\d{2}-\d{2}$/)) {
+          // Treat as UTC or fix timezone? usually strictly date.
+          // Set finishedAt to this date (at noon or end of day to be safe?)
+          // Actually we just need the string YYYY-MM-DD.
+          const parts = closingField.value.split('-');
+          finishedAt.setFullYear(parts[0], parts[1] - 1, parts[2]);
+        } else if (closingField.value.match(/^\d{2}\/\d{2}\/\d{4}$/)) {
+          // DD/MM/YYYY
+          const parts = closingField.value.split('/');
+          finishedAt.setFullYear(parts[2], parts[1] - 1, parts[0]);
+        }
+      }
+
       const finishedDateStr = finishedAt.toISOString().split('T')[0];
 
       const isCreatedInPeriod = createdAt >= start && createdAt <= end;

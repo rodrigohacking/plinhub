@@ -78,8 +78,8 @@ async function syncAndarWithProducts() {
                 impressions: c.impressions,
                 leads: c.leads,
                 conversions: c.conversions,
-                start_date: c.date,
-                end_date: c.date,
+                start_date: `${c.date}T12:00:00Z`,
+                end_date: `${c.date}T12:00:00Z`,
                 channel: 'meta_ads'
             }));
 

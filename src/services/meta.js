@@ -1,4 +1,4 @@
-
+import { toast } from 'sonner';
 const META_API_URL = 'https://graph.facebook.com/v19.0';
 
 export async function fetchMetaCampaigns(adAccountId, token, productFilter = null) {
@@ -16,11 +16,13 @@ export async function fetchMetaCampaigns(adAccountId, token, productFilter = nul
 
     try {
         // Query Params:
-        // - effective_status: include PAUSED campaigns (default is ACTIVE only often)
+        // - effective_status: include PAUSED campaigns
         // - limit: 500 to catch everything
         // FIXED: Enforce specific Account ID as per requirement
         const TARGET_ACT_ID = '631649546531729';
 
+        // BACK TO BASICS: No date_preset. Trusting API default (usually 28d or similar).
+        // This configuration worked before (albeit with date skew), so it restores data visibility.
         let query = `fields=${fields}&limit=500&access_token=${token}`;
 
         if (productFilter) {
@@ -45,6 +47,7 @@ export async function fetchMetaCampaigns(adAccountId, token, productFilter = nul
         }
 
         const campaigns = result.data || [];
+        console.log(`[Meta API] Fetched ${campaigns.length} campaigns. Insights present: ${campaigns.some(c => c.insights)}`);
 
         return campaigns.map(camp => {
             const rawInsights = camp.insights?.data || [];
@@ -101,6 +104,7 @@ export async function fetchMetaCampaigns(adAccountId, token, productFilter = nul
 
     } catch (error) {
         console.error('Meta Fetch Error:', error);
-        throw error; // Propagate error to caller (AdminSettings) to show in UI
+        toast.error(`Erro Facebook Ads: ${error.message}`);
+        throw error;
     }
 }

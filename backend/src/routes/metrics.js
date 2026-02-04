@@ -33,9 +33,35 @@ router.get('/:companyId', async (req, res) => {
         const { data: metrics, error } = await query;
 
         if (error) throw new Error(error.message);
-
         res.json(metrics || []);
     } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+/**
+ * Save/Update a Metric (Goal)
+ * POST /api/metrics
+ */
+router.post('/', async (req, res) => {
+    try {
+        const metric = req.body;
+
+        // Critical Validation
+        if (!metric.companyId || !metric.source || !metric.date) {
+            return res.status(400).json({ error: 'Missing required fields: companyId, source, date' });
+        }
+
+        // Use backend supabase client (admin privileges usually)
+        const { error } = await supabase
+            .from('Metric')
+            .upsert(metric, { onConflict: 'companyId, source, date, label' });
+
+        if (error) throw new Error(error.message);
+
+        res.json({ success: true });
+    } catch (error) {
+        console.error("Error saving metric via API:", error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -168,8 +194,15 @@ router.get('/:companyId/unified', async (req, res) => {
             if (tag === 'all') {
                 const VALID_LABELS = ['condominial', 'rc_sindico', 'automovel', 'residencial'];
                 const label = (m.label || '').toLowerCase();
-                const isValid = VALID_LABELS.some(vl => label.includes(vl));
-                if (!isValid) return acc;
+
+                // Allow general Meta Ads labels (stored as 'all' or 'META ADS' by sync service)
+                if (label === 'all' || label === 'meta ads') {
+                    // Pass through
+                } else {
+                    // Otherwise enforce product validation (mainly for Pipefy or granular splits)
+                    const isValid = VALID_LABELS.some(vl => label.includes(vl));
+                    if (!isValid) return acc;
+                }
             }
             return {
                 spend: acc.spend + (m.spend || 0),
@@ -311,6 +344,7 @@ router.get('/:companyId/unified', async (req, res) => {
             availableTags: availableTags
         });
     } catch (error) {
+        console.error("CRITICAL METRICS ERROR:", error);
         res.status(500).json({ error: error.message });
     }
 });

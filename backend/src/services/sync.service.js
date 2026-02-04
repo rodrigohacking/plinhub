@@ -95,10 +95,10 @@ class SyncService {
 
         const companyName = company?.name || null;
 
-        // Get last 30 days
+        // Get last 90 days (Increased to fix historical data visibility)
         const endDate = new Date();
         const startDate = new Date();
-        startDate.setDate(startDate.getDate() - 30);
+        startDate.setDate(startDate.getDate() - 90);
 
         const insights = await metaAdsService.getInsights(
             adAccountId,
@@ -189,7 +189,7 @@ class SyncService {
                     endDate: endDate.toISOString().split('T')[0]
                 },
                 [], // filtering
-                companyName // Pass company name for filtering
+                null // Pass company name for filtering
             );
 
             // 3. Insert new campaign records

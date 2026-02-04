@@ -65,6 +65,7 @@ model Metric {
   
   // Meta Ads Metrics
   spend           Float?
+  revenue         Float?  // Added for Marketing Goals (ROAS target)
   impressions     Int?
   clicks          Int?
   conversions     Int?

@@ -9,9 +9,11 @@
     "dev:backend": "npm run dev --prefix backend",
     "build": "vite build",
     "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "postinstall": "prisma generate --schema=./backend/prisma/schema.prisma"
   },
   "dependencies": {
+    "@prisma/client": "^5.10.2",
     "@radix-ui/react-slot": "^1.2.4",
     "@supabase/supabase-js": "^2.87.2",
     "@types/three": "^0.182.0",
@@ -32,6 +34,7 @@
     "node-cron": "^3.0.3",
     "passport": "^0.7.0",
     "passport-facebook": "^3.0.0",
+    "prisma": "^5.10.2",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.22.3",

@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { createClient } = require('@supabase/supabase-js');
+const { decrypt } = require('../utils/encryption');
 
 // Initialize Supabase Service Client (Bypasses RLS)
 const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
@@ -49,7 +50,17 @@ router.get('/', async (req, res) => {
                     if (integration.type === 'pipefy') {
                         company.pipefyOrgId = integration.pipefyOrgId;
                         company.pipefyPipeId = integration.pipefyPipeId;
-                        company.pipefyToken = integration.pipefyToken;
+                        // Decrypt Token if present
+                        if (integration.pipefyToken) {
+                            try {
+                                company.pipefyToken = integration.pipefyToken.includes(':')
+                                    ? decrypt(integration.pipefyToken)
+                                    : integration.pipefyToken; // Fallback if regular string
+                            } catch (e) {
+                                console.warn(`Failed to decrypt Pipefy token for company ${c.id}`);
+                                company.pipefyToken = null;
+                            }
+                        }
 
                         // Parse JSON settings and merge (Flatten)
                         if (integration.settings) {
@@ -65,7 +76,16 @@ router.get('/', async (req, res) => {
                     }
                     if (integration.type === 'meta_ads') {
                         company.metaAdAccountId = integration.metaAdAccountId;
-                        company.metaToken = integration.metaAccessToken;
+                        // Decrypt Meta Token too if needed by frontend
+                        if (integration.metaAccessToken) {
+                            try {
+                                company.metaToken = integration.metaAccessToken.includes(':')
+                                    ? decrypt(integration.metaAccessToken)
+                                    : integration.metaAccessToken;
+                            } catch (e) {
+                                // Silent fail usually ok, frontend rarely uses raw meta token anymore
+                            }
+                        }
                     }
                 });
             }

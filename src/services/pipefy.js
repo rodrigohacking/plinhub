@@ -56,6 +56,7 @@ export async function fetchPipefyDeals(orgId, pipeId, token, userConfig = {}, se
         finished_at
         updated_at
         current_phase { name id }
+        current_phase_age
         labels { name }
         fields { name value }
         createdAt
@@ -73,9 +74,15 @@ export async function fetchPipefyDeals(orgId, pipeId, token, userConfig = {}, se
   try {
     // 1. Get All Phases
     const phasesQuery = `{ pipe(id: ${pipeId}) { phases { id name cards_count } } }`;
+
+    const headers = { 'Content-Type': 'application/json' };
+    if (token && token !== 'undefined' && token !== 'null') {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
     const phasesRes = await fetch(PIPEFY_API_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      headers: headers,
       body: JSON.stringify({ query: phasesQuery })
     });
 
@@ -135,6 +142,7 @@ export async function fetchPipefyDeals(orgId, pipeId, token, userConfig = {}, se
                                         finished_at
                                         updated_at
                                         current_phase { name id }
+                                        current_phase_age
                                         labels { name }
                                         fields { name value }
                                         createdAt
@@ -295,38 +303,58 @@ export async function fetchPipefyDeals(orgId, pipeId, token, userConfig = {}, se
         status = 'qualified';
       }
 
-      // 3. Date Mapping (STRICT SPEC FROM USER)
-      // "Para Leads Perdidos: USAR EXCLUSIVAMENTE a data de criação do card"
+      // 3. Date Mapping (CONDITIONAL LOGIC)
+      // Apolar (305634232) -> Use LEGACY "Update" Logic (User Request)
+      // Others (Andar) -> Use NEW "Data de Vigência" Logic (Fix Inflation)
+
       let dealDate;
       const createdDate = card.createdAt || card.created_at;
+      const isApolar = String(pipeId) === '305634232';
 
-      // New Priority: Search for explicit "Sale Date" field to override everything
-      // This solves the "Edit Side Effect" -> User can freeze date by filling this field
-      const explicitDateField = card.fields?.find(f => {
-        const n = normalize(f.name);
-        return n.includes('data da venda') || n.includes('data de fechamento') || n.includes('closing date') || n.includes('data venda');
-      });
-
-      if (status === 'lost') {
-        // COHORT LOGIC: Always use creation date for Lost deals
-        dealDate = createdDate;
-      } else if (status === 'won') {
-        if (explicitDateField && explicitDateField.value) {
-          // HIGHEST PRIORITY: Manual Date Field
-          // Handles "YYYY-MM-DD" or ISO
-          dealDate = explicitDateField.value.split("T")[0];
+      if (isApolar) {
+        // --- LEGACY LOGIC (APOLAR) ---
+        if (status === 'lost') {
+          dealDate = createdDate;
         } else {
-          // ACCRUAL LOGIC: Use finish date for Won deals.
-
-          // SPECIAL CASE: "Enviado ao Cliente" is an active phase (no finished_at).
-          // User Request (2025-01-20): "são cards ATUALIZADOS nessa data e não criados"
-          // We must use updated_at to capture when they entered this phase/were modified.
-          const currentPhaseName = normalize(card.current_phase?.name || '');
+          // Simple: If finished, use finished. If active, use updated.
+          // This allows them to "bump" sales to today by editing.
           dealDate = card.finished_at || card.updated_at || createdDate;
         }
       } else {
-        // ACTIVE LOGIC: Use last update or creation for in-progress deals
-        dealDate = card.finished_at || card.updated_at || createdDate;
+        // --- ROBUST LOGIC (ANDAR / DEFAULT) ---
+
+        // New Priority: Search for explicit "Sale Date" field to override everything
+        const explicitDateField = card.fields?.find(f => {
+          const n = normalize(f.name);
+          return n.includes('data da venda') || n.includes('data de fechamento') || n.includes('closing date') || n.includes('data venda') || n.includes('data de vigencia') || n.includes('vigencia');
+        });
+
+        if (status === 'lost') {
+          dealDate = createdDate;
+        } else if (status === 'won') {
+          if (explicitDateField && explicitDateField.value) {
+            // HIGHEST PRIORITY: Manual Date Field
+            const rawVal = explicitDateField.value;
+            const brDate = rawVal.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+            if (brDate) {
+              dealDate = `${brDate[3]}-${brDate[2]}-${brDate[1]}`;
+            } else {
+              dealDate = rawVal.split("T")[0];
+            }
+          } else {
+            // ACCRUAL LOGIC: Use finish date for Won deals.
+            // SPECIAL CASE: "Enviado ao Cliente" (Active Phase)
+            let calculatedPhaseStart = null;
+            if (card.current_phase_age) {
+              const now = new Date();
+              calculatedPhaseStart = new Date(now.getTime() - (card.current_phase_age * 1000));
+            }
+
+            dealDate = card.finished_at || calculatedPhaseStart?.toISOString() || card.updated_at || createdDate;
+          }
+        } else {
+          dealDate = card.finished_at || card.updated_at || createdDate;
+        }
       }
 
       // 4. Loss Reason Mapping (Robust Multi-Try)
@@ -433,7 +461,8 @@ export async function fetchPipefyDeals(orgId, pipeId, token, userConfig = {}, se
         client: card.title,
         status: status,
         lossReason: lossReason,
-        wonDate: card.finished_at,
+        wonDate: dealDate,
+        date: dealDate, // Alias for consistency
         phaseId: phaseId,
         phaseName: card.current_phase?.name,
         // UTMs

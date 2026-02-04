@@ -1,12 +1,22 @@
 {
     "rewrites": [
         {
+            "source": "/api/pipefy",
+            "destination": "/api/pipefy"
+        },
+        {
             "source": "/api/(.*)",
-            "destination": "/api/$1"
+            "destination": "/api/index.js"
         },
         {
             "source": "/(.*)",
             "destination": "/index.html"
+        }
+    ],
+    "crons": [
+        {
+            "path": "/api/sync/daily",
+            "schedule": "0 9 * * *"
         }
     ]
 }

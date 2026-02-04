@@ -1,6 +1,6 @@
 const axios = require('axios');
 
-const META_API_VERSION = 'v18.0';
+const META_API_VERSION = 'v24.0';
 const META_API_BASE = `https://graph.facebook.com/${META_API_VERSION}`;
 
 class MetaAdsService {
@@ -204,10 +204,26 @@ class MetaAdsService {
                 let conversions = 0;
 
                 if (item.actions) {
+                    // Extract values
+                    const totalLeadsAction = item.actions.find(a => a.action_type === 'lead');
+                    const pixelLeadsAction = item.actions.find(a => a.action_type === 'offsite_conversion.fb_pixel_lead');
+                    const formLeadsAction = item.actions.find(a => a.action_type === 'on_facebook_lead');
+
+                    const totalLeads = parseInt(totalLeadsAction?.value || 0);
+                    const pixelLeads = parseInt(pixelLeadsAction?.value || 0);
+
+                    // User strictly wants "Leads (Formulário)". 
+                    // If 'on_facebook_lead' exists, use it.
+                    // If not, infer it: Total - Pixel.
+                    if (formLeadsAction) {
+                        leads = parseInt(formLeadsAction.value);
+                    } else {
+                        // Fallback inference: Total 'lead' includes pixel. We want to exclude pixel.
+                        leads = Math.max(0, totalLeads - pixelLeads);
+                    }
+
+                    // Conversions logic
                     item.actions.forEach(action => {
-                        if (['lead', 'offsite_conversion.fb_pixel_lead', 'on_facebook_lead'].includes(action.action_type)) {
-                            leads += parseInt(action.value || 0);
-                        }
                         if (action.action_type === 'offsite_conversion.fb_pixel_purchase' || action.action_type === 'purchase') {
                             conversions += parseInt(action.value || 0);
                         }

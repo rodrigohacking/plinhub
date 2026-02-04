@@ -182,7 +182,17 @@ function MainApp() {
             case 'sales':
                 return <DashboardSales data={data} company={selectedCompany} />;
             case 'marketing':
-                return <DashboardMarketing data={data} company={selectedCompany} />;
+                return <DashboardMarketing
+                    data={data}
+                    company={selectedCompany}
+                    onRefresh={() => {
+                        setIsLoading(true);
+                        getData().then(d => {
+                            setData(d);
+                            setIsLoading(false);
+                        });
+                    }}
+                />;
             case 'settings':
                 return <AdminSettings
                     data={data}
