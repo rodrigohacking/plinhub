@@ -460,22 +460,30 @@ export async function getData() {
     }
 
     // 2.5 Fetch Metrics (Targets/Goals) from Supabase 'Metric' table
-    // Required for new Marketing Dashboard Product Tabs
+    // REFACTORED: Use Backend API to bypass RLS (Production Fix)
     let dbMetrics = [];
     try {
         if (dbCompanies && dbCompanies.length > 0) {
-            const companyIds = dbCompanies.map(c => c.id);
-            const { data: metricsData, error: metricsError } = await supabase
-                .from('Metric')
-                .select('*')
-                .in('companyId', companyIds);
+            console.log("Fetching metrics via Backend API...");
 
-            if (metricsError) {
-                console.warn("[getData] Failed to fetch Metrics:", metricsError);
-            } else {
-                dbMetrics = metricsData || [];
-                console.log(`[getData] Fetched ${dbMetrics.length} metrics/targets.`);
-            }
+            const promises = dbCompanies.map(async (company) => {
+                try {
+                    // Fetch 365 days of history to support dashboard filters
+                    const res = await fetch(`/api/metrics/${company.id}?range=365d`);
+                    if (res.ok) {
+                        return await res.json();
+                    }
+                    console.warn(`Failed to fetch metrics for ${company.name}: ${res.status}`);
+                    return [];
+                } catch (err) {
+                    console.warn(`Error fetching metrics for ${company.name}`, err);
+                    return [];
+                }
+            });
+
+            const results = await Promise.all(promises);
+            dbMetrics = results.flat();
+            console.log(`[getData] Fetched ${dbMetrics.length} metrics/targets from API.`);
         }
     } catch (e) {
         console.warn("[getData] Error fetching metrics:", e);
