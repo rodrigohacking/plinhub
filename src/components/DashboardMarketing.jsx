@@ -479,6 +479,7 @@ export function DashboardMarketing({ company, data, onRefresh }) {
                 investment: investmentRealized,
                 leads: effectiveLeads, // Using Pipefy List count
                 qualified: qualifiedRealized,
+                lost: totalLost, // Consistent Robust Calculation
                 sales: salesRealized,
                 cpl: cplRealized,
                 volume: salesVolume,
@@ -758,57 +759,10 @@ export function DashboardMarketing({ company, data, onRefresh }) {
                                     <p className="text-xs font-bold text-gray-400 uppercase">Perdidos</p>
                                 </div>
                                 <p className="text-3xl font-black text-red-500">
-                                    {data?.sales?.filter(s => {
-                                        const isCurrentCompany = String(s.companyId) === String(company.id);
-                                        const isInRange = filterByDateRange([s], dateRange, 'createdAt').length > 0;
-
-                                        // Robust Lost Check
-                                        const pName = s.phaseName ? s.phaseName.toLowerCase() : '';
-                                        const isLost = s.status === 'lost' ||
-                                            ['338889931'].includes(String(s.phaseId)) ||
-                                            pName.includes('perdido') ||
-                                            pName.includes('lost');
-
-                                        // Strict Meta Tag Check (Match Created/Won logic)
-                                        const hasMetaTag = s.labels?.some(label =>
-                                            label?.toUpperCase().includes('META ADS') || label?.toUpperCase() === 'META ADS'
-                                        ) || [s.utm_source, s.utm_medium, s.utm_campaign].some(val => {
-                                            const v = (val || '').toLowerCase();
-                                            return v.includes('meta') || v.includes('facebook') || v.includes('instagram');
-                                        });
-                                        return isCurrentCompany && isInRange && isLost && hasMetaTag;
-                                    }).length || 0}
+                                    {realized.lost}
                                 </p>
                                 <p className="text-xs text-red-400 mt-1">
-                                    Churn: {(() => {
-                                        const metaLeads = data?.sales?.filter(s => {
-                                            const isCurrentCompany = String(s.companyId) === String(company.id);
-                                            const isInRange = filterByDateRange([s], dateRange, 'createdAt').length > 0;
-                                            const hasMetaTag = s.labels?.some(label =>
-                                                label?.toUpperCase().includes('META ADS') || label?.toUpperCase() === 'META ADS'
-                                            );
-                                            return isCurrentCompany && isInRange && hasMetaTag;
-                                        }).length || 0;
-
-                                        const metaLost = data?.sales?.filter(s => {
-                                            const isCurrentCompany = String(s.companyId) === String(company.id);
-                                            const isInRange = filterByDateRange([s], dateRange, 'createdAt').length > 0;
-
-                                            // Robust Lost Check
-                                            const pName = s.phaseName ? s.phaseName.toLowerCase() : '';
-                                            const isLost = s.status === 'lost' ||
-                                                ['338889931'].includes(String(s.phaseId)) ||
-                                                pName.includes('perdido') ||
-                                                pName.includes('lost');
-
-                                            const hasMetaTag = s.labels?.some(label =>
-                                                label?.toUpperCase().includes('META ADS') || label?.toUpperCase() === 'META ADS'
-                                            );
-                                            return isCurrentCompany && isInRange && isLost && hasMetaTag;
-                                        }).length || 0;
-
-                                        return metaLeads > 0 ? ((metaLost / metaLeads) * 100).toFixed(1) : 0;
-                                    })()}%
+                                    Churn: {realized.leads > 0 ? ((realized.lost / realized.leads) * 100).toFixed(1) : 0}%
                                 </p>
                             </div>
                         </div>
