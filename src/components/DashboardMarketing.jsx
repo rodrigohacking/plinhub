@@ -344,28 +344,38 @@ export function DashboardMarketing({ company, data, onRefresh }) {
         const totalLost = metaMetrics.reduce((acc, m) => acc + (m.cardsLost || 0), 0);
         const totalWon = metaMetrics.reduce((acc, m) => acc + (m.cardsConverted || 0), 0); // Sales
 
+        // Re-populate wonDeals (List) using the EXACT SAME LOGIC as the "Vendas" Card
+        const wonDeals = (data.sales || []).filter(s => {
+            const isCurrentCompany = String(s.companyId) === String(company.id); // Ensure company match just in case
+
+            // Robust Meta Check (Labels + UTMs)
+            const hasMeta = s.labels?.some(l => l?.toUpperCase().includes('META ADS') || l?.toUpperCase() === 'META ADS') ||
+                [s.utm_source, s.utm_medium, s.utm_campaign].some(u => (u || '').toLowerCase().includes('meta') ||
+                    (u || '').toLowerCase().includes('facebook') || (u || '').toLowerCase().includes('instagram'));
+
+            // Robust DATE Check (Using Helper)
+            // Note: The Vendas Card uses 'wonDate' property.
+            const inRange = isDateInSelectedRange(s.wonDate, dateRange);
+
+            // Robust WON Status Check
+            const pName = s.phaseName ? s.phaseName.toLowerCase() : '';
+            const isWon = s.status === 'won' ||
+                ['338889923', '338889934', '341604257'].includes(String(s.phaseId)) ||
+                pName.includes('ganho') || pName.includes('fechado') ||
+                pName.includes('enviado ao cliente') || pName.includes('apolice fechada') ||
+                pName.includes('fechamento - ganho');
+
+            return isCurrentCompany && isWon && hasMeta && inRange;
+        });
+
         // 4. Final Calculation
+        // Leads & Qualified come from Aggregate Sums (data.metrics)
         const leadsRealized = totalCreated;
         const qualifiedRealized = Math.max(0, totalCreated - totalLost);
 
-        const salesRealized = totalWon;
-        // Sales Volume isn't stored in Metric table aggregates effectively (needs checking), 
-        // but let's assume wonDeals still holds the sales data for Volume reference?
-        // Wait, wonDeals is from 'sales' array (individual items), which DOES exist alongside metrics array.
-        // So we can still calculate volume from wonDeals if we filter correctly.
-        // But for consistency with COUNT, let's use the Aggregate count for salesRealized,
-        // and keeping wonDeals for the list is fine.
-
-        // Recalculate Sales Volume from INDIVIDUAL DEALS because aggregates don't store Money Value
-        const salesVolume = (data.sales || []).reduce((acc, s) => {
-            const isWon = s.status === 'won';
-            const hasMeta = s.labels?.some(l => l.includes('META ADS')) ||
-                [s.utm_source, s.utm_medium].some(u => (u || '').toLowerCase().includes('meta'));
-            const inRange = isDateInSelectedRange(s.wonDate, dateRange);
-
-            if (isWon && hasMeta && inRange) return acc + (s.amount || 0);
-            return acc;
-        }, 0);
+        // Sales come from Individual Deals List (data.sales) to match the "Vendas" Card
+        const salesRealized = wonDeals.length;
+        const salesVolume = wonDeals.reduce((acc, d) => acc + d.amount, 0);
 
         // DEBUG LOGGING
         console.log(`[KPI DEBUG] Aggregated Calculation (${dateRange.label}):`);
