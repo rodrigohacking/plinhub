@@ -334,26 +334,41 @@ export function DashboardMarketing({ company, data, onRefresh }) {
         );
         const wonDeals = filterByMetaAds(wonDealsFiltered);
 
-        // LOST DEALS (New logic for subtraction)
         const lostDealsFiltered = filterByProduct(
             filteredByDate.filter(d => {
                 const pName = d.phaseName ? d.phaseName.toLowerCase() : '';
-                return d.status === 'lost' ||
+                const isLost = d.status === 'lost' ||
                     ['338889931'].includes(String(d.phaseId)) ||
                     pName.includes('perdido') ||
                     pName.includes('lost');
+
+                // DEBUG SPECIFIC: Log if lost logic is tricky
+                // if (isLost) console.log(`[Dashboard Debug] Found Lost Deal: ${d.title} (${d.phaseName})`);
+                return isLost;
             })
         );
         const lostDeals = filterByMetaAds(lostDealsFiltered);
 
         const leadsRealized = createdDeals.length;
-        
+
         // USER REQUEST: Qualified = Total Leads - Lost Leads
-        // (Anything not lost is considered qualified/active)
         const qualifiedRealized = Math.max(0, leadsRealized - lostDeals.length);
-        
+
+        // DEBUG LOGGING FOR USER VERIFICATION
+        console.log(`[KPI DEBUG] Leads Calculation for range ${dateRange}:`);
+        console.log(`- Total Created (Filtered): ${leadsRealized}`);
+        console.log(`- Lost (Subset of Created): ${lostDeals.length}`);
+        console.log(`- Result (Qualified): ${qualifiedRealized}`);
+
         const salesRealized = wonDeals.length;
         const salesVolume = wonDeals.reduce((acc, d) => acc + d.amount, 0);
+
+        // EXTRA DEBUG: Check for mismatch
+        if (activeTab === 'geral') {
+            console.log(`[KPI DEBUG] Detailed Breakdown:`);
+            console.log(`  -> Created List Sample (Top 3):`, createdDeals.slice(0, 3).map(d => `${d.title} (${d.phaseName})`));
+            console.log(`  -> Lost List Sample (Top 3):`, lostDeals.slice(0, 3).map(d => `${d.title} (${d.phaseName})`));
+        }
 
         // B. Investment Realized (Meta Ads) - Strict Filtering
         let investmentRealized = 0;
