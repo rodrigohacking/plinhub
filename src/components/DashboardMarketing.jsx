@@ -380,9 +380,32 @@ export function DashboardMarketing({ company, data, onRefresh }) {
         // DEBUG LOGGING
         console.log(`[KPI DEBUG] Aggregated Calculation (${dateRange.label}):`);
         console.log(`- Meta Metrics Rows Found: ${metaMetrics.length}`);
-        console.log(`- Sum Created: ${totalCreated}`);
-        console.log(`- Sum Lost: ${totalLost}`);
+        console.log(`- Sum Created (Agg): ${totalCreated}`);
+        console.log(`- Sum Lost (Agg): ${totalLost}`);
         console.log(`- Qualified (Created - Lost): ${qualifiedRealized}`);
+
+        // DEBUG: Compare with Individual Deals List to diagnose Sync Discrepancy
+        const debugLostList = (data.sales || []).filter(s => {
+            const isMeta = s.labels?.some(l => l.includes('META ADS')) ||
+                [s.utm_source, s.utm_medium].some(u => (u || '').toLowerCase().includes('meta'));
+
+            const inRange = isDateInSelectedRange(s.createdAt, dateRange); // Uses createdAt for Leads
+
+            const pName = (s.phaseName || '').toLowerCase();
+            const isLost = s.status === 'lost' || pName.includes('perdido') || pName.includes('cancelado') || pName.includes('descarte');
+
+            return isMeta && inRange && isLost;
+        });
+
+        console.log(`[KPI DEBUG] List Comparison:`);
+        console.log(`- Found in List (Client-Side Logic): ${debugLostList.length}`);
+        if (debugLostList.length > 0) {
+            console.log(`- Samples:`, debugLostList.slice(0, 3).map(d => `${d.title} [Phase: ${d.phaseName}]`));
+        }
+
+        if (debugLostList.length > totalLost) {
+            console.warn(`DISCREPANCY DETECTED: List has ${debugLostList.length} lost leads, but Database Aggregates only have ${totalLost}. SYNC ISSUE LIKELY.`);
+        }
 
 
 
