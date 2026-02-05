@@ -384,15 +384,7 @@ export function DashboardMarketing({ company, data, onRefresh }) {
         console.log(`- Sum Lost: ${totalLost}`);
         console.log(`- Qualified (Created - Lost): ${qualifiedRealized}`);
 
-        // Re-populate wonDeals (List) for valid return
-        // (Reusing logic but ensuring it matches aggregate count somewhat)
-        const wonDeals = (data.sales || []).filter(s => {
-            const isWon = s.status === 'won'; // Simple check, backend service ensures status
-            const hasMeta = s.labels?.some(l => l.includes('META ADS')) ||
-                [s.utm_source, s.utm_medium].some(u => (u || '').toLowerCase().includes('meta'));
-            const inRange = isDateInSelectedRange(s.wonDate, dateRange);
-            return isWon && hasMeta && inRange;
-        });
+
 
         // B. Investment Realized (Meta Ads) - Strict Filtering
         let investmentRealized = 0;
