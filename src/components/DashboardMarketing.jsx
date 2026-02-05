@@ -340,9 +340,7 @@ export function DashboardMarketing({ company, data, onRefresh }) {
         );
 
         // 3. Sum Totals
-        const totalCreated = metaMetrics.reduce((acc, m) => acc + (m.cardsCreated || 0), 0);
-        const totalLost = metaMetrics.reduce((acc, m) => acc + (m.cardsLost || 0), 0);
-        const totalWon = metaMetrics.reduce((acc, m) => acc + (m.cardsConverted || 0), 0); // Sales
+
 
         // Re-populate wonDeals (List) using the EXACT SAME LOGIC as the "Vendas" Card
         const wonDeals = (data.sales || []).filter(s => {
@@ -363,6 +361,11 @@ export function DashboardMarketing({ company, data, onRefresh }) {
                 ['338889923', '338889934', '341604257'].includes(String(s.phaseId)) ||
                 pName.includes('ganho') || pName.includes('fechado') ||
                 pName.includes('enviado ao cliente') || pName.includes('apolice fechada') ||
+                pName.includes('fechamento - ganho');
+
+            return isCurrentCompany && isWon && hasMeta && inRange;
+        });
+
         // 4. Final Calculation (PURELY FROM LIST - BYPASSING AGGREGATES)
         // User Request: "Leads Gerados (tag meta) - Perdidos = Leads Qualificados"
         // We use COHORT LOGIC: Count leads CREATED in the period, and check IF they are lost.
@@ -370,338 +373,304 @@ export function DashboardMarketing({ company, data, onRefresh }) {
 
         // A. Leads Created (Meta)
         const leadsList = (data.sales || []).filter(s => {
-                    const hasMeta = s.labels?.some(l => l?.toUpperCase().includes('META ADS') || l?.toUpperCase() === 'META ADS') ||
-                        [s.utm_source, s.utm_medium, s.utm_campaign].some(u => (u || '').toLowerCase().includes('meta') ||
-                            (u || '').toLowerCase().includes('facebook') || (u || '').toLowerCase().includes('instagram'));
+            const hasMeta = s.labels?.some(l => l?.toUpperCase().includes('META ADS') || l?.toUpperCase() === 'META ADS') ||
+                [s.utm_source, s.utm_medium, s.utm_campaign].some(u => (u || '').toLowerCase().includes('meta') ||
+                    (u || '').toLowerCase().includes('facebook') || (u || '').toLowerCase().includes('instagram'));
 
-                    // Use createdAt for "Leads Generated"
-                    const inRange = isDateInSelectedRange(s.createdAt || s.date, dateRange);
-                    return hasMeta && inRange;
-                });
+            // Use createdAt for "Leads Generated"
+            const inRange = isDateInSelectedRange(s.createdAt || s.date, dateRange);
+            return hasMeta && inRange;
+        });
 
-            // B. Leads Lost (Meta - Subset of Created)
-            const lostList = leadsList.filter(s => {
-                const pName = (s.phaseName || '').toLowerCase();
-                const isLost = s.status === 'lost' ||
-                    pName.includes('perdido') ||
-                    pName.includes('cancelado') ||
-                    pName.includes('descarte') ||
-                    pName.includes('recusado') ||
-                    pName.includes('invalido');
-                return isLost;
-            });
+        // B. Leads Lost (Meta - Subset of Created)
+        const lostList = leadsList.filter(s => {
+            const pName = (s.phaseName || '').toLowerCase();
+            const isLost = s.status === 'lost' ||
+                pName.includes('perdido') ||
+                pName.includes('cancelado') ||
+                pName.includes('descarte') ||
+                pName.includes('recusado') ||
+                pName.includes('invalido');
+            return isLost;
+        });
 
-            const totalCreated = leadsList.length; // Use List Count
-            const totalLost = lostList.length;     // Use List Count
-            const leadsRealized = totalCreated;
-            const qualifiedRealized = Math.max(0, totalCreated - totalLost);
+        const totalCreated = leadsList.length; // Use List Count
+        const totalLost = lostList.length;     // Use List Count
+        const leadsRealized = totalCreated;
+        const qualifiedRealized = Math.max(0, totalCreated - totalLost);
 
-            // Sales come from Individual Deals List (data.sales) to match the "Vendas" Card
-            const salesRealized = wonDeals.length;
-            const salesVolume = wonDeals.reduce((acc, d) => acc + d.amount, 0);
+        // Sales come from Individual Deals List (data.sales) to match the "Vendas" Card
+        const salesRealized = wonDeals.length;
+        const salesVolume = wonDeals.reduce((acc, d) => acc + d.amount, 0);
 
-            // DEBUG LOGGING
-            console.log(`[KPI DEBUG] LIST-BASED Calculation (${dateRange.label}):`);
-            console.log(`- Meta List Size: ${leadsList.length}`);
-            console.log(`- Lost Subset: ${totalLost}`);
-            console.log(`- Qualified: ${qualifiedRealized}`);
-            if (leadsList.length > 0) console.log(`- Sample Lead: ${leadsList[0].title} (${leadsList[0].status})`);
+        // DEBUG LOGGING
+        console.log(`[KPI DEBUG] LIST-BASED Calculation (${dateRange.label}):`);
+        console.log(`- Meta List Size: ${leadsList.length}`);
+        console.log(`- Lost Subset: ${totalLost}`);
+        console.log(`- Qualified: ${qualifiedRealized}`);
+        if (leadsList.length > 0) console.log(`- Sample Lead: ${leadsList[0].title} (${leadsList[0].status})`);
 
 
-            // B. Investment Realized (Meta Ads) - Strict Filtering
-            let investmentRealized = 0;
-            let adsLeads = 0;
-            let impressions = 0;
-            let clicks = 0;
+        // B. Investment Realized (Meta Ads) - Strict Filtering
+        let investmentRealized = 0;
+        let adsLeads = 0;
+        let impressions = 0;
+        let clicks = 0;
 
-            // NEW STRATEGY: Campaign-Based Calculation (Lifetime / Live Data)
-            // User requested to calculate Investment iterating over 'effectiveCampaigns' (which contains dailyInsights)
-            // instead of 'data.metrics' (Metric table). This avoids DB Sync gaps and allows Name-based filtering.
+        // NEW STRATEGY: Campaign-Based Calculation (Lifetime / Live Data)
+        // User requested to calculate Investment iterating over 'effectiveCampaigns' (which contains dailyInsights)
+        // instead of 'data.metrics' (Metric table). This avoids DB Sync gaps and allows Name-based filtering.
 
-            // NEW STRATEGY: Iterate effectiveCampaigns (merged DB + Live)
-            const relevantCampaigns = effectiveCampaigns.filter(c => String(c.companyId) === String(company.id));
-            console.log(`[DashboardMarketing] ${company.name} - Relevant Campaigns:`, relevantCampaigns.length);
+        // NEW STRATEGY: Iterate effectiveCampaigns (merged DB + Live)
+        const relevantCampaigns = effectiveCampaigns.filter(c => String(c.companyId) === String(company.id));
+        console.log(`[DashboardMarketing] ${company.name} - Relevant Campaigns:`, relevantCampaigns.length);
 
-            relevantCampaigns.forEach(campaign => {
-                // 1. Check Product Scope
-                let isProductMatch = false;
-                const cName = normalize(campaign.name || '');
+        relevantCampaigns.forEach(campaign => {
+            // 1. Check Product Scope
+            let isProductMatch = false;
+            const cName = normalize(campaign.name || '');
 
-                if (activeTab === 'geral') {
-                    isProductMatch = true;
-                } else {
-                    const config = productMapping[activeTab];
-                    if (config && config.keywords) {
-                        if (config.keywords.some(kw => cName.includes(kw))) {
-                            isProductMatch = true;
-                        }
+            if (activeTab === 'geral') {
+                isProductMatch = true;
+            } else {
+                const config = productMapping[activeTab];
+                if (config && config.keywords) {
+                    if (config.keywords.some(kw => cName.includes(kw))) {
+                        isProductMatch = true;
                     }
                 }
+            }
 
-                if (isProductMatch) {
-                    const inDate = isDateInSelectedRange(campaign.startDate, dateRange);
-                    // console.log(`[Campaign Check] ${cName} | Start: ${campaign.startDate} | InRange: ${inDate} | Invest: ${campaign.investment}`);
+            if (isProductMatch) {
+                const inDate = isDateInSelectedRange(campaign.startDate, dateRange);
+                // console.log(`[Campaign Check] ${cName} | Start: ${campaign.startDate} | InRange: ${inDate} | Invest: ${campaign.investment}`);
 
-                    if (inDate) {
-                        investmentRealized += parseFloat(campaign.investment || 0);
-                        impressions += parseFloat(campaign.impressions || 0);
-                        clicks += parseFloat(campaign.clicks || 0);
-                        adsLeads += parseFloat(campaign.leads || 0);
-                    }
-                    // Hotfix: If dateRange is 'this-month' and campaign looks recent enough?
-                    // Let's stick to isDateInSelectedRange.
+                if (inDate) {
+                    investmentRealized += parseFloat(campaign.investment || 0);
+                    impressions += parseFloat(campaign.impressions || 0);
+                    clicks += parseFloat(campaign.clicks || 0);
+                    adsLeads += parseFloat(campaign.leads || 0);
                 }
-            });
+                // Hotfix: If dateRange is 'this-month' and campaign looks recent enough?
+                // Let's stick to isDateInSelectedRange.
+            }
+        });
 
-            // 4. KPIs
-            // CPL Realized: Use Ads Leads if > 0, otherwise fallback to Pipefy Leads (safety) but prompt requested Ads Data.
-            // If we have 0 ads leads, prevent Infinity.
-            const effectiveLeads = adsLeads; // User Request: "leads do proprio meta" (Sync with Meta)
-            const cplRealized = effectiveLeads > 0 ? investmentRealized / effectiveLeads : 0;
+        // 4. KPIs
+        // CPL Realized: Use Ads Leads if > 0, otherwise fallback to Pipefy Leads (safety) but prompt requested Ads Data.
+        // If we have 0 ads leads, prevent Infinity.
+        const effectiveLeads = adsLeads; // User Request: "leads do proprio meta" (Sync with Meta)
+        const cplRealized = effectiveLeads > 0 ? investmentRealized / effectiveLeads : 0;
 
-            // ROI: (Volume Vendas - Investimento) / Investimento
-            let roi = investmentRealized > 0 ? ((salesVolume - investmentRealized) / investmentRealized) * 100 : 0;
-            let roiMultiplier = investmentRealized > 0 ? (salesVolume / investmentRealized) : 0;
+        // ROI: (Volume Vendas - Investimento) / Investimento
+        let roi = investmentRealized > 0 ? ((salesVolume - investmentRealized) / investmentRealized) * 100 : 0;
+        let roiMultiplier = investmentRealized > 0 ? (salesVolume / investmentRealized) : 0;
 
-            // Percentages
-            const investmentPrc = targets.investment ? (investmentRealized / targets.investment) * 100 : 0;
-            const cplPrc = targets.cpl ? (cplRealized / targets.cpl) * 100 : 0;
+        // Percentages
+        const investmentPrc = targets.investment ? (investmentRealized / targets.investment) * 100 : 0;
+        const cplPrc = targets.cpl ? (cplRealized / targets.cpl) * 100 : 0;
 
-            // Conversion Rate: Sales / Leads * 100
-            const conversionRate = effectiveLeads > 0 ? (salesRealized / effectiveLeads) * 100 : 0;
+        // Conversion Rate: Sales / Leads * 100
+        const conversionRate = effectiveLeads > 0 ? (salesRealized / effectiveLeads) * 100 : 0;
 
-            return {
-                targets,
-                realized: {
-                    investment: investmentRealized,
-                    leads: effectiveLeads, // Using Pipefy List count
-                    qualified: qualifiedRealized,
-                    sales: salesRealized,
-                    cpl: cplRealized,
-                    volume: salesVolume,
-                    cac: salesRealized > 0 ? (investmentRealized / salesRealized) : 0,
-                    roi: roiMultiplier, // Sending Multiplier
-                    conversionRate: conversionRate,
-                    impressions,
-                    clicks
-                },
-                roi,
-                investmentPrc,
-                cplPrc,
-                wonDeals // Expose wonDeals for consistency
-            };
-
-        }, [data, company.id, dateRange, activeTab]);
-
-        const { targets, realized, roi, investmentPrc, cplPrc } = metrics;
-
-        // Top Performers Logic (UTM based)
-        const topPerformers = useMemo(() => {
-            const type = creativesTab === 'creatives' ? 'utm_content' : 'utm_campaign';
-
-            // 1. Use wonDeals (Total 88) but FILTER strictly by Tag for this chart
-            // User Request: "só quero vendas que tenham a tag META ADS"
-            const relevantSales = (metrics.wonDeals || []).filter(d =>
-                d.labels?.some(label =>
-                    label?.toUpperCase().includes('META ADS') ||
-                    label?.toUpperCase() === 'META ADS'
-                )
-            );
-
-            // 2. Aggregate
-            const stats = {};
-            relevantSales.forEach(s => {
-                // Get raw UTM value
-                let key = s[type];
-
-                // Clean up common pipefy artifacts if present (e.g. ["value"])
-                if (key && typeof key === 'string') {
-                    if (key.startsWith('["') && key.endsWith('"]')) {
-                        key = key.replace('["', '').replace('"]', '');
-                    }
-                }
-
-                if (!key) key = 'Não Identificado'; // Include deals without UTMs
-
-                if (!stats[key]) {
-                    stats[key] = { name: key, count: 0, revenue: 0 };
-                }
-                stats[key].count += 1;
-                stats[key].revenue += (s.amount || 0);
-            });
-
-            // 3. Convert to array and sort
-            return Object.values(stats)
-                .sort((a, b) => b.revenue - a.revenue)
-                .slice(0, 5); // Top 5
-        }, [data, company.id, dateRange, creativesTab]);
-
-        // Animation Variants
-        const tabVariants = {
-            initial: { opacity: 0, y: 10 },
-            animate: { opacity: 1, y: 0 },
-            exit: { opacity: 0, y: -10 },
-            transition: { duration: 0.2 }
+        return {
+            targets,
+            realized: {
+                investment: investmentRealized,
+                leads: effectiveLeads, // Using Pipefy List count
+                qualified: qualifiedRealized,
+                sales: salesRealized,
+                cpl: cplRealized,
+                volume: salesVolume,
+                cac: salesRealized > 0 ? (investmentRealized / salesRealized) : 0,
+                roi: roiMultiplier, // Sending Multiplier
+                conversionRate: conversionRate,
+                impressions,
+                clicks
+            },
+            roi,
+            investmentPrc,
+            cplPrc,
+            wonDeals // Expose wonDeals for consistency
         };
 
-        return (
-            <div className="space-y-8 pb-12 w-full max-w-full overflow-x-hidden">
-                {/* 1. Header & Controls */}
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-                    <div>
-                        <h2 className="text-3xl font-black text-gray-900 dark:text-white tracking-tight">Marketing Performance</h2>
-                        <p className="text-gray-500 dark:text-gray-400">Acompanhamento estratégico de campanhas e conversão</p>
-                    </div>
-                    <div className="flex items-center gap-3">
+    }, [data, company.id, dateRange, activeTab]);
 
-                        <DateRangeFilter value={dateRange} onChange={setDateRange} />
-                    </div>
+    const { targets, realized, roi, investmentPrc, cplPrc } = metrics;
+
+    // Top Performers Logic (UTM based)
+    const topPerformers = useMemo(() => {
+        const type = creativesTab === 'creatives' ? 'utm_content' : 'utm_campaign';
+
+        // 1. Use wonDeals (Total 88) but FILTER strictly by Tag for this chart
+        // User Request: "só quero vendas que tenham a tag META ADS"
+        const relevantSales = (metrics.wonDeals || []).filter(d =>
+            d.labels?.some(label =>
+                label?.toUpperCase().includes('META ADS') ||
+                label?.toUpperCase() === 'META ADS'
+            )
+        );
+
+        // 2. Aggregate
+        const stats = {};
+        relevantSales.forEach(s => {
+            // Get raw UTM value
+            let key = s[type];
+
+            // Clean up common pipefy artifacts if present (e.g. ["value"])
+            if (key && typeof key === 'string') {
+                if (key.startsWith('["') && key.endsWith('"]')) {
+                    key = key.replace('["', '').replace('"]', '');
+                }
+            }
+
+            if (!key) key = 'Não Identificado'; // Include deals without UTMs
+
+            if (!stats[key]) {
+                stats[key] = { name: key, count: 0, revenue: 0 };
+            }
+            stats[key].count += 1;
+            stats[key].revenue += (s.amount || 0);
+        });
+
+        // 3. Convert to array and sort
+        return Object.values(stats)
+            .sort((a, b) => b.revenue - a.revenue)
+            .slice(0, 5); // Top 5
+    }, [data, company.id, dateRange, creativesTab]);
+
+    // Animation Variants
+    const tabVariants = {
+        initial: { opacity: 0, y: 10 },
+        animate: { opacity: 1, y: 0 },
+        exit: { opacity: 0, y: -10 },
+        transition: { duration: 0.2 }
+    };
+
+    return (
+        <div className="space-y-8 pb-12 w-full max-w-full overflow-x-hidden">
+            {/* 1. Header & Controls */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+                <div>
+                    <h2 className="text-3xl font-black text-gray-900 dark:text-white tracking-tight">Marketing Performance</h2>
+                    <p className="text-gray-500 dark:text-gray-400">Acompanhamento estratégico de campanhas e conversão</p>
                 </div>
+                <div className="flex items-center gap-3">
 
-                {/* 2. Tabs Navigation */}
-                <div className="flex flex-wrap gap-2 p-1 bg-gray-100 dark:bg-white/5 rounded-xl w-full md:w-fit">
-                    {TABS.map(tab => (
-                        <button
-                            key={tab.id}
-                            onClick={() => setActiveTab(tab.id)}
-                            className={cn(
-                                "px-4 py-2 text-sm font-bold rounded-lg transition-all duration-200",
-                                activeTab === tab.id
-                                    ? "bg-white dark:bg-[#222] text-gray-900 dark:text-white shadow-sm"
-                                    : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
-                            )}
-                        >
-                            {tab.label}
-                        </button>
-                    ))}
+                    <DateRangeFilter value={dateRange} onChange={setDateRange} />
                 </div>
+            </div>
 
-                <AnimatePresence mode='wait'>
-                    <motion.div
-                        key={activeTab}
-                        variants={tabVariants}
-                        initial="initial"
-                        animate="animate"
-                        exit="exit"
-                        className="space-y-6"
+            {/* 2. Tabs Navigation */}
+            <div className="flex flex-wrap gap-2 p-1 bg-gray-100 dark:bg-white/5 rounded-xl w-full md:w-fit">
+                {TABS.map(tab => (
+                    <button
+                        key={tab.id}
+                        onClick={() => setActiveTab(tab.id)}
+                        className={cn(
+                            "px-4 py-2 text-sm font-bold rounded-lg transition-all duration-200",
+                            activeTab === tab.id
+                                ? "bg-white dark:bg-[#222] text-gray-900 dark:text-white shadow-sm"
+                                : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                        )}
                     >
+                        {tab.label}
+                    </button>
+                ))}
+            </div>
 
-                        {/* BLOCK 1: PERFORMANCE (ROI Highlight) */}
-                        <div className="bg-slate-900 rounded-3xl p-8 text-white shadow-2xl relative overflow-hidden">
-                            <div className="absolute top-0 right-0 w-96 h-96 bg-emerald-500/10 rounded-full -mr-32 -mt-32 blur-3xl"></div>
-                            <div className="relative z-10 flex justify-between items-center">
-                                <div>
-                                    <h3 className="text-2xl font-bold mb-1">Retorno sobre Investimento</h3>
-                                    <p className="text-slate-400">{activeTab === 'geral' ? 'Geral' : TABS.find(t => t.id === activeTab)?.label} ROI</p>
-                                </div>
-                                <div className="text-right">
-                                    <span className={cn("text-5xl font-black tracking-tighter", roi >= 0 ? "text-emerald-400" : "text-red-400")}>
-                                        {roi > 0 ? '+' : ''}{formatNumber(roi.toFixed(0))}%
-                                    </span>
-                                </div>
+            <AnimatePresence mode='wait'>
+                <motion.div
+                    key={activeTab}
+                    variants={tabVariants}
+                    initial="initial"
+                    animate="animate"
+                    exit="exit"
+                    className="space-y-6"
+                >
+
+                    {/* BLOCK 1: PERFORMANCE (ROI Highlight) */}
+                    <div className="bg-slate-900 rounded-3xl p-8 text-white shadow-2xl relative overflow-hidden">
+                        <div className="absolute top-0 right-0 w-96 h-96 bg-emerald-500/10 rounded-full -mr-32 -mt-32 blur-3xl"></div>
+                        <div className="relative z-10 flex justify-between items-center">
+                            <div>
+                                <h3 className="text-2xl font-bold mb-1">Retorno sobre Investimento</h3>
+                                <p className="text-slate-400">{activeTab === 'geral' ? 'Geral' : TABS.find(t => t.id === activeTab)?.label} ROI</p>
+                            </div>
+                            <div className="text-right">
+                                <span className={cn("text-5xl font-black tracking-tighter", roi >= 0 ? "text-emerald-400" : "text-red-400")}>
+                                    {roi > 0 ? '+' : ''}{formatNumber(roi.toFixed(0))}%
+                                </span>
                             </div>
                         </div>
+                    </div>
 
-                        {/* ADDITIONAL METRICS - Show in Geral tab for all companies */}
-                        {activeTab === 'geral' && (
-                            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-7 gap-4">
-                                {/* Investimento */}
-                                <div className="bg-white dark:bg-[#111] p-4 lg:p-6 rounded-2xl shadow-lg border border-gray-100 dark:border-white/5 min-w-[140px]">
-                                    <div className="flex items-center gap-2 mb-3">
-                                        <DollarSign className="w-5 h-5 text-red-500 flex-shrink-0" />
-                                        <p className="text-[10px] lg:text-xs font-bold text-gray-400 uppercase truncate">Investimento</p>
-                                    </div>
-                                    <p className="text-lg lg:text-2xl font-black text-gray-900 dark:text-white truncate" title={formatCurrency(realized.investment)}>
-                                        {formatCurrency(realized.investment)}
-                                    </p>
+                    {/* ADDITIONAL METRICS - Show in Geral tab for all companies */}
+                    {activeTab === 'geral' && (
+                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-7 gap-4">
+                            {/* Investimento */}
+                            <div className="bg-white dark:bg-[#111] p-4 lg:p-6 rounded-2xl shadow-lg border border-gray-100 dark:border-white/5 min-w-[140px]">
+                                <div className="flex items-center gap-2 mb-3">
+                                    <DollarSign className="w-5 h-5 text-red-500 flex-shrink-0" />
+                                    <p className="text-[10px] lg:text-xs font-bold text-gray-400 uppercase truncate">Investimento</p>
                                 </div>
+                                <p className="text-lg lg:text-2xl font-black text-gray-900 dark:text-white truncate" title={formatCurrency(realized.investment)}>
+                                    {formatCurrency(realized.investment)}
+                                </p>
+                            </div>
 
-                                {/* Leads Gerados */}
-                                <div className="bg-white dark:bg-[#111] p-4 lg:p-6 rounded-2xl shadow-lg border border-gray-100 dark:border-white/5 min-w-[140px]">
-                                    <div className="flex items-center gap-2 mb-3">
-                                        <UserPlus className="w-5 h-5 text-blue-500 flex-shrink-0" />
-                                        <p className="text-[10px] lg:text-xs font-bold text-gray-400 uppercase truncate">Leads</p>
-                                    </div>
-                                    <p className="text-lg lg:text-2xl font-black text-gray-900 dark:text-white truncate" title={formatNumber(realized.leads)}>
-                                        {formatNumber(realized.leads)}
-                                    </p>
+                            {/* Leads Gerados */}
+                            <div className="bg-white dark:bg-[#111] p-4 lg:p-6 rounded-2xl shadow-lg border border-gray-100 dark:border-white/5 min-w-[140px]">
+                                <div className="flex items-center gap-2 mb-3">
+                                    <UserPlus className="w-5 h-5 text-blue-500 flex-shrink-0" />
+                                    <p className="text-[10px] lg:text-xs font-bold text-gray-400 uppercase truncate">Leads</p>
                                 </div>
+                                <p className="text-lg lg:text-2xl font-black text-gray-900 dark:text-white truncate" title={formatNumber(realized.leads)}>
+                                    {formatNumber(realized.leads)}
+                                </p>
+                            </div>
 
-                                {/* Leads Orgânicos */}
-                                <div className="bg-white dark:bg-[#111] p-4 lg:p-6 rounded-2xl shadow-lg border border-gray-100 dark:border-white/5 min-w-[140px]">
-                                    <div className="flex items-center gap-2 mb-3">
-                                        <Leaf className="w-5 h-5 text-green-500 flex-shrink-0" />
-                                        <p className="text-[10px] lg:text-xs font-bold text-gray-400 uppercase truncate">Leads Orgânicos</p>
-                                    </div>
-                                    <p className="text-lg lg:text-2xl font-black text-gray-900 dark:text-white truncate">
-                                        {(() => {
-                                            const organicLeads = data?.sales?.filter(s => {
-                                                const isCurrentCompany = String(s.companyId) === String(company.id);
-                                                const isInRange = filterByDateRange([s], dateRange, 'createdAt').length > 0;
-                                                const hasOrganicTag = s.labels?.some(label =>
-                                                    label?.toUpperCase().includes('ORGÂNICO IG')
-                                                );
-                                                return isCurrentCompany && isInRange && hasOrganicTag;
-                                            }).length || 0;
-                                            return formatNumber(organicLeads);
-                                        })()}
-                                    </p>
+                            {/* Leads Orgânicos */}
+                            <div className="bg-white dark:bg-[#111] p-4 lg:p-6 rounded-2xl shadow-lg border border-gray-100 dark:border-white/5 min-w-[140px]">
+                                <div className="flex items-center gap-2 mb-3">
+                                    <Leaf className="w-5 h-5 text-green-500 flex-shrink-0" />
+                                    <p className="text-[10px] lg:text-xs font-bold text-gray-400 uppercase truncate">Leads Orgânicos</p>
                                 </div>
+                                <p className="text-lg lg:text-2xl font-black text-gray-900 dark:text-white truncate">
+                                    {(() => {
+                                        const organicLeads = data?.sales?.filter(s => {
+                                            const isCurrentCompany = String(s.companyId) === String(company.id);
+                                            const isInRange = filterByDateRange([s], dateRange, 'createdAt').length > 0;
+                                            const hasOrganicTag = s.labels?.some(label =>
+                                                label?.toUpperCase().includes('ORGÂNICO IG')
+                                            );
+                                            return isCurrentCompany && isInRange && hasOrganicTag;
+                                        }).length || 0;
+                                        return formatNumber(organicLeads);
+                                    })()}
+                                </p>
+                            </div>
 
-                                {/* Custo por Lead */}
-                                <div className="bg-white dark:bg-[#111] p-4 lg:p-6 rounded-2xl shadow-lg border border-gray-100 dark:border-white/5 min-w-[140px]">
-                                    <div className="flex items-center gap-2 mb-3">
-                                        <Target className="w-5 h-5 text-emerald-500 flex-shrink-0" />
-                                        <p className="text-[10px] lg:text-xs font-bold text-gray-400 uppercase truncate">CPL</p>
-                                    </div>
-                                    <p className="text-lg lg:text-2xl font-black text-gray-900 dark:text-white truncate" title={formatCurrency(realized.cpl)}>
-                                        {formatCurrency(realized.cpl)}
-                                    </p>
+                            {/* Custo por Lead */}
+                            <div className="bg-white dark:bg-[#111] p-4 lg:p-6 rounded-2xl shadow-lg border border-gray-100 dark:border-white/5 min-w-[140px]">
+                                <div className="flex items-center gap-2 mb-3">
+                                    <Target className="w-5 h-5 text-emerald-500 flex-shrink-0" />
+                                    <p className="text-[10px] lg:text-xs font-bold text-gray-400 uppercase truncate">CPL</p>
                                 </div>
+                                <p className="text-lg lg:text-2xl font-black text-gray-900 dark:text-white truncate" title={formatCurrency(realized.cpl)}>
+                                    {formatCurrency(realized.cpl)}
+                                </p>
+                            </div>
 
-                                {/* CAC */}
-                                <div className="bg-white dark:bg-[#111] p-4 lg:p-6 rounded-2xl shadow-lg border border-gray-100 dark:border-white/5 min-w-[140px]">
-                                    <div className="flex items-center gap-2 mb-3">
-                                        <Users className="w-5 h-5 text-pink-500 flex-shrink-0" />
-                                        <p className="text-[10px] lg:text-xs font-bold text-gray-400 uppercase truncate">CAC</p>
-                                    </div>
-                                    <p className="text-lg lg:text-2xl font-black text-gray-900 dark:text-white truncate">
-                                        {(() => {
-                                            const metaSales = data?.sales?.filter(s => {
-                                                const isCurrentCompany = String(s.companyId) === String(company.id);
-                                                const isInRange = filterByDateRange([s], dateRange, 'wonDate').length > 0;
-
-                                                // Robust Won Check
-                                                const pName = s.phaseName ? s.phaseName.toLowerCase() : '';
-                                                const isWon = s.status === 'won' ||
-                                                    ['338889923', '338889934', '341604257'].includes(String(s.phaseId)) ||
-                                                    pName.includes('ganho') || pName.includes('fechado') || pName.includes('enviado ao cliente');
-
-                                                // Robust Meta Check (Labels + UTMs)
-                                                const hasMetaTag = s.labels?.some(label =>
-                                                    label?.toUpperCase().includes('META ADS') || label?.toUpperCase() === 'META ADS'
-                                                ) || [s.utm_source, s.utm_medium, s.utm_campaign].some(val => {
-                                                    const v = (val || '').toLowerCase();
-                                                    return v.includes('meta') || v.includes('facebook') || v.includes('instagram');
-                                                });
-
-                                                return isCurrentCompany && isInRange && isWon && hasMetaTag;
-                                            }).length || 0;
-
-                                            return metaSales > 0 ? formatCurrency(realized.investment / metaSales) : formatCurrency(0);
-                                        })()}
-                                    </p>
-                                    <p className="text-[10px] text-gray-400 mt-1 truncate">Custo Aquisição</p>
+                            {/* CAC */}
+                            <div className="bg-white dark:bg-[#111] p-4 lg:p-6 rounded-2xl shadow-lg border border-gray-100 dark:border-white/5 min-w-[140px]">
+                                <div className="flex items-center gap-2 mb-3">
+                                    <Users className="w-5 h-5 text-pink-500 flex-shrink-0" />
+                                    <p className="text-[10px] lg:text-xs font-bold text-gray-400 uppercase truncate">CAC</p>
                                 </div>
-
-                                {/* Vendas (Meta) */}
-                                <div className="bg-white dark:bg-[#111] p-4 lg:p-6 rounded-2xl shadow-lg border border-gray-100 dark:border-white/5 min-w-[140px]">
-                                    <div className="flex items-center gap-2 mb-3">
-                                        <Instagram className="w-5 h-5 text-purple-500 flex-shrink-0" />
-                                        <p className="text-[10px] lg:text-xs font-bold text-gray-400 uppercase truncate">Vendas</p>
-                                    </div>
-                                    <p className="text-lg lg:text-2xl font-black text-gray-900 dark:text-white truncate">
-                                        {data?.sales?.filter(s => {
+                                <p className="text-lg lg:text-2xl font-black text-gray-900 dark:text-white truncate">
+                                    {(() => {
+                                        const metaSales = data?.sales?.filter(s => {
                                             const isCurrentCompany = String(s.companyId) === String(company.id);
                                             const isInRange = filterByDateRange([s], dateRange, 'wonDate').length > 0;
 
@@ -720,42 +689,108 @@ export function DashboardMarketing({ company, data, onRefresh }) {
                                             });
 
                                             return isCurrentCompany && isInRange && isWon && hasMetaTag;
-                                        }).length || 0}
+                                        }).length || 0;
+
+                                        return metaSales > 0 ? formatCurrency(realized.investment / metaSales) : formatCurrency(0);
+                                    })()}
+                                </p>
+                                <p className="text-[10px] text-gray-400 mt-1 truncate">Custo Aquisição</p>
+                            </div>
+
+                            {/* Vendas (Meta) */}
+                            <div className="bg-white dark:bg-[#111] p-4 lg:p-6 rounded-2xl shadow-lg border border-gray-100 dark:border-white/5 min-w-[140px]">
+                                <div className="flex items-center gap-2 mb-3">
+                                    <Instagram className="w-5 h-5 text-purple-500 flex-shrink-0" />
+                                    <p className="text-[10px] lg:text-xs font-bold text-gray-400 uppercase truncate">Vendas</p>
+                                </div>
+                                <p className="text-lg lg:text-2xl font-black text-gray-900 dark:text-white truncate">
+                                    {data?.sales?.filter(s => {
+                                        const isCurrentCompany = String(s.companyId) === String(company.id);
+                                        const isInRange = filterByDateRange([s], dateRange, 'wonDate').length > 0;
+
+                                        // Robust Won Check
+                                        const pName = s.phaseName ? s.phaseName.toLowerCase() : '';
+                                        const isWon = s.status === 'won' ||
+                                            ['338889923', '338889934', '341604257'].includes(String(s.phaseId)) ||
+                                            pName.includes('ganho') || pName.includes('fechado') || pName.includes('enviado ao cliente');
+
+                                        // Robust Meta Check (Labels + UTMs)
+                                        const hasMetaTag = s.labels?.some(label =>
+                                            label?.toUpperCase().includes('META ADS') || label?.toUpperCase() === 'META ADS'
+                                        ) || [s.utm_source, s.utm_medium, s.utm_campaign].some(val => {
+                                            const v = (val || '').toLowerCase();
+                                            return v.includes('meta') || v.includes('facebook') || v.includes('instagram');
+                                        });
+
+                                        return isCurrentCompany && isInRange && isWon && hasMetaTag;
+                                    }).length || 0}
+                                </p>
+                            </div>
+
+                            {/* ROI */}
+                            <div className="bg-white dark:bg-[#111] p-4 lg:p-6 rounded-2xl shadow-lg border border-gray-100 dark:border-white/5 min-w-[140px]">
+                                <div className="flex items-center gap-2 mb-3">
+                                    <TrendingUp className="w-5 h-5 text-purple-500 flex-shrink-0" />
+                                    <p className="text-[10px] lg:text-xs font-bold text-gray-400 uppercase truncate">Retorno sobre Invest.</p>
+                                </div>
+                                <p className="text-lg lg:text-2xl font-black text-gray-900 dark:text-white truncate" title={`${(realized.roi || 0).toFixed(1)}x`}>
+                                    {(realized.roi || 0).toFixed(1)}x
+                                </p>
+                            </div>
+
+                            {/* Taxa de Conversão */}
+                            <div className="bg-white dark:bg-[#111] p-4 lg:p-6 rounded-2xl shadow-lg border border-gray-100 dark:border-white/5 min-w-[140px]">
+                                <div className="flex items-center gap-2 mb-3">
+                                    <Activity className="w-5 h-5 text-indigo-500 flex-shrink-0" />
+                                    <p className="text-[10px] lg:text-xs font-bold text-gray-400 uppercase truncate">Taxa de Conversão</p>
+                                </div>
+                                <div className="flex items-baseline gap-2">
+                                    <p className="text-lg lg:text-2xl font-black text-gray-900 dark:text-white truncate" title={`${(realized.conversionRate || 0).toFixed(1)}%`}>
+                                        {(realized.conversionRate || 0).toFixed(1)}%
                                     </p>
                                 </div>
+                            </div>
 
-                                {/* ROI */}
-                                <div className="bg-white dark:bg-[#111] p-4 lg:p-6 rounded-2xl shadow-lg border border-gray-100 dark:border-white/5 min-w-[140px]">
-                                    <div className="flex items-center gap-2 mb-3">
-                                        <TrendingUp className="w-5 h-5 text-purple-500 flex-shrink-0" />
-                                        <p className="text-[10px] lg:text-xs font-bold text-gray-400 uppercase truncate">Retorno sobre Invest.</p>
-                                    </div>
-                                    <p className="text-lg lg:text-2xl font-black text-gray-900 dark:text-white truncate" title={`${(realized.roi || 0).toFixed(1)}x`}>
-                                        {(realized.roi || 0).toFixed(1)}x
-                                    </p>
+                            {/* Leads Perdidos */}
+                            <div className="bg-white dark:bg-[#111] p-4 lg:p-6 rounded-2xl shadow-lg border border-gray-100 dark:border-white/5 min-w-[140px]">
+                                <div className="flex items-center gap-2 mb-3">
+                                    <Ban className="w-5 h-5 text-red-500" />
+                                    <p className="text-xs font-bold text-gray-400 uppercase">Perdidos</p>
                                 </div>
+                                <p className="text-3xl font-black text-red-500">
+                                    {data?.sales?.filter(s => {
+                                        const isCurrentCompany = String(s.companyId) === String(company.id);
+                                        const isInRange = filterByDateRange([s], dateRange, 'createdAt').length > 0;
 
-                                {/* Taxa de Conversão */}
-                                <div className="bg-white dark:bg-[#111] p-4 lg:p-6 rounded-2xl shadow-lg border border-gray-100 dark:border-white/5 min-w-[140px]">
-                                    <div className="flex items-center gap-2 mb-3">
-                                        <Activity className="w-5 h-5 text-indigo-500 flex-shrink-0" />
-                                        <p className="text-[10px] lg:text-xs font-bold text-gray-400 uppercase truncate">Taxa de Conversão</p>
-                                    </div>
-                                    <div className="flex items-baseline gap-2">
-                                        <p className="text-lg lg:text-2xl font-black text-gray-900 dark:text-white truncate" title={`${(realized.conversionRate || 0).toFixed(1)}%`}>
-                                            {(realized.conversionRate || 0).toFixed(1)}%
-                                        </p>
-                                    </div>
-                                </div>
+                                        // Robust Lost Check
+                                        const pName = s.phaseName ? s.phaseName.toLowerCase() : '';
+                                        const isLost = s.status === 'lost' ||
+                                            ['338889931'].includes(String(s.phaseId)) ||
+                                            pName.includes('perdido') ||
+                                            pName.includes('lost');
 
-                                {/* Leads Perdidos */}
-                                <div className="bg-white dark:bg-[#111] p-4 lg:p-6 rounded-2xl shadow-lg border border-gray-100 dark:border-white/5 min-w-[140px]">
-                                    <div className="flex items-center gap-2 mb-3">
-                                        <Ban className="w-5 h-5 text-red-500" />
-                                        <p className="text-xs font-bold text-gray-400 uppercase">Perdidos</p>
-                                    </div>
-                                    <p className="text-3xl font-black text-red-500">
-                                        {data?.sales?.filter(s => {
+                                        // Strict Meta Tag Check (Match Created/Won logic)
+                                        const hasMetaTag = s.labels?.some(label =>
+                                            label?.toUpperCase().includes('META ADS') || label?.toUpperCase() === 'META ADS'
+                                        ) || [s.utm_source, s.utm_medium, s.utm_campaign].some(val => {
+                                            const v = (val || '').toLowerCase();
+                                            return v.includes('meta') || v.includes('facebook') || v.includes('instagram');
+                                        });
+                                        return isCurrentCompany && isInRange && isLost && hasMetaTag;
+                                    }).length || 0}
+                                </p>
+                                <p className="text-xs text-red-400 mt-1">
+                                    Churn: {(() => {
+                                        const metaLeads = data?.sales?.filter(s => {
+                                            const isCurrentCompany = String(s.companyId) === String(company.id);
+                                            const isInRange = filterByDateRange([s], dateRange, 'createdAt').length > 0;
+                                            const hasMetaTag = s.labels?.some(label =>
+                                                label?.toUpperCase().includes('META ADS') || label?.toUpperCase() === 'META ADS'
+                                            );
+                                            return isCurrentCompany && isInRange && hasMetaTag;
+                                        }).length || 0;
+
+                                        const metaLost = data?.sales?.filter(s => {
                                             const isCurrentCompany = String(s.companyId) === String(company.id);
                                             const isInRange = filterByDateRange([s], dateRange, 'createdAt').length > 0;
 
@@ -766,271 +801,239 @@ export function DashboardMarketing({ company, data, onRefresh }) {
                                                 pName.includes('perdido') ||
                                                 pName.includes('lost');
 
-                                            // Strict Meta Tag Check (Match Created/Won logic)
                                             const hasMetaTag = s.labels?.some(label =>
                                                 label?.toUpperCase().includes('META ADS') || label?.toUpperCase() === 'META ADS'
-                                            ) || [s.utm_source, s.utm_medium, s.utm_campaign].some(val => {
-                                                const v = (val || '').toLowerCase();
-                                                return v.includes('meta') || v.includes('facebook') || v.includes('instagram');
-                                            });
+                                            );
                                             return isCurrentCompany && isInRange && isLost && hasMetaTag;
-                                        }).length || 0}
-                                    </p>
-                                    <p className="text-xs text-red-400 mt-1">
-                                        Churn: {(() => {
-                                            const metaLeads = data?.sales?.filter(s => {
-                                                const isCurrentCompany = String(s.companyId) === String(company.id);
-                                                const isInRange = filterByDateRange([s], dateRange, 'createdAt').length > 0;
-                                                const hasMetaTag = s.labels?.some(label =>
-                                                    label?.toUpperCase().includes('META ADS') || label?.toUpperCase() === 'META ADS'
-                                                );
-                                                return isCurrentCompany && isInRange && hasMetaTag;
-                                            }).length || 0;
+                                        }).length || 0;
 
-                                            const metaLost = data?.sales?.filter(s => {
-                                                const isCurrentCompany = String(s.companyId) === String(company.id);
-                                                const isInRange = filterByDateRange([s], dateRange, 'createdAt').length > 0;
-
-                                                // Robust Lost Check
-                                                const pName = s.phaseName ? s.phaseName.toLowerCase() : '';
-                                                const isLost = s.status === 'lost' ||
-                                                    ['338889931'].includes(String(s.phaseId)) ||
-                                                    pName.includes('perdido') ||
-                                                    pName.includes('lost');
-
-                                                const hasMetaTag = s.labels?.some(label =>
-                                                    label?.toUpperCase().includes('META ADS') || label?.toUpperCase() === 'META ADS'
-                                                );
-                                                return isCurrentCompany && isInRange && isLost && hasMetaTag;
-                                            }).length || 0;
-
-                                            return metaLeads > 0 ? ((metaLost / metaLeads) * 100).toFixed(1) : 0;
-                                        })()}%
-                                    </p>
-                                </div>
+                                        return metaLeads > 0 ? ((metaLost / metaLeads) * 100).toFixed(1) : 0;
+                                    })()}%
+                                </p>
                             </div>
-                        )}
+                        </div>
+                    )}
 
-                        {/* Grid wrapper for Funil & Top Criativos - ONLY VISIBLE IN GERAL TAB */}
-                        {activeTab === 'geral' && (
-                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
-                                {/* Funil de Conversão */}
-                                <div className="bg-white dark:bg-[#111] p-8 rounded-3xl shadow-xl border border-gray-100 dark:border-white/5">
-                                    <div className="flex items-center gap-3 mb-6">
-                                        <div className="p-2 bg-purple-50 dark:bg-purple-900/20 rounded-lg text-purple-600">
-                                            <Filter className="w-6 h-6" />
-                                        </div>
-                                        <h3 className="text-xl font-bold text-gray-900 dark:text-white">Funil de Conversão</h3>
-                                    </div>
-                                    <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">Eficiência de cada etapa do marketing</p>
-
-                                    <div className="space-y-4">
-                                        {/* Impressões */}
-                                        <div className="p-4 bg-gray-50 dark:bg-white/5 rounded-xl flex justify-between items-center">
-                                            <span className="text-sm font-medium text-gray-600 dark:text-gray-300">Impressões</span>
-                                            <span className="text-xl font-bold text-gray-900 dark:text-white">{formatNumber(realized.impressions || 0)}</span>
-                                        </div>
-
-                                        {/* Cliques */}
-                                        <div className="p-4 bg-gray-50 dark:bg-white/5 rounded-xl">
-                                            <div className="flex justify-between items-center">
-                                                <span className="text-sm font-medium text-gray-600 dark:text-gray-300">Cliques</span>
-                                                <span className="text-xl font-bold text-gray-900 dark:text-white">{formatNumber(realized.clicks || 0)}</span>
-                                            </div>
-                                            <p className="text-xs text-gray-400 mt-1 text-right">
-                                                CTR: {realized.impressions > 0 ? ((realized.clicks / realized.impressions) * 100).toFixed(2) : 0}%
-                                            </p>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* Top Criativos */}
-                                <div className="bg-white dark:bg-[#111] p-8 rounded-3xl shadow-xl border border-gray-100 dark:border-white/5">
-                                    <div className="flex items-center gap-3 mb-6">
-                                        <div className="p-2 bg-pink-50 dark:bg-pink-900/20 rounded-lg text-pink-600">
-                                            <TrendingUp className="w-6 h-6" />
-                                        </div>
-                                        <h3 className="text-xl font-bold text-gray-900 dark:text-white">Top Criativos</h3>
-                                    </div>
-                                    <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">Anúncios que geraram receita</p>
-
-                                    <div className="flex gap-4 mb-6">
-                                        <button
-                                            onClick={() => setCreativesTab('creatives')}
-                                            className={cn(
-                                                "px-4 py-2 rounded-lg text-sm font-medium transition-colors",
-                                                creativesTab === 'creatives'
-                                                    ? "bg-gray-100 dark:bg-white/5 text-gray-700 dark:text-gray-300 border-b-2 border-blue-500"
-                                                    : "text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/5"
-                                            )}
-                                        >
-                                            Criativos
-                                        </button>
-                                        <button
-                                            onClick={() => setCreativesTab('campaigns')}
-                                            className={cn(
-                                                "px-4 py-2 rounded-lg text-sm font-medium transition-colors",
-                                                creativesTab === 'campaigns'
-                                                    ? "bg-gray-100 dark:bg-white/5 text-gray-700 dark:text-gray-300 border-b-2 border-blue-500"
-                                                    : "text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/5"
-                                            )}
-                                        >
-                                            Campanhas
-                                        </button>
-                                    </div>
-
-                                    {topPerformers.length > 0 ? (
-                                        <div className="space-y-4">
-                                            {topPerformers.map((item, index) => (
-                                                <div key={index} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-white/5 rounded-xl">
-                                                    <div className="flex items-center gap-3">
-                                                        <div className="w-8 h-8 flex items-center justify-center bg-white dark:bg-white/10 rounded-full font-bold text-sm text-gray-500">
-                                                            #{index + 1}
-                                                        </div>
-                                                        <div>
-                                                            <p className="font-bold text-gray-900 dark:text-white text-sm line-clamp-1" title={item.name}>
-                                                                {item.name}
-                                                            </p>
-                                                            <p className="text-xs text-gray-400">{item.count} venda{item.count !== 1 ? 's' : ''}</p>
-                                                        </div>
-                                                    </div>
-                                                    <p className="font-bold text-emerald-600 text-sm whitespace-nowrap">
-                                                        {formatCurrency(item.revenue)}
-                                                    </p>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    ) : (
-                                        <div className="mt-6 flex flex-col items-center justify-center h-32 bg-gray-50 dark:bg-white/5 rounded-xl">
-                                            <Instagram className="w-12 h-12 text-gray-300 dark:text-gray-600 mb-2" />
-                                            <p className="text-sm text-gray-400 dark:text-gray-500">
-                                                {creativesTab === 'creatives'
-                                                    ? 'Nenhum criativo com vendas no período'
-                                                    : 'Nenhuma campanha com vendas no período'}
-                                            </p>
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                        )}
-
-
+                    {/* Grid wrapper for Funil & Top Criativos - ONLY VISIBLE IN GERAL TAB */}
+                    {activeTab === 'geral' && (
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
-                            {/* BLOCK 2: INVESTIMENTO */}
-                            <div className="bg-white dark:bg-[#111] p-8 rounded-3xl shadow-xl border border-gray-100 dark:border-white/5 relative overflow-hidden">
+                            {/* Funil de Conversão */}
+                            <div className="bg-white dark:bg-[#111] p-8 rounded-3xl shadow-xl border border-gray-100 dark:border-white/5">
                                 <div className="flex items-center gap-3 mb-6">
-                                    <div className="p-2 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-blue-600">
-                                        <DollarSign className="w-6 h-6" />
+                                    <div className="p-2 bg-purple-50 dark:bg-purple-900/20 rounded-lg text-purple-600">
+                                        <Filter className="w-6 h-6" />
                                     </div>
-                                    <h3 className="text-xl font-bold text-gray-900 dark:text-white">Investimento & Resultados</h3>
+                                    <h3 className="text-xl font-bold text-gray-900 dark:text-white">Funil de Conversão</h3>
                                 </div>
+                                <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">Eficiência de cada etapa do marketing</p>
 
-                                <div className="grid grid-cols-2 gap-y-8 gap-x-4">
-                                    {/* Meta vs Realizado - Investimento */}
-                                    <div className="col-span-2 flex items-center justify-between p-4 bg-gray-50 dark:bg-white/5 rounded-2xl">
-                                        <div>
-                                            <p className="text-xs font-bold text-gray-400 uppercase mb-1">Investimento Realizado</p>
-                                            <p className="text-2xl font-black text-gray-900 dark:text-white">{formatCurrency(realized.investment)}</p>
-                                        </div>
-                                        <div className="text-right">
-                                            <p className="text-xs font-bold text-gray-400 uppercase mb-1">Meta</p>
-                                            <p className="text-xl font-bold text-gray-500">{formatCurrency(targets.investment)}</p>
-                                        </div>
-                                        <div className="text-right pl-4 border-l border-gray-200 dark:border-white/10">
-                                            <p className="text-xs font-bold text-gray-400 uppercase mb-1">Atingimento</p>
-                                            <span className={cn("text-lg font-black", investmentPrc > 100 ? "text-red-500" : "text-emerald-500")}>
-                                                {investmentPrc.toFixed(0)}%
-                                            </span>
-                                        </div>
+                                <div className="space-y-4">
+                                    {/* Impressões */}
+                                    <div className="p-4 bg-gray-50 dark:bg-white/5 rounded-xl flex justify-between items-center">
+                                        <span className="text-sm font-medium text-gray-600 dark:text-gray-300">Impressões</span>
+                                        <span className="text-xl font-bold text-gray-900 dark:text-white">{formatNumber(realized.impressions || 0)}</span>
                                     </div>
 
-                                    {/* Leads */}
-                                    <div>
-                                        <p className="text-xs font-bold text-gray-400 uppercase mb-1">Leads Gerados</p>
-                                        <p className="text-3xl font-black text-gray-900 dark:text-white">{realized.leads}</p>
-                                        <p className="text-xs text-gray-400 mt-1">Meta: {targets.leads}</p>
-                                    </div>
-
-                                    {/* Vendas */}
-                                    <div>
-                                        <p className="text-xs font-bold text-gray-400 uppercase mb-1">Vendas Fechadas</p>
-                                        <p className="text-3xl font-black text-emerald-600">{realized.sales}</p>
-                                        <p className="text-xs text-gray-400 mt-1">Meta: {targets.sales}</p>
-                                    </div>
-
-                                    {/* Qualificados */}
-                                    <div className="col-span-2 pt-4 border-t border-gray-100 dark:border-white/5">
+                                    {/* Cliques */}
+                                    <div className="p-4 bg-gray-50 dark:bg-white/5 rounded-xl">
                                         <div className="flex justify-between items-center">
-                                            <p className="text-sm font-bold text-gray-600 dark:text-gray-300">Leads Qualificados</p>
-                                            <p className="text-xl font-black text-purple-600 dark:text-purple-400">{realized.qualified}</p>
+                                            <span className="text-sm font-medium text-gray-600 dark:text-gray-300">Cliques</span>
+                                            <span className="text-xl font-bold text-gray-900 dark:text-white">{formatNumber(realized.clicks || 0)}</span>
                                         </div>
+                                        <p className="text-xs text-gray-400 mt-1 text-right">
+                                            CTR: {realized.impressions > 0 ? ((realized.clicks / realized.impressions) * 100).toFixed(2) : 0}%
+                                        </p>
                                     </div>
                                 </div>
                             </div>
 
-                            {/* BLOCK 3: EFICIÊNCIA (CPL) */}
-                            <div className="bg-white dark:bg-[#111] p-8 rounded-3xl shadow-xl border border-gray-100 dark:border-white/5 relative overflow-hidden">
+                            {/* Top Criativos */}
+                            <div className="bg-white dark:bg-[#111] p-8 rounded-3xl shadow-xl border border-gray-100 dark:border-white/5">
                                 <div className="flex items-center gap-3 mb-6">
-                                    <div className="p-2 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg text-emerald-600">
-                                        <Target className="w-6 h-6" />
+                                    <div className="p-2 bg-pink-50 dark:bg-pink-900/20 rounded-lg text-pink-600">
+                                        <TrendingUp className="w-6 h-6" />
                                     </div>
-                                    <h3 className="text-xl font-bold text-gray-900 dark:text-white">Eficiência (CPL)</h3>
+                                    <h3 className="text-xl font-bold text-gray-900 dark:text-white">Top Criativos</h3>
+                                </div>
+                                <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">Anúncios que geraram receita</p>
+
+                                <div className="flex gap-4 mb-6">
+                                    <button
+                                        onClick={() => setCreativesTab('creatives')}
+                                        className={cn(
+                                            "px-4 py-2 rounded-lg text-sm font-medium transition-colors",
+                                            creativesTab === 'creatives'
+                                                ? "bg-gray-100 dark:bg-white/5 text-gray-700 dark:text-gray-300 border-b-2 border-blue-500"
+                                                : "text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/5"
+                                        )}
+                                    >
+                                        Criativos
+                                    </button>
+                                    <button
+                                        onClick={() => setCreativesTab('campaigns')}
+                                        className={cn(
+                                            "px-4 py-2 rounded-lg text-sm font-medium transition-colors",
+                                            creativesTab === 'campaigns'
+                                                ? "bg-gray-100 dark:bg-white/5 text-gray-700 dark:text-gray-300 border-b-2 border-blue-500"
+                                                : "text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/5"
+                                        )}
+                                    >
+                                        Campanhas
+                                    </button>
                                 </div>
 
-                                <div className="grid grid-cols-1 gap-6">
-                                    {/* CPL Gauge / Comparison */}
-                                    <div className="p-4 bg-gray-50 dark:bg-white/5 rounded-2xl flex justify-between items-center">
-                                        <div>
-                                            <p className="text-xs font-bold text-gray-400 uppercase mb-1">CPL Realizado</p>
-                                            <p className="text-3xl font-black text-gray-900 dark:text-white">{formatCurrency(realized.cpl)}</p>
-                                        </div>
-                                        <div className="text-right">
-                                            <p className="text-xs font-bold text-gray-400 uppercase mb-1">Meta CPL</p>
-                                            <p className="text-xl font-bold text-gray-500">{formatCurrency(targets.cpl)}</p>
-                                        </div>
+                                {topPerformers.length > 0 ? (
+                                    <div className="space-y-4">
+                                        {topPerformers.map((item, index) => (
+                                            <div key={index} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-white/5 rounded-xl">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="w-8 h-8 flex items-center justify-center bg-white dark:bg-white/10 rounded-full font-bold text-sm text-gray-500">
+                                                        #{index + 1}
+                                                    </div>
+                                                    <div>
+                                                        <p className="font-bold text-gray-900 dark:text-white text-sm line-clamp-1" title={item.name}>
+                                                            {item.name}
+                                                        </p>
+                                                        <p className="text-xs text-gray-400">{item.count} venda{item.count !== 1 ? 's' : ''}</p>
+                                                    </div>
+                                                </div>
+                                                <p className="font-bold text-emerald-600 text-sm whitespace-nowrap">
+                                                    {formatCurrency(item.revenue)}
+                                                </p>
+                                            </div>
+                                        ))}
                                     </div>
-
-                                    {/* Volume Vendas */}
-                                    <div className="p-4 bg-emerald-50/50 dark:bg-emerald-900/10 rounded-2xl border border-emerald-100 dark:border-white/5">
-                                        <p className="text-xs font-bold text-emerald-600/70 uppercase mb-2">
-                                            {company?.name?.toLowerCase().includes('apolar') ? 'Volume Total em Contratos' : 'Volume Total em Apólices'}
+                                ) : (
+                                    <div className="mt-6 flex flex-col items-center justify-center h-32 bg-gray-50 dark:bg-white/5 rounded-xl">
+                                        <Instagram className="w-12 h-12 text-gray-300 dark:text-gray-600 mb-2" />
+                                        <p className="text-sm text-gray-400 dark:text-gray-500">
+                                            {creativesTab === 'creatives'
+                                                ? 'Nenhum criativo com vendas no período'
+                                                : 'Nenhuma campanha com vendas no período'}
                                         </p>
-                                        <p className="text-3xl font-black text-emerald-600 dark:text-emerald-400">{formatCurrency(realized.volume)}</p>
-                                        <p className="text-xs text-emerald-600/60 mt-1">Meta: {formatCurrency(targets.revenue)}</p>
                                     </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
 
-                                    {/* Atingimento Text */}
-                                    <div className="pt-2">
-                                        <div className="flex justify-between text-sm mb-1">
-                                            <span className="text-gray-500">Atingimento da Meta de Custo</span>
-                                            <span className={cn("font-bold", realized.cpl <= targets.cpl ? "text-emerald-500" : "text-red-500")}>
-                                                {targets.cpl ? ((realized.cpl / targets.cpl) * 100).toFixed(0) : 0}%
-                                            </span>
-                                        </div>
-                                        <div className="w-full h-2 bg-gray-100 dark:bg-white/10 rounded-full overflow-hidden">
-                                            <div
-                                                className={cn("h-full rounded-full", realized.cpl <= targets.cpl ? "bg-emerald-500" : "bg-red-500")}
-                                                style={{ width: `${Math.min(targets.cpl ? (realized.cpl / targets.cpl) * 100 : 0, 100)}%` }}
-                                            ></div>
-                                        </div>
-                                        <p className="text-xs text-gray-400 mt-2">
-                                            {realized.cpl <= targets.cpl ? "Dentro da meta! 🚀" : "Acima da meta (Atenção) ⚠️"}
-                                        </p>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+                        {/* BLOCK 2: INVESTIMENTO */}
+                        <div className="bg-white dark:bg-[#111] p-8 rounded-3xl shadow-xl border border-gray-100 dark:border-white/5 relative overflow-hidden">
+                            <div className="flex items-center gap-3 mb-6">
+                                <div className="p-2 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-blue-600">
+                                    <DollarSign className="w-6 h-6" />
+                                </div>
+                                <h3 className="text-xl font-bold text-gray-900 dark:text-white">Investimento & Resultados</h3>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-y-8 gap-x-4">
+                                {/* Meta vs Realizado - Investimento */}
+                                <div className="col-span-2 flex items-center justify-between p-4 bg-gray-50 dark:bg-white/5 rounded-2xl">
+                                    <div>
+                                        <p className="text-xs font-bold text-gray-400 uppercase mb-1">Investimento Realizado</p>
+                                        <p className="text-2xl font-black text-gray-900 dark:text-white">{formatCurrency(realized.investment)}</p>
+                                    </div>
+                                    <div className="text-right">
+                                        <p className="text-xs font-bold text-gray-400 uppercase mb-1">Meta</p>
+                                        <p className="text-xl font-bold text-gray-500">{formatCurrency(targets.investment)}</p>
+                                    </div>
+                                    <div className="text-right pl-4 border-l border-gray-200 dark:border-white/10">
+                                        <p className="text-xs font-bold text-gray-400 uppercase mb-1">Atingimento</p>
+                                        <span className={cn("text-lg font-black", investmentPrc > 100 ? "text-red-500" : "text-emerald-500")}>
+                                            {investmentPrc.toFixed(0)}%
+                                        </span>
+                                    </div>
+                                </div>
+
+                                {/* Leads */}
+                                <div>
+                                    <p className="text-xs font-bold text-gray-400 uppercase mb-1">Leads Gerados</p>
+                                    <p className="text-3xl font-black text-gray-900 dark:text-white">{realized.leads}</p>
+                                    <p className="text-xs text-gray-400 mt-1">Meta: {targets.leads}</p>
+                                </div>
+
+                                {/* Vendas */}
+                                <div>
+                                    <p className="text-xs font-bold text-gray-400 uppercase mb-1">Vendas Fechadas</p>
+                                    <p className="text-3xl font-black text-emerald-600">{realized.sales}</p>
+                                    <p className="text-xs text-gray-400 mt-1">Meta: {targets.sales}</p>
+                                </div>
+
+                                {/* Qualificados */}
+                                <div className="col-span-2 pt-4 border-t border-gray-100 dark:border-white/5">
+                                    <div className="flex justify-between items-center">
+                                        <p className="text-sm font-bold text-gray-600 dark:text-gray-300">Leads Qualificados</p>
+                                        <p className="text-xl font-black text-purple-600 dark:text-purple-400">{realized.qualified}</p>
                                     </div>
                                 </div>
                             </div>
-
                         </div>
 
-                        {/* Placeholder for future detailed charts */}
-                        <div className="text-center text-xs text-gray-400 pt-8 opacity-50">
-                            Dados filtrados para: {TABS.find(t => t.id === activeTab)?.label}
+                        {/* BLOCK 3: EFICIÊNCIA (CPL) */}
+                        <div className="bg-white dark:bg-[#111] p-8 rounded-3xl shadow-xl border border-gray-100 dark:border-white/5 relative overflow-hidden">
+                            <div className="flex items-center gap-3 mb-6">
+                                <div className="p-2 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg text-emerald-600">
+                                    <Target className="w-6 h-6" />
+                                </div>
+                                <h3 className="text-xl font-bold text-gray-900 dark:text-white">Eficiência (CPL)</h3>
+                            </div>
+
+                            <div className="grid grid-cols-1 gap-6">
+                                {/* CPL Gauge / Comparison */}
+                                <div className="p-4 bg-gray-50 dark:bg-white/5 rounded-2xl flex justify-between items-center">
+                                    <div>
+                                        <p className="text-xs font-bold text-gray-400 uppercase mb-1">CPL Realizado</p>
+                                        <p className="text-3xl font-black text-gray-900 dark:text-white">{formatCurrency(realized.cpl)}</p>
+                                    </div>
+                                    <div className="text-right">
+                                        <p className="text-xs font-bold text-gray-400 uppercase mb-1">Meta CPL</p>
+                                        <p className="text-xl font-bold text-gray-500">{formatCurrency(targets.cpl)}</p>
+                                    </div>
+                                </div>
+
+                                {/* Volume Vendas */}
+                                <div className="p-4 bg-emerald-50/50 dark:bg-emerald-900/10 rounded-2xl border border-emerald-100 dark:border-white/5">
+                                    <p className="text-xs font-bold text-emerald-600/70 uppercase mb-2">
+                                        {company?.name?.toLowerCase().includes('apolar') ? 'Volume Total em Contratos' : 'Volume Total em Apólices'}
+                                    </p>
+                                    <p className="text-3xl font-black text-emerald-600 dark:text-emerald-400">{formatCurrency(realized.volume)}</p>
+                                    <p className="text-xs text-emerald-600/60 mt-1">Meta: {formatCurrency(targets.revenue)}</p>
+                                </div>
+
+                                {/* Atingimento Text */}
+                                <div className="pt-2">
+                                    <div className="flex justify-between text-sm mb-1">
+                                        <span className="text-gray-500">Atingimento da Meta de Custo</span>
+                                        <span className={cn("font-bold", realized.cpl <= targets.cpl ? "text-emerald-500" : "text-red-500")}>
+                                            {targets.cpl ? ((realized.cpl / targets.cpl) * 100).toFixed(0) : 0}%
+                                        </span>
+                                    </div>
+                                    <div className="w-full h-2 bg-gray-100 dark:bg-white/10 rounded-full overflow-hidden">
+                                        <div
+                                            className={cn("h-full rounded-full", realized.cpl <= targets.cpl ? "bg-emerald-500" : "bg-red-500")}
+                                            style={{ width: `${Math.min(targets.cpl ? (realized.cpl / targets.cpl) * 100 : 0, 100)}%` }}
+                                        ></div>
+                                    </div>
+                                    <p className="text-xs text-gray-400 mt-2">
+                                        {realized.cpl <= targets.cpl ? "Dentro da meta! 🚀" : "Acima da meta (Atenção) ⚠️"}
+                                    </p>
+                                </div>
+                            </div>
                         </div>
 
-                    </motion.div >
-                </AnimatePresence >
-            </div >
-        );
-    }
+                    </div>
+
+                    {/* Placeholder for future detailed charts */}
+                    <div className="text-center text-xs text-gray-400 pt-8 opacity-50">
+                        Dados filtrados para: {TABS.find(t => t.id === activeTab)?.label}
+                    </div>
+
+                </motion.div >
+            </AnimatePresence >
+        </div >
+    );
+}
