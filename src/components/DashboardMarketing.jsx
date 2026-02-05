@@ -330,17 +330,8 @@ export function DashboardMarketing({ company, data, onRefresh }) {
         // We must SUM the values, not count the rows.
 
         // 1. Filter Metrics by Date Range
-        const metricsInRange = (data.metrics || []).filter(m => {
-            const mDate = m.date ? new Date(m.date) : null;
-            if (!mDate) return false;
-
-            // Normalize to YYYY-MM-DD for comparison
-            const mTime = mDate.getTime();
-            const sTime = dateRange.startDate.getTime();
-            const eTime = dateRange.endDate.getTime();
-
-            return mTime >= sTime && mTime <= eTime;
-        });
+        // Use the imported helper which handles 'this-month', 'last-7-days' strings strings correctly
+        const metricsInRange = filterByDateRange(data.metrics || [], dateRange, 'date');
 
         // 2. Filter by Meta Ads Label (User Request: "tag do meta")
         const metaMetrics = metricsInRange.filter(m =>
