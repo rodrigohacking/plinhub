@@ -334,16 +334,24 @@ export function DashboardMarketing({ company, data, onRefresh }) {
         );
         const wonDeals = filterByMetaAds(wonDealsFiltered);
 
-        const qualifiedDealsFiltered = filterByProduct(
-            filteredByDate.filter(d =>
-                d.status === 'qualified' ||
-                d.status === 'won'
-            )
+        // LOST DEALS (New logic for subtraction)
+        const lostDealsFiltered = filterByProduct(
+            filteredByDate.filter(d => {
+                const pName = d.phaseName ? d.phaseName.toLowerCase() : '';
+                return d.status === 'lost' ||
+                    ['338889931'].includes(String(d.phaseId)) ||
+                    pName.includes('perdido') ||
+                    pName.includes('lost');
+            })
         );
-        const qualifiedDeals = filterByMetaAds(qualifiedDealsFiltered);
+        const lostDeals = filterByMetaAds(lostDealsFiltered);
 
         const leadsRealized = createdDeals.length;
-        const qualifiedRealized = qualifiedDeals.length;
+        
+        // USER REQUEST: Qualified = Total Leads - Lost Leads
+        // (Anything not lost is considered qualified/active)
+        const qualifiedRealized = Math.max(0, leadsRealized - lostDeals.length);
+        
         const salesRealized = wonDeals.length;
         const salesVolume = wonDeals.reduce((acc, d) => acc + d.amount, 0);
 
