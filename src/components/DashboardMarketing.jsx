@@ -307,14 +307,21 @@ export function DashboardMarketing({ company, data, onRefresh }) {
             }
         };
 
-        // META ADS Filter Logic - Apply to ALL tabs
+        // META ADS Filter Logic - Apply to ALL tabs (Aggregated Definition)
         const filterByMetaAds = (deals) => {
             return deals.filter(d => {
                 const hasMetaTag = d.labels?.some(label =>
                     label?.toUpperCase().includes('META ADS') ||
                     label?.toUpperCase() === 'META ADS'
                 );
-                return hasMetaTag;
+
+                // Robust Check: Also check UTMs if label is missing
+                const hasUtmMeta = [d.utm_source, d.utm_medium, d.utm_campaign].some(val => {
+                    const v = (val || '').toLowerCase();
+                    return v.includes('meta') || v.includes('facebook') || v.includes('instagram');
+                });
+
+                return hasMetaTag || hasUtmMeta;
             });
         };
 
