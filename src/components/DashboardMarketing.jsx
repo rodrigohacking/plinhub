@@ -326,56 +326,72 @@ export function DashboardMarketing({ company, data, onRefresh }) {
         };
 
         // Apply both product and META ADS filters
-        const createdDealsFiltered = filterByProduct(filteredByDate);
-        const createdDeals = filterByMetaAds(createdDealsFiltered);
+        // DATA PROCESSING: The API returns Daily Aggregates (Metric Rows), NOT individual deals!
+        // We must SUM the values, not count the rows.
 
-        const wonDealsFiltered = filterByProduct(
-            filteredByDateClosed.filter(d => {
-                const pName = normalize(d.phaseName);
-                return d.status === 'won' ||
-                    ['338889923', '338889934'].includes(String(d.phaseId)) ||
-                    pName.includes('enviado ao cliente') ||
-                    pName.includes('apolice fechada') ||
-                    pName.includes('fechamento - ganho');
-            })
+        // 1. Filter Metrics by Date Range
+        const metricsInRange = (data.metrics || []).filter(m => {
+            const mDate = m.date ? new Date(m.date) : null;
+            if (!mDate) return false;
+
+            // Normalize to YYYY-MM-DD for comparison
+            const mTime = mDate.getTime();
+            const sTime = dateRange.startDate.getTime();
+            const eTime = dateRange.endDate.getTime();
+
+            return mTime >= sTime && mTime <= eTime;
+        });
+
+        // 2. Filter by Meta Ads Label (User Request: "tag do meta")
+        const metaMetrics = metricsInRange.filter(m =>
+            (m.label === 'META ADS') ||
+            (m.label === 'Meta Ads')
         );
-        const wonDeals = filterByMetaAds(wonDealsFiltered);
 
-        const lostDealsFiltered = filterByProduct(
-            filteredByDate.filter(d => {
-                const pName = d.phaseName ? d.phaseName.toLowerCase() : '';
-                const isLost = d.status === 'lost' ||
-                    ['338889931'].includes(String(d.phaseId)) ||
-                    pName.includes('perdido') ||
-                    pName.includes('lost');
+        // 3. Sum Totals
+        const totalCreated = metaMetrics.reduce((acc, m) => acc + (m.cardsCreated || 0), 0);
+        const totalLost = metaMetrics.reduce((acc, m) => acc + (m.cardsLost || 0), 0);
+        const totalWon = metaMetrics.reduce((acc, m) => acc + (m.cardsConverted || 0), 0); // Sales
 
-                // DEBUG SPECIFIC: Log if lost logic is tricky
-                // if (isLost) console.log(`[Dashboard Debug] Found Lost Deal: ${d.title} (${d.phaseName})`);
-                return isLost;
-            })
-        );
-        const lostDeals = filterByMetaAds(lostDealsFiltered);
+        // 4. Final Calculation
+        const leadsRealized = totalCreated;
+        const qualifiedRealized = Math.max(0, totalCreated - totalLost);
 
-        const leadsRealized = createdDeals.length;
+        const salesRealized = totalWon;
+        // Sales Volume isn't stored in Metric table aggregates effectively (needs checking), 
+        // but let's assume wonDeals still holds the sales data for Volume reference?
+        // Wait, wonDeals is from 'sales' array (individual items), which DOES exist alongside metrics array.
+        // So we can still calculate volume from wonDeals if we filter correctly.
+        // But for consistency with COUNT, let's use the Aggregate count for salesRealized,
+        // and keeping wonDeals for the list is fine.
 
-        // USER REQUEST: Qualified = Total Leads - Lost Leads
-        const qualifiedRealized = Math.max(0, leadsRealized - lostDeals.length);
+        // Recalculate Sales Volume from INDIVIDUAL DEALS because aggregates don't store Money Value
+        const salesVolume = (data.sales || []).reduce((acc, s) => {
+            const isWon = s.status === 'won';
+            const hasMeta = s.labels?.some(l => l.includes('META ADS')) ||
+                [s.utm_source, s.utm_medium].some(u => (u || '').toLowerCase().includes('meta'));
+            const inRange = isDateInSelectedRange(s.wonDate, dateRange);
 
-        // DEBUG LOGGING FOR USER VERIFICATION
-        console.log(`[KPI DEBUG] Leads Calculation for range ${dateRange}:`);
-        console.log(`- Total Created (Filtered): ${leadsRealized}`);
-        console.log(`- Lost (Subset of Created): ${lostDeals.length}`);
-        console.log(`- Result (Qualified): ${qualifiedRealized}`);
+            if (isWon && hasMeta && inRange) return acc + (s.amount || 0);
+            return acc;
+        }, 0);
 
-        const salesRealized = wonDeals.length;
-        const salesVolume = wonDeals.reduce((acc, d) => acc + d.amount, 0);
+        // DEBUG LOGGING
+        console.log(`[KPI DEBUG] Aggregated Calculation (${dateRange.label}):`);
+        console.log(`- Meta Metrics Rows Found: ${metaMetrics.length}`);
+        console.log(`- Sum Created: ${totalCreated}`);
+        console.log(`- Sum Lost: ${totalLost}`);
+        console.log(`- Qualified (Created - Lost): ${qualifiedRealized}`);
 
-        // EXTRA DEBUG: Check for mismatch
-        if (activeTab === 'geral') {
-            console.log(`[KPI DEBUG] Detailed Breakdown:`);
-            console.log(`  -> Created List Sample (Top 3):`, createdDeals.slice(0, 3).map(d => `${d.title} (${d.phaseName})`));
-            console.log(`  -> Lost List Sample (Top 3):`, lostDeals.slice(0, 3).map(d => `${d.title} (${d.phaseName})`));
-        }
+        // Re-populate wonDeals (List) for valid return
+        // (Reusing logic but ensuring it matches aggregate count somewhat)
+        const wonDeals = (data.sales || []).filter(s => {
+            const isWon = s.status === 'won'; // Simple check, backend service ensures status
+            const hasMeta = s.labels?.some(l => l.includes('META ADS')) ||
+                [s.utm_source, s.utm_medium].some(u => (u || '').toLowerCase().includes('meta'));
+            const inRange = isDateInSelectedRange(s.wonDate, dateRange);
+            return isWon && hasMeta && inRange;
+        });
 
         // B. Investment Realized (Meta Ads) - Strict Filtering
         let investmentRealized = 0;
