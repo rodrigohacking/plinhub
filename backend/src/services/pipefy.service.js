@@ -239,7 +239,15 @@ class PipefyService {
       }
 
       // 3. Sales Won
-      const isWon = card.current_phase && card.current_phase.name.toLowerCase().includes('ganho');
+      const phaseName = card.current_phase ? card.current_phase.name.toLowerCase() : '';
+
+      const isWon = phaseName.includes('ganho') ||
+        phaseName.includes('won') ||
+        phaseName.includes('vendido') ||
+        phaseName.includes('fechado') ||
+        phaseName.includes('contrato assinado') ||
+        phaseName.includes('apolice emitida'); // Insurance specific
+
       if (isWon && finishedAt >= start && finishedAt <= end) {
         allAndTags.forEach(t => {
           metricsByTag[t].cardsConverted++;
@@ -248,7 +256,13 @@ class PipefyService {
       }
 
       // 4. Leads Lost
-      const isLost = card.current_phase && card.current_phase.name.toLowerCase().includes('perdido');
+      const isLost = phaseName.includes('perdido') ||
+        phaseName.includes('lost') ||
+        phaseName.includes('cancelado') ||
+        phaseName.includes('descarte') ||
+        phaseName.includes('recusado') ||
+        phaseName.includes('invalido');
+
       if (isLost && finishedAt >= start && finishedAt <= end) {
         allAndTags.forEach(t => {
           metricsByTag[t].cardsLost++;
