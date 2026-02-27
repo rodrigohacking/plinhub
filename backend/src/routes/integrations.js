@@ -197,13 +197,93 @@ router.delete('/:companyId/:type', async (req, res) => {
 });
 
 /**
+ * Server-side Pipefy Deals Fetch
+ * GET /api/integrations/:companyId/pipefy/deals
+ *
+ * Instead of the frontend calling the Pipefy GraphQL API directly (which
+ * exposes tokens and hits CORS/auth issues), this route uses the encrypted
+ * token stored in the Integration table to fetch deals on the server side.
+ */
+router.get('/:companyId/pipefy/deals', async (req, res) => {
+    try {
+        const { companyId } = req.params;
+
+        // 1. Get Integration + Company name
+        const { data: integration, error: intError } = await supabase
+            .from('Integration')
+            .select('pipefyOrgId, pipefyPipeId, pipefyToken, settings')
+            .eq('companyId', companyId)
+            .eq('type', 'pipefy')
+            .eq('isActive', true)
+            .single();
+
+        if (intError || !integration || !integration.pipefyToken) {
+            return res.status(404).json({
+                success: false,
+                error: 'Integração Pipefy não encontrada ou sem token.',
+                deals: []
+            });
+        }
+
+        const { data: company } = await supabase
+            .from('Company')
+            .select('name')
+            .eq('id', companyId)
+            .single();
+
+        // 2. Decrypt token
+        const token = decrypt(integration.pipefyToken);
+        const pipeId = integration.pipefyPipeId;
+
+        console.log(`[PipefyDeals] Fetching for ${company?.name || companyId} | Pipe: ${pipeId}`);
+
+        // 3. Use getPipeCards to fetch raw card data from Pipefy API
+        //    This uses the server-side token and returns { pipe, cards }
+        const pipeData = await pipefyService.getPipeCards(pipeId, token);
+        const cards = pipeData.cards || [];
+
+        const settings = typeof integration.settings === 'string'
+            ? JSON.parse(integration.settings) : (integration.settings || {});
+
+        console.log(`[PipefyDeals] Success! Cards: ${cards.length}`);
+
+        // 4. Return raw cards — the frontend fetchPipefyDeals() handles mapping
+        //    We transform to the shape that the frontend expects (edges with node)
+        const edgesForFrontend = cards.map(card => ({
+            node: card,
+            phaseName: card.current_phase?.name || ''
+        }));
+
+        res.json({
+            success: true,
+            deals: edgesForFrontend,
+            pipeLabels: pipeData.pipe?.labels || [],
+            phases: pipeData.pipe?.phases || [],
+            settings,
+            fetchedAt: new Date().toISOString()
+        });
+
+
+    } catch (error) {
+        console.error('[PipefyDeals] ERROR:', error.message);
+        res.status(500).json({
+            success: false,
+            error: error.message,
+            deals: []
+        });
+    }
+});
+
+
+/**
  * LIVE FETCH Meta Ads (Real-time data)
  * GET /api/integrations/:companyId/meta/live
  */
 router.get('/:companyId/meta/live', async (req, res) => {
     try {
         const { companyId } = req.params;
-        const { days = 30 } = req.query; // Default to 30 days window for fetching
+        // Live Fetch
+        const { days = 30, since, until, preset } = req.query; // Accept optional preset
 
         const { data: integration, error } = await supabase
             .from('Integration')
@@ -220,28 +300,31 @@ router.get('/:companyId/meta/live', async (req, res) => {
         const adAccountId = integration.metaAdAccountId;
 
         // Calculate Date Range
-        const endDate = new Date(); // Today
-        const startDate = new Date();
-        startDate.setDate(startDate.getDate() - parseInt(days));
+        let startDate, endDate;
+        if (since && until) {
+            startDate = new Date(since);
+            endDate = new Date(until);
+        } else {
+            endDate = new Date();
+            startDate = new Date();
+            startDate.setDate(startDate.getDate() - parseInt(days));
+        }
 
-        // Get Live Insights
-        // We use getCampaignInsights because that's what fills the dashboard tables/charts
+        console.log(`[MetaLive] Fetching for ${companyId} | Range: ${startDate.toISOString()} to ${endDate.toISOString()} | Preset: ${preset}`);
+
         const insights = await metaAdsService.getCampaignInsights(
             adAccountId,
             accessToken,
             {
                 startDate: startDate.toISOString().split('T')[0],
-                endDate: endDate.toISOString().split('T')[0]
+                endDate: endDate.toISOString().split('T')[0],
+                preset: preset // Pass preset explicitly
             },
             [], // filtering
             null // company name
         );
 
-        // BACKGROUND SYNC: Update Database asynchronously so next load is fast/cached
-        // We do this via the sync service to reuse logic (upsert campaigns, etc)
-        // Note: This relies on full SyncService logic which might be heavy.
-        // For now, let's just return the fresh data to UI.
-        // We can trigger a lightweight sync here if needed.
+        console.log(`[MetaLive] Success! Fetched ${insights.length} campaigns.`);
 
         // Return structured data for Frontend
         res.json({
@@ -252,7 +335,10 @@ router.get('/:companyId/meta/live', async (req, res) => {
         });
 
     } catch (error) {
-        console.error('Meta Live Fetch Error:', error);
+        console.error('[MetaLive] ERROR:', error.message);
+        if (error.response) {
+            console.error('[MetaLive] API Response:', error.response.data);
+        }
         res.status(500).json({ error: error.message });
     }
 });

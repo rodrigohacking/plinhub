@@ -105,47 +105,81 @@ router.get('/:companyId/unified', async (req, res) => {
 
         const effectiveId = company.id;
 
-        let startDate = new Date();
-        let endDate = new Date();
+        const getBRDate = () => {
+            return new Date(new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
+        };
+
+        let now = getBRDate();
+        let startDate = new Date(now);
+        let endDate = new Date(now);
 
         if (range.includes('d')) {
             const days = parseInt(range.replace('d', ''));
             startDate.setDate(startDate.getDate() - days);
+            startDate.setHours(0, 0, 0, 0);
         } else if (range.startsWith('custom:')) {
             const parts = range.split(':');
             if (parts.length === 3) {
-                startDate = new Date(parts[1]);
-                endDate = new Date(parts[2]);
-                endDate.setHours(23, 59, 59, 999);
+                startDate = new Date(parts[1] + 'T00:00:00');
+                endDate = new Date(parts[2] + 'T23:59:59');
             }
         } else {
-            const now = new Date();
             switch (range) {
+                case 'today':
+                    startDate.setHours(0, 0, 0, 0);
+                    break;
+                case 'yesterday':
+                    startDate.setDate(startDate.getDate() - 1);
+                    startDate.setHours(0, 0, 0, 0);
+                    endDate.setDate(endDate.getDate() - 1);
+                    endDate.setHours(23, 59, 59, 999);
+                    break;
                 case 'this-month':
-                    startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+                    startDate = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0);
                     break;
                 case 'last-month':
-                    startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-                    endDate = new Date(now.getFullYear(), now.getMonth(), 0);
+                    startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0);
+                    endDate = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
                     break;
                 case 'last-3-months':
-                    startDate = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+                    startDate = new Date(now.getFullYear(), now.getMonth() - 2, 1, 0, 0, 0);
                     break;
                 case 'last-6-months':
-                    startDate = new Date(now.getFullYear(), now.getMonth() - 5, 1);
+                    startDate = new Date(now.getFullYear(), now.getMonth() - 5, 1, 0, 0, 0);
                     break;
                 case 'this-year':
-                    startDate = new Date(now.getFullYear(), 0, 1);
+                    startDate = new Date(now.getFullYear(), 0, 1, 0, 0, 0);
                     break;
                 default:
                     startDate.setDate(startDate.getDate() - 30);
+                    startDate.setHours(0, 0, 0, 0);
             }
         }
 
         const startDateStr = startDate.toISOString();
         const endDateStr = endDate.toISOString();
 
-        // Get Meta Ads metrics
+        // 1. Fetch Aggregated Totals via RPC (High Performance)
+        // If tag is 'all', we pass null to p_labels to sum everything in the table.
+        // This is safe now because we've removed redundant 'all' labels in SyncService.
+        let rpcLabels = tag === 'all' ? null : [tag];
+
+        // 1. Fetch Aggregated Totals via RPC (High Performance)
+        const { data: aggregatedData, error: rpcError } = await supabase
+            .rpc('get_metrics_summary', {
+                p_company_id: effectiveId,
+                p_start_date: startDate.toISOString().split('T')[0],
+                p_end_date: endDate.toISOString().split('T')[0],
+                p_labels: rpcLabels
+            });
+
+        if (rpcError) console.error("RPC Error:", rpcError);
+
+        const metaAgg = aggregatedData?.find(d => d.source === 'meta_ads') || {};
+        const pipefyAgg = aggregatedData?.find(d => d.source === 'pipefy') || {};
+
+        // 2. Fetch Daily Details (Still needed for charts)
+        // Meta Ads metrics
         let metaQuery = supabase
             .from('Metric')
             .select('*')
@@ -182,59 +216,26 @@ router.get('/:companyId/unified', async (req, res) => {
             .eq('companyId', effectiveId)
             .eq('source', 'pipefy');
 
-        // Manual distinct as Supabase distinct requires specific setup, or just JS filter
         const availableTags = [...new Set(uniqueLabels?.map(l => l.label) || [])].filter(l => l !== 'all');
 
         const safeMetaMetrics = metaMetrics || [];
         const safePipefyMetrics = pipefyMetrics || [];
 
-        // Aggregate totals
-        // Aggregate totals
-        const metaTotal = safeMetaMetrics.reduce((acc, m) => {
-            if (tag === 'all') {
-                const VALID_LABELS = ['condominial', 'rc_sindico', 'automovel', 'residencial'];
-                const label = (m.label || '').toLowerCase();
+        // Map RPC results to expected format
+        const metaTotal = {
+            spend: parseFloat(metaAgg.total_spend || 0),
+            impressions: parseInt(metaAgg.total_impressions || 0),
+            clicks: parseInt(metaAgg.total_clicks || 0),
+            conversions: parseInt(metaAgg.total_conversions || 0)
+        };
 
-                // Allow general Meta Ads labels (stored as 'all' or 'META ADS' by sync service)
-                if (label === 'all' || label === 'meta ads') {
-                    // Pass through
-                } else {
-                    // Otherwise enforce product validation (mainly for Pipefy or granular splits)
-                    const isValid = VALID_LABELS.some(vl => label.includes(vl));
-                    if (!isValid) return acc;
-                }
-            }
-            return {
-                spend: acc.spend + (m.spend || 0),
-                impressions: acc.impressions + (m.impressions || 0),
-                clicks: acc.clicks + (m.clicks || 0),
-                conversions: acc.conversions + (m.conversions || 0)
-            };
-        }, { spend: 0, impressions: 0, clicks: 0, conversions: 0 });
+        const pipefyTotal = {
+            leadsEntered: parseInt(pipefyAgg.total_cards_created || 0),
+            leadsQualified: parseInt(pipefyAgg.total_cards_qualified || 0),
+            salesClosed: parseInt(pipefyAgg.total_cards_converted || 0),
+            leadsLost: parseInt(pipefyAgg.total_cards_lost || 0)
+        };
 
-        // Aggregate totals for the period
-        // Aggregate totals for the period
-        // RULE: For "Geral" (all), ONLY sum specific products: condominial, rc_sindico, automovel, residencial
-        const VALID_LABELS = ['condominial', 'rc_sindico', 'automovel', 'residencial'];
-
-        const pipefyTotal = safePipefyMetrics.reduce((acc, m) => {
-            // Filter logic
-            if (tag === 'all') {
-                const label = (m.label || '').toLowerCase();
-                // Check if label matches any valid product (exact or partial match if needed, assuming exact for now based on "registros com os labels")
-                // The user said "soma apenas dos registros com os labels: condominial, rc_sindico, automovel e residencial"
-                // Labels in DB might be uppercase or have variations, let's normalize.
-                const isValid = VALID_LABELS.some(vl => label.includes(vl));
-                if (!isValid) return acc;
-            }
-
-            return {
-                leadsEntered: acc.leadsEntered + (m.cardsCreated || 0),
-                leadsQualified: acc.leadsQualified + (m.cardsQualified || 0),
-                salesClosed: acc.salesClosed + (m.cardsConverted || 0),
-                leadsLost: acc.leadsLost + (m.cardsLost || 0)
-            };
-        }, { leadsEntered: 0, leadsQualified: 0, salesClosed: 0, leadsLost: 0 });
 
         // User Request: "Metas Fixas... meta de investimento total no Geral seja de R$ 5.500,00"
         if (tag === 'all') {

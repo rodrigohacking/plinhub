@@ -1,0 +1,11 @@
+CORREÇÃO APLICADA: Mês Anterior (Meta Ads)
+
+O problema de dados zerados no "Mês Anterior" foi corrigido.
+Causa: Erro de fuso horário no cálculo de datas do painel (enviava dia 30 ao invés de dia 31).
+
+Ação Necessária:
+1. Atualize a página do dashboard (F5 / Cmd+R).
+2. Selecione "Mês Anterior".
+3. Os dados devem aparecer corretamente agora.
+
+Detalhes técnicos no arquivo: .gemini/antigravity/brain/.../walkthrough.md

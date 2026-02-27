@@ -25,6 +25,8 @@ const goalsRoutes = require('./routes/goals'); // Restore this
 const syncRoutes = require('./routes/sync');
 const companyRoutes = require('./routes/companies');
 const campaignsRoutes = require('./routes/campaigns'); // New Route
+const salesRoutes = require('./routes/sales');
+const webhookRoutes = require('./routes/webhooks');
 
 // Jobs
 const { startCronJobs } = require('./jobs/dailySync.cron');
@@ -64,6 +66,9 @@ app.use('/api/metrics', metricsRoutes);
 app.use('/api/goals', goalsRoutes);
 app.use('/api/sync', syncRoutes);
 app.use('/api/campaigns', campaignsRoutes);
+app.use('/api/sales', salesRoutes);
+app.use('/api/companies', companyRoutes);
+app.use('/api/webhooks', webhookRoutes);
 app.use('/api/invites', require('./routes/invite'));
 // Removed duplicate goalsRoutes usage
 
@@ -76,25 +81,35 @@ app.get('/health', (req, res) => {
 app.post('/api/pipefy', async (req, res) => {
     try {
         const { query, variables } = req.body;
-        // Check for Backend Auth Config
-        // Check for Backend Auth Config
-        const clientId = process.env.PIPEFY_CLIENT_ID;
-        const clientSecret = process.env.PIPEFY_CLIENT_SECRET;
-        const systemToken = process.env.PIPEFY_TOKEN ? (process.env.PIPEFY_TOKEN.startsWith('Bearer ') ? process.env.PIPEFY_TOKEN : `Bearer ${process.env.PIPEFY_TOKEN}`) : null;
+        const { decrypt } = require('./utils/encryption');
 
-        // AUTH PRIORITY STRATEGY (Vercel Consistent)
-        // 1. Client Token (User/Company specific) - PRIORITY
+        const systemToken = process.env.PIPEFY_TOKEN
+            ? (process.env.PIPEFY_TOKEN.startsWith('Bearer ') ? process.env.PIPEFY_TOKEN : `Bearer ${process.env.PIPEFY_TOKEN}`)
+            : null;
+
+        // AUTH PRIORITY STRATEGY
+        // 1. Client Token (from header — may be plaintext or encrypted from DB)
         let token = req.headers.authorization?.replace('Bearer ', '');
         if (token && token.toLowerCase() !== 'undefined' && token.toLowerCase() !== 'null') {
-            // Keep it (it's valid)
+            // Detect encrypted tokens (format: "iv_hex:encrypted_hex")
+            // Plain Pipefy tokens never contain colons
+            if (token.includes(':') && !token.startsWith('eyJ')) {
+                try {
+                    token = decrypt(token);
+                    console.log('[Proxy] Token decrypted successfully.');
+                } catch (decryptErr) {
+                    console.warn('[Proxy] Token looked encrypted but decrypt failed, using as-is:', decryptErr.message);
+                }
+            }
         } else {
             token = null;
         }
 
-        // 2. System Overlord Token (Env Var) - FALLBACK
+        // 2. System Token (Env Var) — FALLBACK
         if (!token && systemToken) {
             token = systemToken.replace('Bearer ', '');
         }
+
 
         if (!query) {
             return res.status(400).json({ error: 'Missing GraphQL query in body' });

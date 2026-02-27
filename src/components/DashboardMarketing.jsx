@@ -10,107 +10,115 @@ import { KPICard } from './KPICard';
 import { formatCurrency, formatNumber, formatPercent, cn } from '../lib/utils';
 import { DateRangeFilter, filterByDateRange, isDateInSelectedRange } from './DateRangeFilter';
 
-export function DashboardMarketing({ company, data, onRefresh }) {
-    const [dateRange, setDateRange] = useState('this-month');
+export function DashboardMarketing({ company, data, onRefresh, dateRange, setDateRange }) {
+    // dateRange comes from App.jsx (global persistence)
     const [activeTab, setActiveTab] = useState('geral');
     const [creativesTab, setCreativesTab] = useState('creatives'); // 'creatives' or 'campaigns'
     const [isSyncing, setIsSyncing] = useState(false);
-    // Live Overlay State
-    const [liveCampaigns, setLiveCampaigns] = useState([]);
 
-    // Calculate effective campaigns (Merge DB + Live)
+    // Effective campaigns — sourced exclusively from Supabase DB (via data.campaigns)
     const effectiveCampaigns = useMemo(() => {
-        const dbCampaigns = data.campaigns || [];
-
-        // Helper to normalize date to YYYY-MM-DD
-        const normDate = (d) => {
-            if (!d) return '';
-            return typeof d === 'string' ? d.substring(0, 10) : new Date(d).toISOString().substring(0, 10);
-        };
-
-        // 1. Convert DB Campaigns to Map
-        const campaignMap = new Map();
-        dbCampaigns.forEach(c => {
-            if (String(c.companyId) === String(company.id)) {
-                // Key by Name + StartDate (Normalized)
-                const key = `${c.name}-${normDate(c.startDate)}`;
-                campaignMap.set(key, c);
-            }
-        });
-
-        // 2. Overlay Live Campaigns
-        if (liveCampaigns.length > 0) {
-            liveCampaigns.forEach(c => {
-                const rawDate = c.date_start || c.date;
-                const dateStr = normDate(rawDate);
-                // DEBUG LOG
-                console.log(`[MarketingDebug] Live Campaign: ${c.campaign_name} | Raw: ${rawDate} | Norm: ${dateStr} | Invest: ${c.spend}`);
-
-                const formatted = {
-                    id: `live_${c.campaign_id}_${dateStr}`,
-                    companyId: company.id,
-                    name: c.campaign_name,
-                    startDate: dateStr,
-                    endDate: normDate(c.date_stop || c.date), // Use stop date or fallback
-                    investment: Number(c.spend || 0),
-                    impressions: Number(c.impressions || 0),
-                    clicks: Number(c.clicks || 0),
-                    leads: Number(c.leads || 0),
-                    channel: 'Meta Ads (Live)'
-                };
-
-                // Override if exists
-                const key = `${formatted.name}-${dateStr}`;
-                campaignMap.set(key, formatted);
-            });
-        }
-
-        return Array.from(campaignMap.values());
-    }, [data.campaigns, liveCampaigns, company.id]);
-
-    // State for Live Data (Transient)
-
-
+        return (data.campaigns || []).filter(c => String(c.companyId) === String(company.id));
+    }, [data.campaigns, company.id]);
 
     const handleSync = async () => {
         setIsSyncing(true);
-        const toastId = toast.loading('Sincronizando dados com Meta Ads e Pipefy...');
+        const toastId = toast.loading('Sincronizando Meta Ads + Pipefy...');
 
         try {
-            // 1. Force Backend Sync (Database Update)
-            const res = await fetch(`/api/sync/${company.id}/force`, { method: 'POST' });
-            if (!res.ok) throw new Error('Falha na sincronização');
+            // Sync both Meta Ads and Pipefy in parallel
+            const [metaRes, pipefyRes] = await Promise.allSettled([
+                fetch(`/api/sync/${company.id}/meta?days=30`, { method: 'POST' })
+                    .then(r => r.ok ? r.json() : r.json().then(e => { throw new Error(e.error || r.status); })),
+                fetch(`/api/sync/${company.id}/pipefy`, { method: 'POST' })
+                    .then(r => r.ok ? r.json() : r.json().then(e => { throw new Error(e.error || r.status); }))
+            ]);
 
-            // 2. Fetch Live Data immediately (Hotfix for freshness) - LIFETIME (365 days)
-            try {
-                const liveRes = await fetch(`/api/integrations/${company.id}/meta/live?days=365`);
-                if (liveRes.ok) {
-                    const liveData = await liveRes.json();
-                    if (liveData.success && liveData.data) {
-                        console.log("Live Meta Data Fetched:", liveData.data.length);
-                        setLiveCampaigns(liveData.data); // Update State
-                    }
-                }
-            } catch (e) {
-                console.warn("Live fetch warning:", e);
-            }
+            const metaRows = metaRes.status === 'fulfilled' ? metaRes.value.rowsUpserted : 0;
+            const pipefyRows = pipefyRes.status === 'fulfilled' ? pipefyRes.value.rowsUpserted : 0;
 
-            toast.success('Dados atualizados com sucesso!', { id: toastId });
+            if (metaRes.status === 'rejected') console.warn('[Sync] Meta Ads failed:', metaRes.reason);
+            if (pipefyRes.status === 'rejected') console.warn('[Sync] Pipefy failed:', pipefyRes.reason);
+
+            const parts = [];
+            if (metaRows > 0) parts.push(`${metaRows} campanhas Meta`);
+            if (pipefyRows > 0) parts.push(`${pipefyRows} deals Pipefy`);
+
+            toast.success(
+                parts.length > 0
+                    ? `Dados atualizados: ${parts.join(', ')}`
+                    : 'Sync concluído (sem novos dados)',
+                { id: toastId }
+            );
 
             if (onRefresh) {
                 onRefresh();
             }
         } catch (error) {
             console.error(error);
-            toast.error('Erro ao sincronizar. Tente novamente.', { id: toastId });
+            toast.error(`Erro ao sincronizar: ${error.message}`, { id: toastId });
         } finally {
             setIsSyncing(false);
         }
     };
 
-    // AUTO-SYNC ON MOUNT (Replaces Manual Button)
+    // Helper to get actual start/end dates from range string
+    const getDateRangeValues = (range, customStart = null, customEnd = null) => {
+        const today = new Date();
+        const endDate = new Date(today);
+        const startDate = new Date(today);
+
+        const fmt = (d) => {
+            const y = d.getFullYear();
+            const m = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            return `${y}-${m}-${day}`;
+        };
+
+        switch (range) {
+            case 'today':
+                return { since: fmt(today), until: fmt(today) };
+            case 'yesterday': {
+                const yest = new Date(today);
+                yest.setDate(yest.getDate() - 1);
+                return { since: fmt(yest), until: fmt(yest) };
+            }
+            case 'last-7-days':
+                startDate.setDate(today.getDate() - 7);
+                return { since: fmt(startDate), until: fmt(endDate) };
+            case 'last-30-days':
+                startDate.setDate(today.getDate() - 30);
+                return { since: fmt(startDate), until: fmt(endDate) };
+            case 'this-month': {
+                const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+                return { since: fmt(firstDay), until: fmt(endDate) };
+            }
+            case 'last-month': {
+                const firstDayLast = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+                const lastDayLast = new Date(today.getFullYear(), today.getMonth(), 0);
+                return { since: fmt(firstDayLast), until: fmt(lastDayLast) };
+            }
+            case 'last-3-months':
+                startDate.setDate(today.getDate() - 90);
+                return { since: fmt(startDate), until: fmt(endDate) };
+            case 'this-year': {
+                const firstDayYear = new Date(today.getFullYear(), 0, 1);
+                return { since: fmt(firstDayYear), until: fmt(endDate) };
+            }
+            case 'all-time':
+                startDate.setFullYear(2023, 0, 1);
+                return { since: fmt(startDate), until: fmt(endDate) };
+            default:
+                if (range && range.startsWith('custom:') && customStart && customEnd) {
+                    return { since: customStart, until: customEnd };
+                }
+                startDate.setDate(today.getDate() - 30);
+                return { since: fmt(startDate), until: fmt(endDate) };
+        }
+    };
+
+    // AUTO-SYNC ON MOUNT & DATE CHANGE
     const syncRan = React.useRef(false);
-    const toastIdRef = React.useRef(null);
 
     React.useEffect(() => {
         let isMounted = true;
@@ -118,96 +126,103 @@ export function DashboardMarketing({ company, data, onRefresh }) {
         const autoSync = async () => {
             if (!company?.id) return;
 
-            // Prevent double run
-            if (syncRan.current) return;
-            syncRan.current = true;
-
-            // Avoid duplicate strict syncs if already syncing
-            if (isSyncing) return;
-
             setIsSyncing(true);
-            const toastId = toast.loading('Atualizando dados do Meta Ads e Pipefy...', { duration: Infinity }); // Persistent until done
-            toastIdRef.current = toastId;
 
             try {
-                console.log("Auto-Sync: Iniciando atualização...");
-
-                // 1. Force Backend Sync (Database Update - 90 days window)
-                const res = await fetch(`/api/sync/${company.id}/force`, { method: 'POST' });
-
-                if (!res.ok) {
-                    console.warn("Auto-Sync: Falha no sync do backend, tentando live fetch...");
-                }
-
-                // 2. Fetch Live Data immediately to ensure "Today" is accurate (Hotfix)
-                try {
-                    // Fetch 365 days of live data to compare/fill gaps if backend sync was slow
-                    const liveRes = await fetch(`/api/integrations/${company.id}/meta/live?days=365`);
-                    if (liveRes.ok) {
-                        const liveJson = await liveRes.json();
-                        if (liveJson.success && Array.isArray(liveJson.data)) {
-                            console.log("Live Overlay Applied:", liveJson.data.length, "records");
-                            if (isMounted) setLiveCampaigns(liveJson.data);
+                // Trigger Backend Sync ONCE (on mount) to ensure database has latest numbers
+                if (!syncRan.current) {
+                    syncRan.current = true;
+                    try {
+                        const res = await fetch(`/api/sync/${company.id}/force`, { method: 'POST' });
+                        if (res.ok && onRefresh) {
+                            onRefresh();
                         }
+                    } catch (e) {
+                        console.warn("Auto-Sync: Backend error", e);
                     }
-                } catch (e) {
-                    console.warn("Auto-Sync: Live fetch warning:", e);
-                }
-
-                if (isMounted) {
-                    toast.dismiss(toastId);
-                    toast.success('Dados atualizados!', { duration: 2000 });
-                    if (onRefresh) onRefresh();
                 }
             } catch (error) {
                 console.error("Auto-Sync Error:", error);
-                if (isMounted) {
-                    toast.dismiss(toastId);
-                    toast.error('Erro na atualização automática.');
-                }
             } finally {
-                if (isMounted) setIsSyncing(false);
+                if (isMounted) {
+                    setIsSyncing(false);
+                }
             }
         };
 
-        autoSync();
+        const timeout = setTimeout(autoSync, 500);
 
         return () => {
             isMounted = false;
-            toast.dismiss(toastIdRef.current);
+            clearTimeout(timeout);
         };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [company.id]); // Run when company changes (or mounts)
+    }, [company.id, dateRange]); 
+// Re-run when dateRange changes
 
     // Determine if company sells insurance products
     const isAndar = company?.name?.toLowerCase().includes('andar');
     const isInsuranceCompany = isAndar || company?.name?.toLowerCase().includes('apolar');
 
     // Tabs Configuration - conditional based on company type
-    const TABS = isAndar ? [
-        { id: 'geral', label: 'Geral', color: 'blue' },
-        { id: 'condominial', label: 'Condominial', color: 'indigo' },
-        { id: 'rc_sindico', label: 'RC Síndico', color: 'purple' },
-        { id: 'automovel', label: 'Automóvel', color: 'rose' },
-        { id: 'residencial', label: 'Residencial', color: 'emerald' }
-    ] : [
-        { id: 'geral', label: 'Geral', color: 'blue' }
+    // 4. Product Definitions (Master List for Auto-Detection)
+    const PRODUCT_DEFINITIONS = [
+        { id: 'condominial', label: 'Condominial', keywords: ['condominial', 'condominio', 'predio'] },
+        { id: 'rc_sindico', label: 'RC Síndico', keywords: ['sindico', 'síndico', 'rc sindico'] },
+        { id: 'automovel', label: 'Automóvel', keywords: ['auto', 'automovel', 'automóvel', 'carro'] },
+        { id: 'residencial', label: 'Residencial', keywords: ['residencial', 'casa'] },
+        { id: 'administradora', label: 'Administradora', keywords: ['administradora', 'gestao', 'gestão'] },
+        { id: 'vida', label: 'Vida', keywords: ['vida', 'seguro vida'] },
+        { id: 'empresarial', label: 'Empresarial', keywords: ['empresa', 'empresarial', 'pme'] }
     ];
 
     // Helper: Normalize Text for Matching
     const normalize = (str) => str ? str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim() : "";
 
+    // Dynamic Product Detection based on Keywords in Campaign Names
+    const detectedProducts = useMemo(() => {
+        const found = new Set();
+        const campaignNames = effectiveCampaigns.map(c => normalize(c.name || ''));
+
+        PRODUCT_DEFINITIONS.forEach(prod => {
+            if (campaignNames.some(name => prod.keywords.some(kw => name.includes(normalize(kw))))) {
+                found.add(prod.id);
+            }
+        });
+
+        return Array.from(found);
+    }, [effectiveCampaigns]);
+
+    // Tabs Configuration - Dynamic based on active products
+    const TABS = useMemo(() => {
+        const base = [{ id: 'geral', label: 'Geral', color: 'blue' }];
+        const colors = ['indigo', 'purple', 'rose', 'emerald', 'amber', 'cyan', 'pink', 'orange', 'violet', 'teal'];
+        
+        detectedProducts.forEach((prodId, index) => {
+            const def = PRODUCT_DEFINITIONS.find(d => d.id === prodId);
+            if (def) {
+                base.push({
+                    id: def.id,
+                    label: def.label,
+                    color: colors[index % colors.length]
+                });
+            }
+        });
+
+        return base;
+    }, [detectedProducts]);
+
     // Calculation Engine
     const metrics = useMemo(() => {
-        // 1. Determine Product Scope
-        // Map Tab ID to Database Label and Pipefy Insurance Type
-        const productMapping = {
-            'geral': null, // Special handling
-            'condominial': { dbLabel: 'condominial', pipefyType: 'condomin', keywords: ['condominial', 'condomínio'] },
-            'rc_sindico': { dbLabel: 'rc_sindico', pipefyType: 'sindico', keywords: ['sindico', 'síndico'] },
-            'automovel': { dbLabel: 'automovel', pipefyType: 'auto', keywords: ['automovel', 'automóvel', 'auto'] },
-            'residencial': { dbLabel: 'residencial', pipefyType: 'residencial', keywords: ['residencial'] }
-        };
+        // Map dynamic products to their keywords
+        const productMapping = {};
+        PRODUCT_DEFINITIONS.forEach(prod => {
+            productMapping[prod.id] = { 
+                dbLabel: prod.id, 
+                keywords: prod.keywords.map(kw => normalize(kw))
+            };
+        });
+
+        const activeScope = productMapping[activeTab];
 
         let targetSum = { investment: 0, sales: 0, leads: 0, revenue: 0 };
         let weightedCplSum = 0; // To calculate average CPL target
@@ -216,11 +231,13 @@ export function DashboardMarketing({ company, data, onRefresh }) {
         if (activeTab === 'geral') {
             // For insurance companies: Sum of specific 4 products
             // For non-insurance companies: Use 'all' label directly
-            if (isInsuranceCompany) {
-                const products = ['condominial', 'rc_sindico', 'automovel', 'residencial'];
+            if (true) { // Enable dynamic summing for all
+                const products = Array.from(new Set([...detectedProducts, 'condominial', 'rc_sindico', 'automovel', 'residencial']));
 
                 products.forEach(pKey => {
                     const pConfig = productMapping[pKey];
+                    if (!pConfig) return;
+
                     // Find latest metric for this product
                     const row = (data.metrics || [])
                         .filter(m => String(m.companyId) === String(company.id) && m.label === pConfig.dbLabel)
@@ -269,9 +286,8 @@ export function DashboardMarketing({ company, data, onRefresh }) {
 
         } else {
             // Specific Product
-            const activeScope = productMapping[activeTab];
             const row = (data.metrics || [])
-                .filter(m => String(m.companyId) === String(company.id) && m.label === activeScope.dbLabel)
+                .filter(m => String(m.companyId) === String(company.id) && m.label === activeScope?.dbLabel)
                 .sort((a, b) => new Date(a.date) - new Date(b.date))
                 .pop() || {};
 
@@ -301,10 +317,16 @@ export function DashboardMarketing({ company, data, onRefresh }) {
             if (activeTab === 'geral') {
                 // Return ALL deals for Geral to ensure everything is counted
                 return deals;
-            } else {
-                const type = productMapping[activeTab].pipefyType;
-                return deals.filter(d => normalize(d.insuranceType || '').includes(type));
-            }
+            } 
+            
+            const scope = productMapping[activeTab];
+            if (!scope) return deals;
+            
+            const keywords = scope.keywords || [];
+            return deals.filter(d => {
+                const type = normalize(d.insuranceType || d.product || '');
+                return keywords.some(kw => type.includes(kw));
+            });
         };
 
         // META ADS Filter Logic - Apply to ALL tabs (Aggregated Definition)
@@ -339,32 +361,46 @@ export function DashboardMarketing({ company, data, onRefresh }) {
             (m.label === 'Meta Ads')
         );
 
+        // 4. Filter Campaigns by Active Tab (Scope)
+        const activeScopeResolved = activeTab === 'geral' ? null : productMapping[activeTab];
+
         // 3. Sum Totals
 
 
         // Re-populate wonDeals (List) using the EXACT SAME LOGIC as the "Vendas" Card
-        const wonDeals = (data.sales || []).filter(s => {
-            const isCurrentCompany = String(s.companyId) === String(company.id); // Ensure company match just in case
+        // A. Filter Won Deals by 'won_date' (real policy closing date) if available
+        const wonDealsRaw = (data.sales || []).filter(s => {
+            const isCurrentCompany = String(s.companyId) === String(company.id);
+            const pName = (s.phaseName || '').toLowerCase();
+            const normP = (str) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+            const normPhase = normP(pName);
 
-            // Robust Meta Check (Labels + UTMs)
-            const hasMeta = s.labels?.some(l => l?.toUpperCase().includes('META ADS') || l?.toUpperCase() === 'META ADS') ||
-                [s.utm_source, s.utm_medium, s.utm_campaign].some(u => (u || '').toLowerCase().includes('meta') ||
-                    (u || '').toLowerCase().includes('facebook') || (u || '').toLowerCase().includes('instagram'));
+            const isWon = (
+                normPhase.includes('ganho') || 
+                normPhase.includes('fechado') || 
+                normPhase.includes('fechada') ||
+                normPhase.includes('enviado ao cliente') || 
+                normPhase.includes('apolice fechada') ||
+                normPhase.includes('fechamento - ganho') ||
+                s.status === 'won'
+            );
 
-            // Robust DATE Check (Using Helper)
-            // Note: The Vendas Card uses 'wonDate' property.
-            const inRange = isDateInSelectedRange(s.wonDate, dateRange);
+            // Use won_date (snake_case) if exists, fallback to date
+            const effectiveDate = s.won_date ? new Date(s.won_date) : 
+                               (s.wonDate ? new Date(s.wonDate) : new Date(s.date));
+            const inRange = isDateInSelectedRange(effectiveDate, dateRange);
 
-            // Robust WON Status Check
-            const pName = s.phaseName ? s.phaseName.toLowerCase() : '';
-            const isWon = s.status === 'won' ||
-                ['338889923', '338889934', '341604257'].includes(String(s.phaseId)) ||
-                pName.includes('ganho') || pName.includes('fechado') ||
-                pName.includes('enviado ao cliente') || pName.includes('apolice fechada') ||
-                pName.includes('fechamento - ganho');
+            // Filter by Meta Ads tag for Marketing Dashboard ROI accuracy
+            const hasMeta = s.labels?.some(l => {
+                const labelName = normalize(typeof l === 'string' ? l : (l?.name || ''));
+                return labelName.includes('meta ads');
+            });
 
-            return isCurrentCompany && isWon && hasMeta && inRange;
+            return isCurrentCompany && isWon && inRange && hasMeta;
         });
+
+        // Apply product filter to won deals based on active tab
+        const wonDeals = filterByProduct(wonDealsRaw);
 
         // 4. Final Calculation (PURELY FROM LIST - BYPASSING AGGREGATES)
         // User Request: "Leads Gerados (tag meta) - Perdidos = Leads Qualificados"
@@ -373,9 +409,8 @@ export function DashboardMarketing({ company, data, onRefresh }) {
 
         // A. Leads Created (Meta)
         const leadsList = (data.sales || []).filter(s => {
-            const hasMeta = s.labels?.some(l => l?.toUpperCase().includes('META ADS') || l?.toUpperCase() === 'META ADS') ||
-                [s.utm_source, s.utm_medium, s.utm_campaign].some(u => (u || '').toLowerCase().includes('meta') ||
-                    (u || '').toLowerCase().includes('facebook') || (u || '').toLowerCase().includes('instagram'));
+            // Strict Meta Check (Labels ONLY - User Request)
+            const hasMeta = s.labels?.some(l => l?.toUpperCase().includes('META ADS') || l?.toUpperCase() === 'META ADS');
 
             // Use createdAt for "Leads Generated"
             const inRange = isDateInSelectedRange(s.createdAt || s.date, dateRange);
@@ -383,32 +418,34 @@ export function DashboardMarketing({ company, data, onRefresh }) {
         });
 
         // B. Leads Lost (Meta - Subset of Created)
+        // User Request: Strict adherence to "Perdido" status for these leads.
         const lostList = leadsList.filter(s => {
             const pName = (s.phaseName || '').toLowerCase();
+            const normalize = (str) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+            const normPhase = normalize(pName);
+
+            // Strict Status Check (Phase ID or Name)
+            // IDs: 338889931 (Andar Lose)
             const isLost = s.status === 'lost' ||
-                pName.includes('perdido') ||
-                pName.includes('cancelado') ||
-                pName.includes('descarte') ||
-                pName.includes('recusado') ||
-                pName.includes('invalido');
+                ['338889931'].includes(String(s.phaseId)) ||
+                normPhase.includes('perdido') ||
+                normPhase.includes('cancelado') ||
+                normPhase.includes('descarte') ||
+                normPhase.includes('recusado') ||
+                normPhase.includes('invalido');
+
             return isLost;
         });
 
         const totalCreated = leadsList.length; // Use List Count
         const totalLost = lostList.length;     // Use List Count
         const leadsRealized = totalCreated;
-        const qualifiedRealized = Math.max(0, totalCreated - totalLost);
 
-        // Sales come from Individual Deals List (data.sales) to match the "Vendas" Card
         const salesRealized = wonDeals.length;
         const salesVolume = wonDeals.reduce((acc, d) => acc + d.amount, 0);
 
-        // DEBUG LOGGING
-        console.log(`[KPI DEBUG] LIST-BASED Calculation (${dateRange.label}):`);
-        console.log(`- Meta List Size: ${leadsList.length}`);
-        console.log(`- Lost Subset: ${totalLost}`);
-        console.log(`- Qualified: ${qualifiedRealized}`);
-        if (leadsList.length > 0) console.log(`- Sample Lead: ${leadsList[0].title} (${leadsList[0].status})`);
+
+
 
 
         // B. Investment Realized (Meta Ads) - Strict Filtering
@@ -432,27 +469,22 @@ export function DashboardMarketing({ company, data, onRefresh }) {
 
             if (activeTab === 'geral') {
                 isProductMatch = true;
-            } else {
-                const config = productMapping[activeTab];
-                if (config && config.keywords) {
-                    if (config.keywords.some(kw => cName.includes(kw))) {
-                        isProductMatch = true;
-                    }
+            } else if (activeScopeResolved) {
+                const keywords = activeScopeResolved.keywords;
+                if (keywords.some(kw => cName.includes(kw))) {
+                    isProductMatch = true;
                 }
             }
 
             if (isProductMatch) {
-                const inDate = isDateInSelectedRange(campaign.startDate, dateRange);
-                // console.log(`[Campaign Check] ${cName} | Start: ${campaign.startDate} | InRange: ${inDate} | Invest: ${campaign.investment}`);
-
-                if (inDate) {
-                    investmentRealized += parseFloat(campaign.investment || 0);
-                    impressions += parseFloat(campaign.impressions || 0);
-                    clicks += parseFloat(campaign.clicks || 0);
-                    adsLeads += parseFloat(campaign.leads || 0);
-                }
-                // Hotfix: If dateRange is 'this-month' and campaign looks recent enough?
-                // Let's stick to isDateInSelectedRange.
+                // Remove redundant date check: the LIVE API already filters insights by date range.
+                // Keeping this check here would exclude campaigns that started BEFORE the range
+                // but had spend/leads WITHIN the range.
+                
+                investmentRealized += parseFloat(campaign.investment || 0);
+                impressions += parseFloat(campaign.impressions || 0);
+                clicks += parseFloat(campaign.clicks || 0);
+                adsLeads += parseFloat(campaign.leads || 0);
             }
         });
 
@@ -460,6 +492,18 @@ export function DashboardMarketing({ company, data, onRefresh }) {
         // CPL Realized: Use Ads Leads if > 0, otherwise fallback to Pipefy Leads (safety) but prompt requested Ads Data.
         // If we have 0 ads leads, prevent Infinity.
         const effectiveLeads = adsLeads; // User Request: "leads do proprio meta" (Sync with Meta)
+
+        // Correct Calculation: Displayed Leads (Meta) - Displayed Lost (Pipefy)
+        const qualifiedRealized = Math.max(0, effectiveLeads - totalLost);
+
+
+        // DEBUG LOGGING (Moved here to have access to final vars)
+        console.log(`[KPI DEBUG] Calculation (${dateRange.label}):`);
+        console.log(`- Meta Effective Leads: ${effectiveLeads}`);
+        console.log(`- Pipefy Lost: ${totalLost}`);
+        console.log(`- Qualified: ${qualifiedRealized}`);
+
+
         const cplRealized = effectiveLeads > 0 ? investmentRealized / effectiveLeads : 0;
 
         // ROI: (Volume Vendas - Investimento) / Investimento
@@ -492,12 +536,60 @@ export function DashboardMarketing({ company, data, onRefresh }) {
             roi,
             investmentPrc,
             cplPrc,
-            wonDeals // Expose wonDeals for consistency
+            wonDeals, // Expose for product table usage
+            leadsList // Expose for product efficiency usage
         };
 
     }, [data, company.id, dateRange, activeTab]);
 
-    const { targets, realized, roi, investmentPrc, cplPrc } = metrics;
+    const { targets, realized, roi, investmentPrc, cplPrc, wonDeals, leadsList } = metrics;
+
+    // C. Product/Insurance Efficiency
+    // Group leads by product keywords (from campaign name)
+    // Group sales by the NEW 'product' column
+    const productStats = {};
+    const campaignsList = effectiveCampaigns.filter(c => String(c.companyId) === String(company.id)); // Assuming effectiveCampaigns is available
+
+    // 1. Group Active Leads by Campaign Tags
+    leadsList.forEach(lead => {
+        const campaign = campaignsList.find(c => c.id === lead.campaign_id);
+        const cName = campaign?.name || '';
+        let productKey = 'Outros';
+
+        // Use defined products for grouping
+        PRODUCT_DEFINITIONS.forEach(def => {
+            if (cName.toLowerCase().includes(normalize(def.label)) || def.keywords.some(kw => cName.toLowerCase().includes(normalize(kw)))) {
+                productKey = def.label;
+            }
+        });
+
+        if (!productStats[productKey]) {
+            productStats[productKey] = { name: productKey, leads: 0, sales: 0, volume: 0 };
+        }
+        productStats[productKey].leads++;
+    });
+
+    // 2. Group Won Deals by ACTUAL product column
+    wonDeals.forEach(deal => {
+        let pName = deal.product || 'Outros';
+
+        // Normalize product names to match keys
+        if (pName.toLowerCase().includes('condomin')) pName = 'Condominial';
+        else if (pName.toLowerCase().includes('sindico')) pName = 'RC Síndico';
+        else if (pName.toLowerCase().includes('auto')) pName = 'Automóvel';
+        else if (pName.toLowerCase().includes('residenc')) pName = 'Residencial';
+        else if (pName.toLowerCase().includes('vida')) pName = 'Vida';
+
+        if (!productStats[pName]) {
+            productStats[pName] = { name: pName, leads: 0, sales: 0, volume: 0 };
+        }
+        productStats[pName].sales++;
+        productStats[pName].volume += deal.amount;
+    });
+
+    // 3. Convert to array and sort
+    const productEfficiency = Object.values(productStats)
+        .sort((a, b) => b.volume - a.volume); // Sort by volume for product efficiency
 
     // Top Performers Logic (UTM based)
     const topPerformers = useMemo(() => {
@@ -608,7 +700,7 @@ export function DashboardMarketing({ company, data, onRefresh }) {
 
                     {/* ADDITIONAL METRICS - Show in Geral tab for all companies */}
                     {activeTab === 'geral' && (
-                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-7 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-7 gap-4">
                             {/* Investimento */}
                             <div className="bg-white dark:bg-[#111] p-4 lg:p-6 rounded-2xl shadow-lg border border-gray-100 dark:border-white/5 min-w-[140px]">
                                 <div className="flex items-center gap-2 mb-3">
@@ -730,9 +822,9 @@ export function DashboardMarketing({ company, data, onRefresh }) {
 
                             {/* ROI */}
                             <div className="bg-white dark:bg-[#111] p-4 lg:p-6 rounded-2xl shadow-lg border border-gray-100 dark:border-white/5 min-w-[140px]">
-                                <div className="flex items-center gap-2 mb-3">
+                                <div className="flex items-center gap-2 mb-3 overflow-hidden">
                                     <TrendingUp className="w-5 h-5 text-purple-500 flex-shrink-0" />
-                                    <p className="text-[10px] lg:text-xs font-bold text-gray-400 uppercase truncate">Retorno sobre Invest.</p>
+                                    <p className="text-[10px] lg:text-xs font-bold text-gray-400 uppercase whitespace-normal leading-tight">Retorno sobre Invest.</p>
                                 </div>
                                 <p className="text-lg lg:text-2xl font-black text-gray-900 dark:text-white truncate" title={`${(realized.roi || 0).toFixed(1)}x`}>
                                     {(realized.roi || 0).toFixed(1)}x
@@ -741,9 +833,9 @@ export function DashboardMarketing({ company, data, onRefresh }) {
 
                             {/* Taxa de Conversão */}
                             <div className="bg-white dark:bg-[#111] p-4 lg:p-6 rounded-2xl shadow-lg border border-gray-100 dark:border-white/5 min-w-[140px]">
-                                <div className="flex items-center gap-2 mb-3">
+                                <div className="flex items-center gap-2 mb-3 overflow-hidden">
                                     <Activity className="w-5 h-5 text-indigo-500 flex-shrink-0" />
-                                    <p className="text-[10px] lg:text-xs font-bold text-gray-400 uppercase truncate">Taxa de Conversão</p>
+                                    <p className="text-[10px] lg:text-xs font-bold text-gray-400 uppercase whitespace-normal leading-tight">Taxa de Conversão</p>
                                 </div>
                                 <div className="flex items-baseline gap-2">
                                     <p className="text-lg lg:text-2xl font-black text-gray-900 dark:text-white truncate" title={`${(realized.conversionRate || 0).toFixed(1)}%`}>

@@ -1,7 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const syncService = require('../services/sync.service');
-const supabase = require('../utils/supabase'); // Changed from prisma
+const supabase = require('../utils/supabase');
+const { handleSyncRequest } = require('../controllers/metaAdsSync.controller');
+const { handlePipefySyncRequest } = require('../controllers/pipefySync.controller');
 
 /**
  * Force manual sync for a company
@@ -45,6 +47,18 @@ router.post('/:companyId/force', async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 });
+
+/**
+ * Incremental Meta Ads sync — bulk UPSERT via new controller
+ * POST /api/sync/:companyId/meta?days=7
+ */
+router.post('/:companyId/meta', handleSyncRequest);
+
+/**
+ * Pipefy historical sync — fetch all cards and UPSERT into sales table
+ * POST /api/sync/:companyId/pipefy
+ */
+router.post('/:companyId/pipefy', handlePipefySyncRequest);
 
 /**
  * Get sync logs for a company

@@ -15,7 +15,12 @@ if (!isConfigured) {
 }
 
 export const supabase = isConfigured
-    ? createClient(supabaseUrl, supabaseAnonKey)
+    ? createClient(supabaseUrl, supabaseAnonKey, {
+        auth: {
+            autoRefreshToken: false,
+            persistSession: false
+        }
+    })
     : {
         auth: {
             getSession: () => Promise.resolve({ data: { session: null }, error: new Error('Supabase not configured') }),

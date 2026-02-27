@@ -8,10 +8,28 @@ import { Target, Ban, CircleDollarSign, AlertCircle, BarChart as BarChartIcon, C
 import { KPICard } from './KPICard';
 import { ChartCard } from './ChartCard';
 import { formatCurrency, formatNumber, formatPercent } from '../lib/utils';
-import { DateRangeFilter, filterByDateRange } from './DateRangeFilter';
+import { DateRangeFilter, filterByDateRange, isDateInSelectedRange } from './DateRangeFilter';
 
-export function DashboardSales({ company, data }) {
-    const [dateRange, setDateRange] = useState('this-month');
+export function DashboardSales({ company, data, dateRange, setDateRange }) {
+    // dateRange comes from App.jsx (global persistence)
+
+    // Helper: Normalize Insurance Product Names (Global)
+    const normalizeProduct = (val) => {
+        if (!val || val === 'null' || val === 'undefined' || val === '-') return 'Não Identificado';
+        const v = String(val).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+        
+        // Priority Mapping
+        if (v.includes('condomin')) return 'Condominial';
+        if (v.includes('sindico') || v.includes('rc_sindico')) return 'RC Síndico';
+        if (v.includes('auto')) return 'Automóvel';
+        if (v.includes('residenc')) return 'Residencial';
+        if (v.includes('vida')) return 'Vida';
+        if (v.includes('empresa')) return 'Empresarial';
+        if (v.includes('administradora')) return 'Administradora';
+        
+        // Clean up underscores and capitalize if no match
+        return String(val).replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+    };
 
     // DEBUG: Inspect Apolar Data
     const debugApolar = data.sales.filter(s => s.companyId === company.id).slice(0, 5);
@@ -56,15 +74,25 @@ export function DashboardSales({ company, data }) {
     // Split filtering logic:
     // 1. createdDeals: Filter by 'createdAt' -> For "Leads Created" metric (Top of Funnel)
     // 2. relevantDeals: Filter by 'date' (wonDate/createdAt) -> For "Sales", "Revenue", "List" (Bottom of Funnel)
-    const { createdDeals, relevantDeals } = useMemo(() => {
-        const allDeals = data.sales.filter(s => s.companyId === company.id);
+    // 3. wonDeals: Filtered by 'wonDate' (actual closing)
+    const { allDeals, createdDeals, relevantDeals, wonDeals } = useMemo(() => {
+        const filtered = data.sales.filter(s => s.companyId === company.id);
+        
+        const filteredWonDeals = filtered.filter(d => {
+            const effectiveDateStr = d.wonDate || d.won_date || d.date;
+            const isWon = d.status === 'won';
+            return isWon && isDateInSelectedRange(effectiveDateStr, dateRange);
+        });
+
         return {
-            createdDeals: filterByDateRange(allDeals, dateRange, 'createdAt'),
-            relevantDeals: filterByDateRange(allDeals, dateRange, 'date') // Changed to 'date' (effective date) to capture Won/Lost events in period
+            allDeals: filtered,
+            createdDeals: filterByDateRange(filtered, dateRange, 'createdAt'),
+            relevantDeals: filterByDateRange(filtered, dateRange, 'date'),
+            wonDeals: filteredWonDeals
         };
     }, [data.sales, company.id, dateRange]);
 
-    // Use relevantDeals for most charts/tables
+    // Use relevantDeals for most charts/tables, EXCEPT for metrics that depend on wonDate
     const filteredDeals = relevantDeals;
 
     // Calculations for CRM Pipeline
@@ -82,14 +110,7 @@ export function DashboardSales({ company, data }) {
         // Definition: User Formula: (Entraram - Perdidos)
         const qualifiedCount = leadsCreatedCount - lostCount;
 
-        // 4. Vendas Fechadas
-        // Definition: Phase "Fechamento - Ganho" (ID 338889923) or "Apólice Fechada" (ID 338889934) or "Enviado ao Cliente" (User Request)
-        // CHANGED: Added 'Enviado ao Cliente' check via phaseName (normalized)
-        const wonDeals = relevantDeals.filter(d => {
-            const phaseMatches = ['338889923', '338889934'].includes(String(d.phaseId));
-            const nameMatches = d.phaseName === 'Enviado ao Cliente' || d.phaseName === 'Enviado ao cliente';
-            return phaseMatches || nameMatches || d.status === 'won';
-        });
+        // 4. Vendas Fechadas (Mudar para data de fechamento real)
         const wonCount = wonDeals.length;
 
         // Goals Logic
@@ -222,31 +243,26 @@ export function DashboardSales({ company, data }) {
             scheduledMeetingCount,
             proposalSentCount
         };
-    }, [createdDeals, relevantDeals, data.goals, company.id]);
+    }, [createdDeals, relevantDeals, wonDeals, data.goals, company.id]);
 
     // ANDAR SPECIFIC: Insurance Stats (Global)
     const insuranceStats = useMemo(() => {
         const stats = {};
 
+
         // 1. Count Created (Total Opportunities)
         createdDeals.forEach(d => {
-            const type = d.insuranceType || 'Não Identificado';
-            if (!stats[type]) stats[type] = { name: type, total: 0, won: 0, open: 0 };
+            const type = normalizeProduct(d.product || d.insuranceType || d.insurance_type);
+            if (!stats[type]) stats[type] = { name: type, total: 0, won: 0, open: 0, wonValue: 0 };
             stats[type].total++;
         });
 
-        // 2. Count Won (From metrics.wonDeals logic - which is reliable per user request)
+        // 2. Count Won
         metrics.wonDeals.forEach(d => {
-            const type = d.insuranceType || 'Não Identificado';
-            if (!stats[type]) stats[type] = { name: type, total: 0, won: 0, open: 0 }; // Should exist from step 1 usually, but metrics.wonDeals might have older created deals?
-            // Note: If a deal was won this month but created 6 months ago, it counts as WON result, but might not be in 'createdDeals' (cohort) depending on filter.
-            // If we want STRICT "Cohort Conversion" (Won from Created in this period), we must filter `metrics.wonDeals` by creation date overlap.
-            // If we want "Activity Conversion" (Won this month / Created this month), it's a proxy.
-
-            // User Ex: "Seguro condominial: 10% conversão" usually implies Cohort or Proxy.
-            // Let's increment 'won' blindly here implies "Activity Proxy".
+            const type = normalizeProduct(d.product || d.insuranceType || d.insurance_type);
+            if (!stats[type]) stats[type] = { name: type, total: 0, won: 0, open: 0, wonValue: 0 };
             stats[type].won++;
-            stats[type].wonValue = (stats[type].wonValue || 0) + d.amount; // Accumulate Value
+            stats[type].wonValue = (stats[type].wonValue || 0) + (d.amount || 0);
         });
 
         return Object.values(stats)
@@ -282,34 +298,23 @@ export function DashboardSales({ company, data }) {
             map[d.seller].total++;
 
             // Insurance Breakdown (Created)
-            const type = d.insuranceType || 'Outros';
+            const type = normalizeProduct(d.product || d.insuranceType);
             if (!map[d.seller].insuranceBreakdown[type]) map[d.seller].insuranceBreakdown[type] = { total: 0, won: 0 };
             map[d.seller].insuranceBreakdown[type].total++;
         });
 
-        // 3. Pass: Count Sales/Revenue (from relevantDeals - filtering for WON)
-        // We use relevantDeals because it matches the timeframe for "Activity/Result"
-        relevantDeals.forEach(d => {
-            const phaseMatches = ['338889923', '338889934'].includes(String(d.phaseId));
-            const nameMatches = d.phaseName === 'Enviado ao Cliente' || d.phaseName === 'Enviado ao cliente';
+        // 3. Pass: Count Sales/Revenue (from wonDeals - filtering for WON)
+        // We use wonDeals because it matches the timeframe for "Actual Sales" (wonDate)
+        wonDeals.forEach(d => {
+            initSeller(d.seller);
+            map[d.seller].won++;
+            map[d.seller].wonValue += d.amount;
+            map[d.seller].daysSum += (d.daysToClose || 0);
 
-            if (d.status === 'won' || phaseMatches || nameMatches) {
-                initSeller(d.seller);
-                map[d.seller].won++;
-                map[d.seller].wonValue += d.amount;
-                map[d.seller].daysSum += (d.daysToClose || 0);
-
-                // Insurance Breakdown (Won)
-                const type = d.insuranceType || 'Outros';
-                if (!map[d.seller].insuranceBreakdown[type]) map[d.seller].insuranceBreakdown[type] = { total: 0, won: 0 };
-                map[d.seller].insuranceBreakdown[type].won++;
-            }
-            // Optional: Track Lost Reasons from relevantDeals too (Deals lost IN this period)
-            if (d.status === 'lost') {
-                initSeller(d.seller);
-                const reason = d.lossReason || 'Outros';
-                map[d.seller].lostReasons[reason] = (map[d.seller].lostReasons[reason] || 0) + 1;
-            }
+            // Insurance Breakdown (Won)
+            const type = normalizeProduct(d.product || d.insuranceType);
+            if (!map[d.seller].insuranceBreakdown[type]) map[d.seller].insuranceBreakdown[type] = { total: 0, won: 0 };
+            map[d.seller].insuranceBreakdown[type].won++;
         });
 
         return Object.values(map)
@@ -320,7 +325,7 @@ export function DashboardSales({ company, data }) {
                 avgTime: s.won ? s.daysSum / s.won : 0
             })).sort((a, b) => b.wonValue - a.wonValue);
 
-    }, [createdDeals, relevantDeals]);
+    }, [createdDeals, wonDeals]);
 
     // Common Colors
     const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
@@ -360,7 +365,7 @@ export function DashboardSales({ company, data }) {
             </div>
 
             {/* 2. Premium KPI Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
                 {/* Card 1: Entraram */}
                 <div className="bg-white dark:bg-[#111] p-8 rounded-3xl shadow-xl border border-gray-100 dark:border-white/5 relative overflow-hidden group hover:shadow-2xl transition-all duration-300">
                     <div className="flex justify-between items-start mb-6">
@@ -639,8 +644,9 @@ export function DashboardSales({ company, data }) {
                                 <Pie
                                     data={(() => {
                                         const counts = {};
-                                        createdDeals.forEach(d => {
-                                            counts[d.channel] = (counts[d.channel] || 0) + 1;
+                                        metrics.wonDeals.forEach(d => {
+                                            const ch = d.channel || 'Desconhecido';
+                                            counts[ch] = (counts[ch] || 0) + 1;
                                         });
 
                                         // Group small values into "Outros"
@@ -759,7 +765,7 @@ export function DashboardSales({ company, data }) {
                                 className="bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-gray-700 dark:text-gray-300 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 outline-none"
                             >
                                 <option value="all">Todos os Seguros</option>
-                                {Array.from(new Set(metrics.wonDeals?.map(d => d.insuranceType).filter(Boolean) || [])).sort().map(type => (
+                                {Array.from(new Set(metrics.wonDeals?.map(d => normalizeProduct(d.product || d.insuranceType)) || [])).filter(t => t !== 'Não Identificado').sort().map(type => (
                                     <option key={type} value={type}>{type}</option>
                                 ))}
                             </select>
@@ -805,7 +811,7 @@ export function DashboardSales({ company, data }) {
                                     tableData = tableData.filter(d => (d.channel || 'Desconhecido') === filterChannel);
                                 }
                                 if (filterInsuranceType !== 'all') {
-                                    tableData = tableData.filter(d => (d.insuranceType) === filterInsuranceType);
+                                    tableData = tableData.filter(d => normalizeProduct(d.product || d.insuranceType) === filterInsuranceType);
                                 }
 
                                 // 3. Sort Logic
@@ -844,22 +850,22 @@ export function DashboardSales({ company, data }) {
                                         {currentData.map((deal) => (
                                             <tr key={deal.id} className="hover:bg-gray-50 dark:hover:bg-white/5 transition-colors">
                                                 <td className="px-6 py-4 text-gray-600 dark:text-gray-400">
-                                                    {new Date(deal.date || deal.createdAt).toLocaleDateString('pt-BR')}
+                                                    {new Date(deal.won_date || deal.date || deal.createdAt).toLocaleDateString('pt-BR')}
                                                 </td>
                                                 <td className="px-6 py-4 font-medium text-gray-900 dark:text-white">
                                                     {deal.client || deal.title}
                                                 </td>
                                                 <td className="px-6 py-4 text-gray-600 dark:text-gray-400">
-                                                    {deal.seller}
+                                                    {(deal.seller || 'N/A').replace(/[\[\]"]/g, '').trim()}
                                                 </td>
                                                 <td className="px-6 py-4">
-                                                    <span className="px-2 py-1 rounded-full text-xs font-semibold bg-gray-100 dark:bg-white/10 text-gray-600 dark:text-gray-300">
+                                                    <span className="px-2 py-1 rounded-full text-xs font-semibold bg-gray-100 dark:bg-white/10 text-gray-600 dark:text-gray-300 whitespace-nowrap">
                                                         {deal.channel || 'N/A'}
                                                     </span>
                                                 </td>
                                                 {(String(company.pipefyPipeId) === '306438109' || (company.name || '').toLowerCase().includes('andar')) && (
                                                     <td className="px-6 py-4 text-xs font-medium text-gray-500">
-                                                        {deal.insuranceType || '-'}
+                                                        {normalizeProduct(deal.product || deal.insuranceType)}
                                                     </td>
                                                 )}
                                                 <td className="px-6 py-4 font-bold text-gray-900 dark:text-white">
@@ -887,7 +893,7 @@ export function DashboardSales({ company, data }) {
                         tableData = tableData.filter(d => (d.channel || 'Desconhecido') === filterChannel);
                     }
                     if (filterInsuranceType !== 'all') {
-                        tableData = tableData.filter(d => (d.insuranceType) === filterInsuranceType);
+                        tableData = tableData.filter(d => normalizeProduct(d.product || d.insuranceType) === filterInsuranceType);
                     }
 
                     const totalItems = tableData.length;
@@ -1358,7 +1364,7 @@ export function DashboardSales({ company, data }) {
                         {(() => {
                             const today = new Date();
                             const currentMonthName = today.toLocaleString('pt-BR', { month: 'long' });
-                            const capitalizedMonth = currentMonthName.charAt(0).toUpperCase() + currentMonthName.slice(1);
+                            const capitalizedMonth = currentMonthName ? currentMonthName.charAt(0).toUpperCase() + currentMonthName.slice(1) : '';
 
                             const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0);
                             const diffTime = Math.abs(endOfMonth - today);
@@ -1556,7 +1562,7 @@ export function DashboardSales({ company, data }) {
                                             <div className="flex justify-between items-end mb-2">
                                                 <div className="flex items-center gap-3">
                                                     <div className="w-10 h-10 rounded-full bg-gray-100 dark:bg-white/10 flex items-center justify-center font-bold text-gray-600 dark:text-gray-300">
-                                                        {sdr.name.charAt(0)}
+                                                        {sdr.name?.charAt(0) || '?'}
                                                     </div>
                                                     <div>
                                                         <p className="font-bold text-gray-900 dark:text-white">{sdr.name}</p>

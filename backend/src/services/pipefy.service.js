@@ -79,6 +79,12 @@ class PipefyService {
                   name
                   value
                 }
+                assignees {
+                  name
+                }
+                created_by {
+                  name
+                }
               }
             }
             pageInfo {
@@ -114,42 +120,13 @@ class PipefyService {
   async getPipeMetrics(pipeId, token, startDate, endDate) {
     const pipeData = await this.getPipeCards(pipeId, token);
     const cards = pipeData.cards;
-    const pipeLabels = pipeData.pipe.labels.map(l => l.name);
+    const pipeLabels = pipeData.pipe.labels;
     const start = new Date(startDate);
     const end = new Date(endDate);
 
-    // Tags to track (curated list + anything found in pipe)
-    const trackedTags = ['META ADS', 'ORGÂNICO', 'GPTMAKER', 'GOOGLE ADS', ...pipeLabels.map(l => l.toUpperCase())];
+    // Tracked tags for initialization
+    const trackedTags = ['META ADS', 'ORGÂNICO', 'GPTMAKER', 'GOOGLE ADS', ...pipeLabels.map(l => l.name.toUpperCase())];
     const uniqueTags = [...new Set(trackedTags)];
-
-    const getCardTags = (card) => {
-      const tags = new Set();
-
-      // Check labels
-      if (card.labels) {
-        card.labels.forEach(l => {
-          const name = l.name.toUpperCase();
-          uniqueTags.forEach(t => {
-            if (name.includes(t)) tags.add(t);
-          });
-        });
-      }
-
-      // Check fields
-      const originField = card.fields?.find(f =>
-        f.name === 'Etiqueta origem do lead' ||
-        f.name === 'Origem do Lead' ||
-        f.name === 'Origem do Lead(Nome)'
-      );
-      if (originField && originField.value) {
-        const val = originField.value.toUpperCase();
-        uniqueTags.forEach(t => {
-          if (val.includes(t)) tags.add(t);
-        });
-      }
-
-      return Array.from(tags);
-    };
 
     // Initialize daily metrics structure
     // Key: YYYY-MM-DD, Value: { tag: { metrics... } }
@@ -218,7 +195,7 @@ class PipefyService {
       // but here we filter to requested range to check if valid.
       // However, we want to bucket by actual date.
 
-      const cardTags = getCardTags(card);
+      const cardTags = this.extractCardTags(card, pipeLabels);
       const allAndTags = ['all', ...cardTags];
 
       // 1. Leads Created
@@ -305,6 +282,41 @@ class PipefyService {
       availableTags: uniqueTags,
       pipeLabels: pipeData.pipe.labels
     };
+  }
+
+  /**
+   * Helper to extract tags from a card (Labels and Fields)
+   */
+  extractCardTags(card, pipeLabels = []) {
+    const pipeLabelsProcessed = pipeLabels.map(l => (l.name || l).toUpperCase());
+    const trackedTags = ['META ADS', 'ORGÂNICO', 'GPTMAKER', 'GOOGLE ADS', ...pipeLabelsProcessed];
+    const uniqueTags = [...new Set(trackedTags)];
+    const tags = new Set();
+
+    // Check labels
+    if (card.labels) {
+      card.labels.forEach(l => {
+        const name = (l.name || '').toUpperCase();
+        uniqueTags.forEach(t => {
+          if (name.includes(t)) tags.add(t);
+        });
+      });
+    }
+
+    // Check fields
+    const originField = card.fields?.find(f =>
+      f.name === 'Etiqueta origem do lead' ||
+      f.name === 'Origem do Lead' ||
+      f.name === 'Origem do Lead(Nome)'
+    );
+    if (originField && originField.value) {
+      const val = originField.value.toUpperCase();
+      uniqueTags.forEach(t => {
+        if (val.includes(t)) tags.add(t);
+      });
+    }
+
+    return Array.from(tags);
   }
 
   /**

@@ -1,11 +1,8 @@
-
-import { fetchPipefyDeals } from '../services/pipefy';
-import { fetchMetaCampaigns } from '../services/meta';
 import { supabase } from './supabase';
 import { toast } from 'sonner';
 
 export const STORAGE_KEY = 'plin_system_data_v4';
-const COMPANIES_CONFIG_KEY = 'plin_companies_config'; // New: Array of company configs
+const COMPANIES_CONFIG_KEY = 'plin_companies_config';
 
 export const INITIAL_DATA = {
     companies: [],
@@ -15,142 +12,7 @@ export const INITIAL_DATA = {
     metrics: []
 };
 
-// Helper to generate random dates
-function randomDate(start, end) {
-    return new Date(start.getTime() + Math.random() * (end.getTime() - start.getTime()));
-}
-
-
-
-// Generate Seed Data
-export function generateSeedData() {
-    const existing = localStorage.getItem(STORAGE_KEY);
-    if (existing) return JSON.parse(existing);
-
-    const sales = [];
-    const campaigns = [];
-    const goals = [];
-    const companies = INITIAL_DATA.companies;
-    const channels = ['Online', 'Loja Física', 'Telefone', 'Marketplace', 'Facebook', 'Instagram'];
-    const marketingChannels = ['Google Ads', 'Facebook', 'Instagram', 'Email', 'Linkedin'];
-    const sellers = ['Ana', 'Carlos', 'Beatriz', 'João', 'Mariana'];
-
-    const statuses = ['new', 'qualified', 'won', 'lost'];
-    const lossReasons = ['Preço alto', 'Concorrente', 'Sem contato', 'Desistência', 'Produto indisponível'];
-
-    const endDate = new Date();
-    const startDate = new Date();
-    startDate.setMonth(startDate.getMonth() - 6);
-
-    companies.forEach(company => {
-        // SALES
-        for (let i = 0; i < 150; i++) {
-            const date = randomDate(startDate, endDate);
-            const daysToClose = Math.floor(Math.random() * 60) + 1;
-            const createdAt = new Date(date);
-            createdAt.setDate(createdAt.getDate() - daysToClose);
-
-            const amount = Math.floor(Math.random() * 5000) + 100;
-
-            let status = 'won';
-            const r = Math.random();
-            if (r < 0.2) status = 'new';
-            else if (r < 0.5) status = 'qualified';
-            else if (r < 0.8) status = 'won';
-            else status = 'lost';
-
-            // Force some Meta sales for demo
-            const channel = (i % 3 === 0) ? (Math.random() > 0.5 ? 'Facebook' : 'Instagram') : channels[Math.floor(Math.random() * channels.length)];
-
-            // Add fake UTMs for creative ranking
-            let utm_content = null;
-            if (['Facebook', 'Instagram'].includes(channel)) {
-                utm_content = ['Vídeo Depoimento', 'Carrossel Oferta', 'Foto Lifestyle', 'Stories Quiz', 'Reels Viral'][Math.floor(Math.random() * 5)];
-            }
-
-            const deal = {
-                id: `deal_${company.id}_${i}`,
-                companyId: company.id,
-                title: `Venda ${i}`,
-                date: date.toISOString(), // Close Date
-                createdAt: createdAt.toISOString(),
-                daysToClose: daysToClose,
-                amount: amount,
-                items: Math.floor(Math.random() * 5) + 1,
-                channel: channel,
-                seller: sellers[Math.floor(Math.random() * sellers.length)],
-                client: `Cliente ${i}`,
-                status: status,
-                lossReason: status === 'lost' ? lossReasons[Math.floor(Math.random() * lossReasons.length)] : null,
-                utm_content: utm_content
-            };
-            sales.push(deal);
-        }
-
-        // CAMPAIGNS
-        const campStartDate = new Date();
-        campStartDate.setMonth(campStartDate.getMonth() - 3);
-
-        // 1. Generate Historical Campaigns
-        for (let i = 0; i < 10; i++) {
-            const start = randomDate(campStartDate, endDate);
-            const end = new Date(start);
-            end.setDate(end.getDate() + 15);
-
-            const investment = Math.floor(Math.random() * 2000) + 500;
-            const impressions = Math.floor(investment * (Math.random() * 20 + 10));
-            const clicks = Math.floor(impressions * (Math.random() * 0.05 + 0.01));
-            const leads = Math.floor(clicks * (Math.random() * 0.2 + 0.05));
-            const conversions = Math.floor(leads * (Math.random() * 0.3 + 0.1));
-
-            campaigns.push({
-                id: `camp_${company.id}_${i}`,
-                companyId: company.id,
-                name: `Campanha ${marketingChannels[i % marketingChannels.length]} ${i + 1}`,
-                startDate: start.toISOString(),
-                endDate: end.toISOString(),
-                investment,
-                channel: marketingChannels[Math.floor(Math.random() * marketingChannels.length)],
-                impressions,
-                clicks,
-                leads,
-                conversions
-            });
-        }
-
-        // 2. Force Active Campaigns (Current Month specific)
-        const currentMonthStart = new Date(endDate.getFullYear(), endDate.getMonth(), 1);
-        for (let i = 0; i < 3; i++) {
-            const start = randomDate(currentMonthStart, endDate);
-            const end = new Date(start);
-            end.setDate(end.getDate() + 30); // Goes into future
-
-            const investment = Math.floor(Math.random() * 3000) + 1000;
-            const impressions = Math.floor(investment * 15);
-            const clicks = Math.floor(impressions * 0.03);
-            const leads = Math.floor(clicks * 0.15);
-
-            campaigns.push({
-                id: `camp_active_${company.id}_${i}`,
-                companyId: company.id,
-                name: `[ACTIVE] Campanha Mensal ${i + 1}`,
-                startDate: start.toISOString(),
-                endDate: end.toISOString(),
-                investment,
-                channel: 'Instagram',
-                impressions,
-                clicks,
-                leads,
-                conversions: Math.floor(leads * 0.2)
-            });
-        }
-    });
-
-    const data = { companies, sales, campaigns, goals };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-    return data;
-}
-
+// Seed functionality removed - data sourced from Supabase
 
 // Get all company configurations
 export function getCompaniesConfig() {
@@ -172,11 +34,7 @@ export async function saveCompanyConfig(companyConfig) {
         let fetchMethod = 'POST';
         let companyId = companyConfig.id;
 
-        // Heuristic: 
-        // 1. If ID is a Number (1, 2, or Timestamp) -> It is LOCAL (Seed or Temp). We must POST (Create).
-        // 2. If ID is a String (UUID) -> It is from DB. We must PUT (Update).
-
-        const isStringId = typeof companyId === 'string' && companyConfig.id.length > 20; // UUID is 36 chars
+        const isStringId = typeof companyId === 'string' && companyConfig.id.length > 20;
         const isDbId = isStringId;
 
         if (isDbId) {
@@ -194,25 +52,17 @@ export async function saveCompanyConfig(companyConfig) {
             });
 
             if (!companyResponse.ok) {
-                const errText = await companyResponse.text(); // Get server error
-
-                // ROBUSTNESS: If Duplicate Key Error (Unique Constraint on Name),
-                // it means the company EXISTS but we tried to POST (or PUT to wrong ID).
-                // We should FIND the ID by Name and retry as PUT.
+                const errText = await companyResponse.text();
                 if (companyResponse.status === 500 && errText.toLowerCase().includes('duplicate')) {
-                    console.warn("Duplicate Name detected (500). Retrying as UPDATE (Upsert logic)... Error:", errText);
-
-                    // 1. Fetch all companies to find the ID
                     const allRes = await fetch('/api/companies');
                     if (allRes.ok) {
                         const all = await allRes.json();
                         const existing = all.find(c => c.name.toLowerCase().trim() === companyConfig.name.toLowerCase().trim());
 
                         if (existing) {
-                            console.log(`Found existing company "${existing.name}" with ID ${existing.id}. Switching to PUT.`);
                             fetchMethod = 'PUT';
                             url = `/api/companies/${existing.id}`;
-                            companyId = existing.id; // Update local var for integrations
+                            companyId = existing.id;
 
                             companyResponse = await fetch(url, {
                                 method: 'PUT',
@@ -220,8 +70,6 @@ export async function saveCompanyConfig(companyConfig) {
                                 body: JSON.stringify({ name: companyConfig.name })
                             });
                         } else {
-                            // Name matches nothing? Then why duplicate? Race condition or soft-deleted?
-                            // Throw original error.
                             throw new Error(`Failed to save company (Duplicate): ${errText}`);
                         }
                     }
@@ -241,8 +89,6 @@ export async function saveCompanyConfig(companyConfig) {
         const company = await companyResponse.json();
         const realId = company.id;
 
-        // Now Save Integrations
-        // Pipefy
         if (companyConfig.pipefyPipeId || companyConfig.pipefyToken) {
             const pipeRes = await fetch(`/api/integrations/${realId}/pipefy`, {
                 method: 'POST',
@@ -266,7 +112,6 @@ export async function saveCompanyConfig(companyConfig) {
             if (!pipeRes.ok) console.warn("Pipefy Integration Save Warning:", await pipeRes.text());
         }
 
-        // Meta Ads (Manual Token)
         if (companyConfig.metaAdAccountId || companyConfig.metaToken) {
             const metaRes = await fetch(`/api/integrations/${realId}/meta`, {
                 method: 'POST',
@@ -279,7 +124,6 @@ export async function saveCompanyConfig(companyConfig) {
             if (!metaRes.ok) console.warn("Meta Integration Save Warning:", await metaRes.text());
         }
 
-        // Return the REAL company ID and data so the UI can update
         return { ...companyConfig, id: realId };
 
     } catch (e) {
@@ -318,29 +162,21 @@ export function checkAdminPin(inputPin) {
     return stored === inputPin;
 }
 
-
-export async function getData() {
-    // 1. Load base data structure (sales, campaigns, etc.) from local storage or seed
-    // Ideally, these should also come from DB, but for now we only migrate 'companies' as requested.
+export async function getData(range = 'this-month') {
     let localData;
     const existing = localStorage.getItem(STORAGE_KEY);
     if (!existing) {
-        localData = generateSeedData();
+        localData = { ...INITIAL_DATA };
     } else {
         try {
             const parsed = JSON.parse(existing);
-            // Deep Merge / Ensure Keys exist to prevent crashes
             localData = {
                 ...INITIAL_DATA,
-                ...parsed,
-                companies: parsed.companies || [],
-                sales: parsed.sales || [],
-                campaigns: parsed.campaigns || [],
-                goals: parsed.goals || []
+                ...parsed
             };
         } catch (e) {
-            console.error("Data corruption detected, properly regenerating.", e);
-            localData = generateSeedData();
+            console.error("Data corruption detected, resetting.", e);
+            localData = { ...INITIAL_DATA };
         }
     }
 
@@ -468,8 +304,8 @@ export async function getData() {
 
             const promises = dbCompanies.map(async (company) => {
                 try {
-                    // Fetch 365 days of history to support dashboard filters
-                    const res = await fetch(`/api/metrics/${company.id}?range=365d`);
+                    // Fetch metrics history to support dashboard filters
+                    const res = await fetch(`/api/metrics/${company.id}?range=${range}`);
                     if (res.ok) {
                         return await res.json();
                     }
@@ -496,17 +332,21 @@ export async function getData() {
             const { data: goalsData, error: goalsError } = await supabase
                 .from('goals')
                 .select('*')
-                .in('companyId', companyIds);
+                .in('company_id', companyIds);
 
             if (goalsError) {
                 console.warn("[getData] Failed to fetch Goals:", goalsError);
             } else {
                 const fetchedGoals = (goalsData || []).map(g => ({
-                    companyId: g.companyId,
+                    companyId: g.company_id,
                     month: g.month,
-                    revenue: g.revenue || 0,
-                    deals: g.deals || 0,
-                    leads: g.leads || 0,
+                    year: g.year,
+                    revenue: g.sales_goal || 0,
+                    deals: g.sales_count_goal || 0,
+                    leads: g.leads_goal || 0,
+                    ticket: g.ticket_goal || 0,
+                    investment: g.investment_goal || 0,
+                    roi: g.roi_goal || 0,
                     created_at: g.created_at
                 }));
 
@@ -528,217 +368,114 @@ export async function getData() {
     // 2.6 Fetch Campaigns from Supabase (Source of Truth for Meta Ads)
     // Replaces direct frontend API calls
     let dbCampaigns = [];
+    let dbSales = [];
     try {
         if (dbCompanies && dbCompanies.length > 0) {
-            console.log("Fetching campaigns via Backend API (Bypassing RLS)...");
+            console.log("Fetching campaigns and sales via Backend API...");
 
-            // Fetch for each company (Limit 90 days by default)
+            // Fetch campaigns AND sales for each company in parallel
             const promises = dbCompanies.map(async (company) => {
-                try {
-                    const res = await fetch(`/api/campaigns/${company.id}?range=90d`);
-                    if (res.ok) {
-                        return await res.json();
-                    }
-                    console.warn(`Failed to fetch campaigns for ${company.name}: ${res.status}`);
-                    return [];
-                } catch (err) {
-                    console.warn(`Error fetching campaigns for ${company.name}`, err);
-                    return [];
-                }
+                const [campaignsRes, salesRes] = await Promise.all([
+                    fetch(`/api/campaigns/${company.id}?range=${range}`).then(r => r.ok ? r.json() : []).catch(() => []),
+                    fetch(`/api/sales/${company.id}?range=${range}`).then(r => r.ok ? r.json() : []).catch(() => [])
+                ]);
+                return { campaigns: campaignsRes, sales: salesRes };
             });
 
             const results = await Promise.all(promises);
-            dbCampaigns = results.flat();
-            console.log(`[getData] Fetched ${dbCampaigns.length} campaign records from API.`);
+            dbCampaigns = results.flatMap(r => r.campaigns);
+            dbSales = results.flatMap(r => r.sales);
+            console.log(`[getData] Fetched ${dbCampaigns.length} campaigns, ${dbSales.length} sales from API.`);
         }
     } catch (e) {
-        console.warn("[getData] Error fetching campaigns:", e);
+        console.warn("[getData] Error fetching campaigns/sales:", e);
     }
 
-    // 3. Format DB Companies for Frontend
-    // Ensure IDs are consistent (DB sends strings/numbers, frontend needs to handle them)
-    // PLUS: ONE-TIME DATA MIGRATION CHECK
-    // If we have local configs but DB has empty configs (migration scenario), we push local to DB.
-
-    const localConfigs = getCompaniesConfig();
-
-    const formattedCompanies = await Promise.all(dbCompanies.map(async (c) => {
-        const companyIdStr = c.id.toString();
-
-        // Find matching local config
-        const localMatch = localConfigs.find(lc => String(lc.id) === companyIdStr);
-
-        let mergedCompany = {
+    // 3. Select Companies
+    const formattedCompanies = dbCompanies.map(c => {
+        const flatCompany = {
             ...c,
-            logo: c.logo || null,
-            id: c.id
+            id: c.id,
+            name: c.name
         };
 
-        // Check if DB is missing tokens but local has them (Migration Logic)
-        if (localMatch) {
-            let needsSync = false;
-
-            // Check Pipefy
-            if (!c.pipefyToken && localMatch.pipefyToken) {
-                mergedCompany.pipefyToken = localMatch.pipefyToken;
-                mergedCompany.pipefyOrgId = localMatch.pipefyOrgId || c.pipefyOrgId;
-                mergedCompany.pipefyPipeId = localMatch.pipefyPipeId || c.pipefyPipeId;
-                // Sync legacy manual field mapping too? 
-                // schema doesn't have individual phase ID fields in Company/Integration yet?
-                // Wait, integration table has basic fields.
-                // AdminSettings uses the fields returned by API.
-                needsSync = true;
-            }
-
-            // Check Meta
-            if (!c.metaToken && localMatch.metaToken) {
-                mergedCompany.metaToken = localMatch.metaToken;
-                mergedCompany.metaAdAccountId = localMatch.metaAdAccountId || c.metaAdAccountId;
-                needsSync = true;
-            }
-
-            if (needsSync) {
-                // Background Sync to DB to fix it for everyone
-                console.log(`Migrating config for company ${c.name} to DB...`);
-                try {
-                    await fetch('/api/companies', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(mergedCompany)
-                    });
-                } catch (e) {
-                    console.error("Migration failed", e);
+        if (c.Integration && c.Integration.length > 0) {
+            c.Integration.forEach(integration => {
+                if (integration.type === 'pipefy') {
+                    flatCompany.pipefyOrgId = integration.pipefyOrgId;
+                    flatCompany.pipefyPipeId = integration.pipefyPipeId;
+                    flatCompany.pipefyToken = integration.pipefyToken;
+                    if (integration.settings) {
+                        try {
+                            const settings = typeof integration.settings === 'string'
+                                ? JSON.parse(integration.settings)
+                                : integration.settings;
+                            Object.assign(flatCompany, settings);
+                        } catch (e) { }
+                    }
                 }
-            }
+                if (integration.type === 'meta_ads') {
+                    flatCompany.metaAdAccountId = integration.metaAdAccountId;
+                    flatCompany.metaToken = integration.metaAccessToken;
+                }
+            });
         }
-
-        return mergedCompany;
-    }));
-
-    // CRITICAL FIX: Merge Local-Only Companies (Fallback)
-    // If a company exists in LocalStorage but not in DB (e.g. offline creation or sync error),
-    // we must include it. We also deduplicate by NAME to avoid "Andar Seguros" appearing twice with different IDs.
-    const dbIds = new Set(formattedCompanies.map(c => String(c.id)));
-    const dbNames = new Set(formattedCompanies.map(c => c.name.toLowerCase().trim()));
-
-    localConfigs.forEach(localC => {
-        const localId = String(localC.id);
-        const localName = localC.name.toLowerCase().trim();
-
-        // Skip if ID exists in DB
-        if (dbIds.has(localId)) return;
-
-        // Skip if Name exists in DB (Avoid Visual Duplicates)
-        if (dbNames.has(localName)) {
-            console.log(`[getData] Skipping local company "${localC.name}" - Name match found in DB.`);
-            return;
-        }
-
-        if (localC.id !== 1 && localC.id !== 2) {
-            console.log(`[getData] Found local-only company: ${localC.name} (${localC.id}). Adding to list AND syncing to DB.`);
-            formattedCompanies.push(localC);
-
-            // AUTO-SYNC: Persist this local-only company to the backend so it becomes global
-            saveCompanyConfig(localC).then(() => {
-                console.log(`[getData] Auto-synced company ${localC.name} to DB.`);
-            }).catch(err => console.error("Auto-sync failed", err));
-        }
+        return flatCompany;
     });
 
-    // Override local companies with DB companies
     localData.companies = formattedCompanies;
 
-    // 4. Fetch API data for each company (Pipefy/Meta)
-    // We iterate over the *fetched* companies now.
-    // No more merging with getCompaniesConfig()!
+    // 4. Fetch Details for each company
     const companyPromises = formattedCompanies.map(async (company) => {
-        // ... (Logic for fetching deals/ads remains similar, but using 'company' from DB)
-
         let apiSales = [];
         let apiCampaigns = [];
 
-        // Use company directly as it now has the config
-        const effectiveCompany = company;
+        // Sales
+        if (dbSales.length > 0) {
+            const relevantSales = dbSales.filter(s => String(s.company_id) === String(company.id));
+            apiSales = relevantSales.map(s => {
+                let labels = [];
+                try {
+                    labels = typeof s.labels === 'string' ? JSON.parse(s.labels) : (s.labels || []);
+                } catch (e) { }
 
-        // Try Pipefy
-        if (effectiveCompany.pipefyToken && effectiveCompany.pipefyPipeId) {
-            try {
-                const isApolar = effectiveCompany.name?.toUpperCase().includes('APOLAR') || effectiveCompany.pipefyPipeId === '305634232';
-                const isAndar = effectiveCompany.name?.toUpperCase().includes('ANDAR');
-
-                const apolarConfig = isApolar ? {
-                    wonPhase: 'Contrato Assinado (Ganho)',
-                    lostPhase: 'Perdido',
-                    qualifiedPhase: 'Em Contato',
-                    valueField: 'Valor mensal dos honorários administrativos',
-                    lossReasonField: 'Proposta Enviada'
-                } : {};
-
-                const andarConfig = isAndar ? {
-                    wonPhase: 'Apólice Emitida',
-                    lostPhase: 'Perdido',
-                    qualifiedPhase: 'Cotação',
-                    valueField: 'Prêmio Líquido', // Common in insurance
-                    lossReasonField: 'Motivo Recusa'
-                } : {};
-
-                const pipefyResult = await fetchPipefyDeals(
-                    effectiveCompany.pipefyOrgId,
-                    effectiveCompany.pipefyPipeId,
-                    effectiveCompany.pipefyToken,
-                    {
-                        wonPhase: effectiveCompany.wonPhase || apolarConfig.wonPhase || andarConfig.wonPhase,
-                        wonPhaseId: effectiveCompany.wonPhaseId,
-                        lostPhase: effectiveCompany.lostPhase || apolarConfig.lostPhase || andarConfig.lostPhase,
-                        lostPhaseId: effectiveCompany.lostPhaseId,
-                        qualifiedPhase: apolarConfig.qualifiedPhase || andarConfig.qualifiedPhase,
-                        qualifiedPhaseId: effectiveCompany.qualifiedPhaseId,
-                        valueField: effectiveCompany.valueField || apolarConfig.valueField || andarConfig.valueField,
-                        lossReasonField: effectiveCompany.lossReasonField || andarConfig.lossReasonField || apolarConfig.lossReasonField
-                    }
-                );
-
-                const pipefySales = Array.isArray(pipefyResult) ? pipefyResult : pipefyResult.deals;
-                if (!Array.isArray(pipefyResult) && pipefyResult.debug) {
-                    console.log(`[Storage] Pipefy Debug for ${effectiveCompany.name}:`, pipefyResult.debug);
-                }
-
-                if (isApolar) {
-                    console.log("DEBUG APOLAR - Config:", apolarConfig);
-                    console.log("DEBUG APOLAR - Token:", effectiveCompany.pipefyToken ? "Exists" : "Missing");
-                    console.log("DEBUG APOLAR - Raw Sales Count:", pipefySales.length);
-                    console.log("DEBUG APOLAR - First Sale Sample:", pipefySales[0]);
-                }
-
-                apiSales = pipefySales.map(s => ({ ...s, companyId: company.id }));
-            } catch (e) {
-                console.warn(`Failed to load Pipefy data for company ${company.id}`, e);
-                toast.error(`Erro ao carregar Pipefy (${company.name}): ${e.message}`);
-            }
+                return {
+                    id: s.id,
+                    companyId: s.company_id,
+                    client: s.client,
+                    status: s.status,
+                    amount: Number(s.amount || 0),
+                    date: s.date,
+                    createdAt: s.created_at_pipefy || s.date,
+                    wonDate: s.won_date,
+                    product: s.product,
+                    phaseName: s.phase_name,
+                    phaseId: s.phase_id,
+                    labels: labels,
+                    channel: s.channel || 'Orgânico',
+                    seller: s.seller,
+                    lossReason: s.loss_reason,
+                    daysToClose: s.days_to_close
+                };
+            });
         }
 
-        // Try Meta Ads (From DB now)
-        // We filter the pre-fetched dbCampaigns
+        // Campaigns
         if (dbCampaigns.length > 0) {
             const relevant = dbCampaigns.filter(c => String(c.company_id) === String(company.id));
-            if (relevant.length > 0) {
-                apiCampaigns = relevant.map(c => ({
-                    id: c.id,
-                    companyId: c.company_id,
-                    name: c.name,
-                    startDate: c.start_date, // Map snake_case to camelCase
-                    endDate: c.end_date,
-                    investment: Number(c.investment || 0),
-                    leads: Number(c.leads || 0),
-                    impressions: Number(c.impressions || 0),
-                    clicks: Number(c.clicks || 0),
-                    channel: c.channel || 'Meta Ads'
-                }));
-            }
-        } else if (effectiveCompany.metaToken && effectiveCompany.metaAdAccountId) {
-            // Fallback: If DB is empty but we have tokens, maybe Sync hasn't run? 
-            // We could try direct fetch, but let's stick to DB to enforce new architecture.
-            console.log(`[getData] No DB campaigns for ${company.name}, waiting for backend sync.`);
+            apiCampaigns = relevant.map(c => ({
+                id: c.id,
+                campaignId: c.campaignId || c.id,
+                companyId: c.company_id,
+                name: c.name,
+                startDate: c.start_date,
+                endDate: c.end_date,
+                investment: Number(c.investment || 0),
+                leads: Number(c.leads || 0),
+                impressions: Number(c.impressions || 0),
+                clicks: Number(c.clicks || 0),
+                channel: c.channel || 'Meta Ads'
+            }));
         }
 
         return {
@@ -749,19 +486,14 @@ export async function getData() {
     });
 
     const results = await Promise.all(companyPromises);
-
-    // Merge results into localData
     results.forEach(({ companyId, sales, campaigns }) => {
-        // ALWAYS remove existing (seed/stale) data for this company
-        // This ensures that if Pipefy returns 0 deals, we show 0, not fake data.
-        localData.sales = localData.sales.filter(s => String(s.companyId) !== String(companyId)).concat(sales);
-        localData.campaigns = localData.campaigns.filter(c => String(c.companyId) !== String(companyId)).concat(campaigns);
+        localData.sales = (localData.sales || []).filter(s => String(s.companyId) !== String(companyId)).concat(sales);
+        localData.campaigns = (localData.campaigns || []).filter(c => String(c.companyId) !== String(companyId)).concat(campaigns);
     });
 
-    // Merge Metrics (Replace existing for these companies)
     if (dbMetrics.length > 0) {
         const fetchedCompanyIds = new Set(dbMetrics.map(m => String(m.companyId)));
-        localData.metrics = localData.metrics.filter(m => !fetchedCompanyIds.has(String(m.companyId))).concat(dbMetrics);
+        localData.metrics = (localData.metrics || []).filter(m => !fetchedCompanyIds.has(String(m.companyId))).concat(dbMetrics);
     }
 
     return localData;

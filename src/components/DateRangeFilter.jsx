@@ -97,9 +97,9 @@ function toBrazilYMD(val) {
         // If YYYY-MM-DD already
         if (val.match(/^\d{4}-\d{2}-\d{2}$/)) return val;
         // If ISO string (YYYY-MM-DDTHH:mm:ss...), split and take date part
-        // This avoids timezone shifting (e.g. UTC midnight becoming previous day in Brazil)
-        // We assume the DB stores the "business date" at midnight UTC or similar.
-        if (val.includes('T')) return val.split('T')[0];
+        // Standardize: Replace ' ' with 'T' if DB uses spaces (Postgres default)
+        const tVal = val.includes(' ') ? val.replace(' ', 'T') : val;
+        if (tVal.includes('T')) return tVal.split('T')[0];
     }
 
     // Fallback for Date objects or other formats
@@ -167,8 +167,11 @@ export function isDateInSelectedRange(dateVal, range) {
         case 'all-time':
             return true;
 
-        case 'this-month':
-            return itemYMD.slice(0, 7) === todayYMD.slice(0, 7);
+        case 'this-month': {
+            const itemM = itemYMD.slice(0, 7);
+            const targetM = todayYMD.slice(0, 7);
+            return itemM === targetM;
+        }
 
         case 'this-year':
             return itemYMD.slice(0, 4) === todayYMD.slice(0, 4);

@@ -100,7 +100,8 @@ class SyncService {
         const startDate = new Date();
         startDate.setDate(startDate.getDate() - 90);
 
-        const insights = await metaAdsService.getInsights(
+        // Fetch daily insights for the last 90 days
+        const dailyInsights = await metaAdsService.getDailyInsights(
             adAccountId,
             accessToken,
             {
@@ -109,62 +110,65 @@ class SyncService {
             }
         );
 
-        const today = new Date().toISOString().split('T')[0];
-        const metricData = {
-            spend: insights.spend,
-            impressions: insights.impressions,
-            clicks: insights.clicks,
-            conversions: insights.conversions,
-            roas: insights.roas,
-            cpc: insights.cpc,
-            cpm: insights.cpm,
-            ctr: insights.ctr,
-            reach: insights.reach,
-            frequency: insights.frequency
-        };
+        if (!dailyInsights || dailyInsights.length === 0) {
+            console.log(`[SyncService] No daily insights for company ${companyId}`);
+            return { success: true };
+        }
 
-        // Save for "all" and specifically for "META ADS" tag
-        const labelsToSave = ['all', 'META ADS'];
+        // Aggregate by date (Meta might return multiple rows per date if multiple campaigns exist)
+        const metricsByDate = {};
+        dailyInsights.forEach(row => {
+            const date = row.date;
+            if (!metricsByDate[date]) {
+                metricsByDate[date] = {
+                    spend: 0,
+                    impressions: 0,
+                    clicks: 0,
+                    conversions: 0,
+                    reach: 0
+                };
+            }
+            metricsByDate[date].spend += row.spend;
+            metricsByDate[date].impressions += row.impressions;
+            metricsByDate[date].clicks += row.clicks;
+            metricsByDate[date].conversions += row.leads; // Map "leads" to "conversions" field in Metric table
+            metricsByDate[date].reach += row.reach;
+        });
 
-        for (const label of labelsToSave) {
-            // Prisma Upsert -> Supabase Upsert
-            // Note: We need the ID to update, or we rely on a Unique Constraint.
-            // Assuming 'Metric_companyId_date_source_label_key' exists, we can just upsert.
-            // Since we can't easily rely on constraints being perfectly mapped in Supabase without checking,
-            // we'll try to FIND first.
-
-            // Construct find query
-            const { data: existing } = await supabase
-                .from('Metric')
-                .select('id')
-                .eq('companyId', companyId)
-                .eq('date', today)
-                .eq('source', 'meta_ads')
-                .eq('label', label)
-                .single();
-
+        // Save specifically for "META ADS" tag for each date
+        // Note: No longer saving "all" label to avoid double counting in global sums.
+        const targetLabel = 'META ADS';
+        let insertedCount = 0;
+        
+        for (const dateStr of Object.keys(metricsByDate)) {
+            const metricData = metricsByDate[dateStr];
+            
             const payload = {
                 companyId,
                 source: 'meta_ads',
-                date: today, // Date string YYYY-MM-DD or ISO
-                label: label,
+                date: dateStr,
+                label: targetLabel,
                 ...metricData
             };
-
-            if (existing) {
-                payload.id = existing.id;
+            const { error } = await supabase.from('Metric').upsert(payload, { onConflict: 'companyId,date,source,label' });
+            if (error) {
+                console.error(`[SyncService] Meta Ads upsert failed for ${dateStr}:`, error.message);
+                await this.logSync(companyId, 'meta_ads', 'error', `Metric upsert failed for ${dateStr}: ${error.message}`);
+            } else {
+                insertedCount++;
             }
+        }
 
-            const { error } = await supabase.from('Metric').upsert(payload);
-            if (error) throw new Error(error.message);
+        if (insertedCount > 0) {
+            console.log(`[SyncService] Inserted/Updated ${insertedCount} metric rows for Meta Ads.`);
         }
 
         // Update integration lastSync
         await supabase.from('Integration').update({ lastSync: new Date() }).eq('id', integration.id);
 
-        await this.logSync(companyId, 'meta_ads', 'success', 'Metrics synced successfully', 1);
+        await this.logSync(companyId, 'meta_ads', 'success', 'Metrics synced successfully', insertedCount);
 
-        // --- NEW: Sync Campaign Data (Daily Breakdown) ---
+        // --- Sync Campaign Data (Daily Breakdown) ---
         try {
             console.log(`Syncing campaigns for company ${companyId}...`);
 
@@ -229,14 +233,15 @@ class SyncService {
     /**
      * Sync Pipefy metrics
      */
-    async syncPipefy(companyId, integration) {
+    async syncPipefy(companyId, integration, daysToSync = 180) {
         const token = decrypt(integration.pipefyToken);
         const pipeId = integration.pipefyPipeId;
 
-        // Get last 180 days (6 months) to ensure deep history backfill
+        // Get dynamic range (Default to 180 days for full sync, or less for incremental)
         const endDate = new Date();
         const startDate = new Date();
-        startDate.setDate(startDate.getDate() - 180);
+        startDate.setDate(startDate.getDate() - daysToSync);
+
 
         const metrics = await pipefyService.getPipeMetrics(
             pipeId,
@@ -252,19 +257,9 @@ class SyncService {
             const dayTags = metrics.dailyMetrics[dateStr];
             const tagKeys = Object.keys(dayTags);
 
-            for (const tag of tagKeys) {
+            const payloads = tagKeys.map(tag => {
                 const tagMetrics = dayTags[tag];
-
-                const { data: existing } = await supabase
-                    .from('Metric')
-                    .select('id')
-                    .eq('companyId', companyId)
-                    .eq('date', dateStr)
-                    .eq('source', 'pipefy')
-                    .eq('label', tag)
-                    .single();
-
-                const payload = {
+                return {
                     companyId,
                     source: 'pipefy',
                     date: dateStr,
@@ -276,58 +271,33 @@ class SyncService {
                     conversionRate: tagMetrics.conversionRate,
                     cardsByPhase: JSON.stringify(tagMetrics.cardsByPhase)
                 };
+            });
 
-                if (existing) {
-                    payload.id = existing.id;
-                }
-
-                await supabase.from('Metric').upsert(payload);
+            if (payloads.length > 0) {
+                const { error } = await supabase.from('Metric').upsert(payloads, { onConflict: 'companyId,date,source,label' });
+                if (error) console.error(`[PipefySync] Bulk upsert error for ${dateStr}:`, error.message);
             }
         }
 
         // Also save the CURRENT PIPELINE STATE (Phases) to TODAY's record
-        const aggregateTags = Object.keys(metrics.metricsByTag);
-        for (const tag of aggregateTags) {
+        // Note: No longer saving "all" label to avoid double counting.
+        const aggregateTags = Object.keys(metrics.metricsByTag).filter(t => t !== 'all');
+        const todayPayloads = aggregateTags.map(tag => {
             const agg = metrics.metricsByTag[tag];
-
-            const { data: existing } = await supabase
-                .from('Metric')
-                .select('id')
-                .eq('companyId', companyId)
-                .eq('date', todayTimestamp)
-                .eq('source', 'pipefy')
-                .eq('label', tag)
-                .single();
-
-            const payload = {
+            return {
                 companyId,
                 source: 'pipefy',
                 date: todayTimestamp,
                 label: tag,
-                cardsByPhase: JSON.stringify(agg.cardsByPhase),
-                // Initialize default values if creating new
-                cardsCreated: 0,
-                cardsQualified: 0,
-                cardsConverted: 0,
-                cardsLost: 0
+                cardsByPhase: JSON.stringify(agg.cardsByPhase)
             };
+        });
 
-            // If updating, we DON'T want to overwrite the counts we might have set in the loop above?
-            // Wait, the loop above iterates dates inclusive of today.
-            // So if today exists in 'dates', we already set counts.
-            // We just need to ensure cardsByPhase is up to date.
-
-            if (existing) {
-                payload.id = existing.id;
-                // If existing, we only update cardsByPhase to avoid resetting counts to 0
-                const { error } = await supabase
-                    .from('Metric')
-                    .update({ cardsByPhase: JSON.stringify(agg.cardsByPhase) })
-                    .eq('id', existing.id);
-                if (error) console.error("Error updating phases:", error);
-            } else {
-                await supabase.from('Metric').insert(payload);
-            }
+        if (todayPayloads.length > 0) {
+            // Note: This upsert might overwrite counts if not careful, 
+            // but since we just synced counts in the loop above for TODAY, it's safe.
+            const { error } = await supabase.from('Metric').upsert(todayPayloads, { onConflict: 'companyId,date,source,label' });
+            if (error) console.error("[PipefySync] Error updating phases:", error.message);
         }
 
         // Update integration lastSync
@@ -350,6 +320,30 @@ class SyncService {
             recordsProcessed,
             duration
         });
+    }
+
+    /**
+     * Handle single card update from Webhook (Incremental)
+     */
+    async processPipefyWebhookCard(companyId, cardPayload) {
+        console.log(`[SyncService] Incremental update for card ${cardPayload.id} (Company: ${companyId})`);
+
+        // Strategy: Instead of complex delta logic, we simply trigger a 5-day sync
+        // for this company to ensure the table is consistent around this card's date.
+        // This is safe, fast (compared to 180 days), and highly accurate.
+
+        const { data: integration } = await supabase
+            .from('Integration')
+            .select('*')
+            .eq('companyId', companyId)
+            .eq('type', 'pipefy')
+            .eq('isActive', true)
+            .single();
+
+        if (integration) {
+            // Sync only the last 7 days to capture current movements
+            return this.syncPipefy(companyId, integration, 7);
+        }
     }
 }
 

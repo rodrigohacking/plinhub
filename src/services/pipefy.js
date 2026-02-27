@@ -291,6 +291,8 @@ export async function fetchPipefyDeals(orgId, pipeId, token, userConfig = {}, se
         normPhaseName.includes('apolice emitida') || // Insurance Specific
         normPhaseName.includes('implantacao') || // Onboarding
         normPhaseName.includes('enviado ao cliente') || // User Request: explicit acceptance
+        normPhaseName.includes('apolice fechada') || // Andar Specific (Correct Name)
+        normPhaseName.includes('fechada') || // Generic Feminine
         normPhaseName.includes('assinado')) {
         status = 'won';
       }
@@ -322,6 +324,15 @@ export async function fetchPipefyDeals(orgId, pipeId, token, userConfig = {}, se
         }
       } else {
         // --- ROBUST LOGIC (ANDAR / DEFAULT) ---
+        const isAndar = String(pipeId).trim() === '306438109';
+        let policyCloseDate = null;
+
+        if (isAndar) {
+          const policyField = card.fields?.find(f => f.id === 'data_de_fechamento_da_ap_lice');
+          if (policyField && policyField.value) {
+            policyCloseDate = policyField.value.split("T")[0];
+          }
+        }
 
         // New Priority: Search for explicit "Sale Date" field to override everything
         const explicitDateField = card.fields?.find(f => {
@@ -331,29 +342,33 @@ export async function fetchPipefyDeals(orgId, pipeId, token, userConfig = {}, se
 
         if (status === 'lost') {
           dealDate = createdDate;
-        } else if (status === 'won') {
-          if (explicitDateField && explicitDateField.value) {
-            // HIGHEST PRIORITY: Manual Date Field
-            const rawVal = explicitDateField.value;
-            const brDate = rawVal.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
-            if (brDate) {
-              dealDate = `${brDate[3]}-${brDate[2]}-${brDate[1]}`;
+        } else {
+          if (isAndar && policyCloseDate) {
+            status = 'won';
+            dealDate = policyCloseDate;
+          } else if (status === 'won') {
+            if (explicitDateField && explicitDateField.value) {
+              // HIGHEST PRIORITY: Manual Date Field
+              const rawVal = explicitDateField.value;
+              const brDate = rawVal.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+              if (brDate) {
+                dealDate = `${brDate[3]}-${brDate[2]}-${brDate[1]}`;
+              } else {
+                dealDate = rawVal.split("T")[0];
+              }
             } else {
-              dealDate = rawVal.split("T")[0];
+              // ACCRUAL LOGIC: Use finish date for Won deals.
+              // SPECIAL CASE: "Enviado ao Cliente" (Active Phase)
+              let calculatedPhaseStart = null;
+              if (card.current_phase_age) {
+                const now = new Date();
+                calculatedPhaseStart = new Date(now.getTime() - (card.current_phase_age * 1000));
+              }
+              dealDate = card.finished_at || calculatedPhaseStart?.toISOString() || card.updated_at || createdDate;
             }
           } else {
-            // ACCRUAL LOGIC: Use finish date for Won deals.
-            // SPECIAL CASE: "Enviado ao Cliente" (Active Phase)
-            let calculatedPhaseStart = null;
-            if (card.current_phase_age) {
-              const now = new Date();
-              calculatedPhaseStart = new Date(now.getTime() - (card.current_phase_age * 1000));
-            }
-
-            dealDate = card.finished_at || calculatedPhaseStart?.toISOString() || card.updated_at || createdDate;
+            dealDate = card.finished_at || card.updated_at || createdDate;
           }
-        } else {
-          dealDate = card.finished_at || card.updated_at || createdDate;
         }
       }
 

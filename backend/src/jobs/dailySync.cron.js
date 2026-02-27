@@ -1,6 +1,7 @@
 const cron = require('node-cron');
-const supabase = require('../utils/supabase'); // Changed from prisma
+const supabase = require('../utils/supabase');
 const syncService = require('../services/sync.service');
+const { runCronSync } = require('../controllers/metaAdsSync.controller');
 
 /**
  * Daily sync cron job
@@ -40,11 +41,32 @@ function startCronJobs() {
 
             console.log(`Found ${companies.length} companies to sync`);
 
-            // Sync each company
+            // Sync each company — Meta Ads uses the new idempotent bulk controller
             for (const company of companies) {
                 try {
                     console.log(`Syncing company: ${company.name} (ID: ${company.id})`);
-                    await syncService.syncCompanyMetrics(company.id);
+
+                    // Fetch Meta Ads integration details for this company
+                    const { data: metaInt } = await supabase
+                        .from('Integration')
+                        .select('metaAdAccountId, metaAccessToken, metaStatus')
+                        .eq('companyId', company.id)
+                        .eq('type', 'meta_ads')
+                        .eq('isActive', true)
+                        .single();
+
+                    if (metaInt && metaInt.metaAccessToken && metaInt.metaStatus !== 'disabled') {
+                        // New controller: bulk UPSERT, 7-day window, CRON-safe (never throws)
+                        await runCronSync(company.id, metaInt, 7);
+                    } else {
+                        console.log(`  ↳ No active Meta Ads integration for ${company.name}, skipping.`);
+                    }
+
+                    // Always run Pipefy sync via the legacy service (unchanged)
+                    await syncService.syncCompanyMetrics(company.id).catch(e => {
+                        console.error(`Pipefy sync failed for ${company.id}:`, e.message);
+                    });
+
                 } catch (error) {
                     console.error(`Failed to sync company ${company.id}:`, error);
                 }
