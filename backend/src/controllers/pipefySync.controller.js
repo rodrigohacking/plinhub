@@ -100,7 +100,9 @@ function toSalesRow(companyId, card, settings = {}) {
                norm.includes('ANUNCIO') || norm.includes('TRAFEGO');
     });
 
-    if (!isMarketingLead && !settings.includeAllCards) {
+    // Only filter out non-marketing cards if explicitly configured per company
+    // Default: include ALL cards so sync is never silently empty
+    if (settings.onlyMarketingLeads && !isMarketingLead) {
         return null;
     }
 
@@ -183,7 +185,9 @@ function toSalesRow(companyId, card, settings = {}) {
                 // Ensure they are numbers and have correct length
                 if (!isNaN(parseInt(d)) && !isNaN(parseInt(m)) && !isNaN(parseInt(y)) && y.length === 4) {
                     try {
-                        finalWonDate = new Date(`${y}-${m}-${d}T12:00:00Z`).toISOString();
+                        const dd = String(parseInt(d)).padStart(2, '0');
+                        const mm = String(parseInt(m)).padStart(2, '0');
+                        finalWonDate = new Date(`${y}-${mm}-${dd}T12:00:00Z`).toISOString();
                     } catch (e) {
                         console.error("Date construction error:", e);
                     }
@@ -265,10 +269,19 @@ function extractRawFieldValue(fields, fieldNames) {
 // Core sync function
 // ---------------------------------------------------------------------------
 
-async function syncPipefyDeals(companyId, pipeId, token, settings = {}) {
-    console.log(`[PipefySync] Fetching cards for company ${companyId}, pipe ${pipeId}...`);
+async function syncPipefyDeals(companyId, pipeId, token, settings = {}, updatedSince = null) {
+    let cards;
 
-    const { pipe, cards } = await pipefyService.getPipeCards(pipeId, token);
+    if (updatedSince) {
+        // INCREMENTAL: only fetch cards modified since lastSync (fast)
+        console.log(`[PipefySync] Incremental sync since ${updatedSince} for company ${companyId}...`);
+        cards = await pipefyService.getUpdatedCards(pipeId, token, updatedSince);
+    } else {
+        // FULL: fetch all cards (slow — only on first sync)
+        console.log(`[PipefySync] Full sync for company ${companyId}, pipe ${pipeId}...`);
+        const result = await pipefyService.getPipeCards(pipeId, token);
+        cards = result.cards;
+    }
 
     if (!cards || cards.length === 0) {
         console.log('[PipefySync] No cards returned.');
@@ -317,10 +330,10 @@ async function handlePipefySyncRequest(req, res) {
     const { companyId } = req.params;
 
     try {
-        // Resolve Pipefy integration
+        // Resolve Pipefy integration (include lastSync for incremental sync decision)
         const { data: integration, error: intError } = await supabase
             .from('Integration')
-            .select('pipefyPipeId, pipefyToken, settings')
+            .select('pipefyPipeId, pipefyToken, settings, lastSync')
             .eq('companyId', companyId)
             .eq('type', 'pipefy')
             .eq('isActive', true)
@@ -363,11 +376,23 @@ async function handlePipefySyncRequest(req, res) {
             }
         }
 
+        // Use incremental sync if lastSync exists and is recent (<7 days), otherwise full sync
+        const forceFullSync = req.query.full === 'true';
+        let updatedSince = null;
+        if (!forceFullSync && integration.lastSync) {
+            const lastSyncAge = Date.now() - new Date(integration.lastSync).getTime();
+            const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+            if (lastSyncAge < SEVEN_DAYS_MS) {
+                updatedSince = new Date(integration.lastSync).toISOString();
+            }
+        }
+
         const result = await syncPipefyDeals(
             companyId,
             integration.pipefyPipeId,
             token,
-            settings
+            settings,
+            updatedSince
         );
 
         // Update lastSync

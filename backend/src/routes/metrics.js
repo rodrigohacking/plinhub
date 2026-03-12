@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const supabase = require('../utils/supabase'); // Changed from prisma
+const { parseDateRange } = require('../utils/dateRange');
 
 /**
  * Get metrics for a company
@@ -11,19 +12,17 @@ router.get('/:companyId', async (req, res) => {
         const { companyId } = req.params;
         const { source, range = '30d' } = req.query;
 
-        // Calculate date range
-        const days = parseInt(range.replace('d', ''));
-        const endDate = new Date().toISOString();
-        const startDate = new Date();
-        startDate.setDate(startDate.getDate() - days);
+        // Calculate date range (BRT-correct)
+        const { startDate, endDate } = parseDateRange(range);
         const startDateStr = startDate.toISOString();
+        const endDateStr = endDate.toISOString();
 
         let query = supabase
             .from('Metric')
             .select('*')
             .eq('companyId', companyId)
             .gte('date', startDateStr)
-            .lte('date', endDate)
+            .lte('date', endDateStr)
             .order('date', { ascending: false });
 
         if (source) {
@@ -105,57 +104,8 @@ router.get('/:companyId/unified', async (req, res) => {
 
         const effectiveId = company.id;
 
-        const getBRDate = () => {
-            return new Date(new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
-        };
-
-        let now = getBRDate();
-        let startDate = new Date(now);
-        let endDate = new Date(now);
-
-        if (range.includes('d')) {
-            const days = parseInt(range.replace('d', ''));
-            startDate.setDate(startDate.getDate() - days);
-            startDate.setHours(0, 0, 0, 0);
-        } else if (range.startsWith('custom:')) {
-            const parts = range.split(':');
-            if (parts.length === 3) {
-                startDate = new Date(parts[1] + 'T00:00:00');
-                endDate = new Date(parts[2] + 'T23:59:59');
-            }
-        } else {
-            switch (range) {
-                case 'today':
-                    startDate.setHours(0, 0, 0, 0);
-                    break;
-                case 'yesterday':
-                    startDate.setDate(startDate.getDate() - 1);
-                    startDate.setHours(0, 0, 0, 0);
-                    endDate.setDate(endDate.getDate() - 1);
-                    endDate.setHours(23, 59, 59, 999);
-                    break;
-                case 'this-month':
-                    startDate = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0);
-                    break;
-                case 'last-month':
-                    startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0);
-                    endDate = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
-                    break;
-                case 'last-3-months':
-                    startDate = new Date(now.getFullYear(), now.getMonth() - 2, 1, 0, 0, 0);
-                    break;
-                case 'last-6-months':
-                    startDate = new Date(now.getFullYear(), now.getMonth() - 5, 1, 0, 0, 0);
-                    break;
-                case 'this-year':
-                    startDate = new Date(now.getFullYear(), 0, 1, 0, 0, 0);
-                    break;
-                default:
-                    startDate.setDate(startDate.getDate() - 30);
-                    startDate.setHours(0, 0, 0, 0);
-            }
-        }
-
+        // Parse date range (BRT-correct)
+        const { startDate, endDate } = parseDateRange(range);
         const startDateStr = startDate.toISOString();
         const endDateStr = endDate.toISOString();
 
@@ -326,7 +276,7 @@ router.get('/:companyId/unified', async (req, res) => {
 
         res.json({
             metaAds: {
-                total: { ...metaTotal, goal: tag === 'all' ? 5500 : null },
+                total: { ...metaTotal },
                 daily: safeMetaMetrics
             },
             pipefy: {
@@ -340,7 +290,9 @@ router.get('/:companyId/unified', async (req, res) => {
                 costPerConversion: costPerConversion,
                 leadsToConversionRate: pipefyTotal.leadsEntered > 0
                     ? (pipefyTotal.salesClosed / pipefyTotal.leadsEntered) * 100
-                    : (pipefySummary.won.total / (pipefySummary.leads.total || 1)) * 100
+                    : pipefySummary.leads.total > 0
+                        ? (pipefySummary.won.total / pipefySummary.leads.total) * 100
+                        : 0
             },
             availableTags: availableTags
         });

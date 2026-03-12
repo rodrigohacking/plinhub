@@ -75,9 +75,32 @@ async function syncDailyMetrics(companyId, accountId, accessToken, daysToSync = 
     const startBR = new Date(nowBR);
     startBR.setDate(startBR.getDate() - daysToSync);
 
+    // ─── Timezone Compensation ─────────────────────────────────────────────────
+    // Meta returns date_start in the ad account's configured timezone (NOT UTC).
+    // If the account is in UTC (offset=0) and BRT = UTC-3, "today" in the account
+    // ends 3 hours after "today" ends in BRT. So we extend endDate by +1 day to
+    // make sure we capture all of BRT's "today" from the Meta perspective.
+    let accountTimezone = { timezone_name: 'America/Sao_Paulo', timezone_offset_hours_utc: -3 };
+    try {
+        accountTimezone = await metaAdsService.getAccountTimezone(accountId, accessToken);
+    } catch (e) {
+        console.warn('[MetaAdsSync] Could not get account timezone, using BRT as default.');
+    }
+
+    const offsetVsBRT = metaAdsService.getTimezoneOffsetVsBRT(accountTimezone.timezone_offset_hours_utc);
+    console.log(`[MetaAdsSync] Account timezone: ${accountTimezone.timezone_name} (UTC${accountTimezone.timezone_offset_hours_utc >= 0 ? '+' : ''}${accountTimezone.timezone_offset_hours_utc}) | Offset vs BRT: ${offsetVsBRT}h`);
+
+    // If account is ahead of BRT (e.g. UTC = +3h vs BRT), add 1 day to endDate
+    // to ensure today's BRT data is captured even after the account's midnight rolls over.
+    const endBR = new Date(nowBR);
+    if (offsetVsBRT > 0) {
+        endBR.setDate(endBR.getDate() + 1);
+        console.log(`[MetaAdsSync] Extending endDate by +1 day to cover account TZ offset.`);
+    }
+
     const dateRange = {
         startDate: toDateStr(startBR),
-        endDate: toDateStr(nowBR) // inclusive — captures all of today in BRT
+        endDate: toDateStr(endBR) // inclusive — captures all of today in BRT
     };
 
     console.log(`[MetaAdsSync] Syncing company ${companyId} | ${dateRange.startDate} → ${dateRange.endDate}`);

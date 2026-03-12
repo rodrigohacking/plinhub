@@ -1,26 +1,16 @@
 import React, { useState } from "react";
-import { motion } from "framer-motion";
-import { Sidebar, SidebarBody, SidebarLink } from "./ui/SidebarFrame";
+import { motion, AnimatePresence } from "framer-motion";
 import {
-    BarChart3,
-    Megaphone,
-    Settings,
-    Plus,
-    Target,
-    Sun,
-    Moon,
-    User,
-    Building2,
-    LogOut
+    BarChart3, Megaphone, Settings, Target,
+    Sun, Moon, Building2, LogOut, ChevronRight
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { useAuth } from "../contexts/AuthContext";
 
 export function SidebarNew({ currentView, onNavigate, company }) {
-    const [open, setOpen] = useState(false);
+    const [collapsed, setCollapsed] = useState(true);
     const { signOut, user } = useAuth();
 
-    // Theme Logic (Reused)
     const [isDark, setIsDark] = React.useState(() => {
         if (typeof window !== 'undefined') {
             return localStorage.getItem('theme') === 'dark' ||
@@ -45,133 +35,219 @@ export function SidebarNew({ currentView, onNavigate, company }) {
     const handleNav = (view) => {
         onNavigate(view);
         if (typeof window !== 'undefined' && window.innerWidth < 768) {
-            setOpen(false);
+            setCollapsed(true);
         }
     };
 
-    const links = [
-        {
-            label: "Dashboard Vendas",
-            onClick: () => handleNav('sales'),
-            current: currentView === 'sales',
-            icon: <BarChart3 className={cn("h-5 w-5 flex-shrink-0", currentView === 'sales' ? "text-[#FD295E]" : "text-neutral-700 dark:text-neutral-200")} />,
-        },
-        {
-            label: "Dashboard Marketing",
-            onClick: () => handleNav('marketing'),
-            current: currentView === 'marketing',
-            icon: <Megaphone className={cn("h-5 w-5 flex-shrink-0", currentView === 'marketing' ? "text-[#FD295E]" : "text-neutral-700 dark:text-neutral-200")} />,
-        },
-        {
-            label: "Definir Metas",
-            onClick: () => handleNav('set-goals'),
-            current: currentView === 'set-goals',
-            icon: <Target className={cn("h-5 w-5 flex-shrink-0", currentView === 'set-goals' ? "text-[#FD295E]" : "text-neutral-700 dark:text-neutral-200")} />,
-        }
+    const navItems = [
+        { label: "Vendas", view: "sales", icon: BarChart3 },
+        { label: "Marketing", view: "marketing", icon: Megaphone },
+        { label: "Metas", view: "set-goals", icon: Target },
     ];
 
-    const actions = [
-        {
-            label: "Configurações",
-            onClick: () => handleNav('settings'),
-            current: currentView === 'settings',
-            icon: <Settings className={cn("h-5 w-5 flex-shrink-0", currentView === 'settings' ? "text-[#FD295E]" : "text-neutral-700 dark:text-neutral-200")} />,
-        }
+    const bottomItems = [
+        { label: "Configurações", view: "settings", icon: Settings },
     ];
+
+    const userName = user?.user_metadata?.name || user?.name || "Usuário";
+    const userPhoto = user?.user_metadata?.photoUrl || user?.photoUrl;
+    const userInitial = userName[0]?.toUpperCase() || 'U';
 
     return (
-        <Sidebar open={open} setOpen={setOpen}>
-            <SidebarBody className="justify-between gap-6 bg-white dark:bg-[#0a0a0a] border-r border-gray-200 dark:border-white/5">
-                <div className="flex flex-col flex-1 overflow-y-auto overflow-x-hidden">
-                    <Logo company={company} open={open} />
+        <>
+            {/* Mobile overlay */}
+            {!collapsed && (
+                <div
+                    className="fixed inset-0 z-30 bg-black/20 backdrop-blur-sm md:hidden"
+                    onClick={() => setCollapsed(true)}
+                />
+            )}
 
-                    <div className="mt-6 flex flex-col gap-2">
-                        {links.map((link, idx) => (
-                            <SidebarLink key={idx} link={link} className={link.current ? "bg-[#FD295E]/10 rounded-lg text-[#FD295E]" : ""} />
-                        ))}
+            <motion.aside
+                animate={{ width: collapsed ? 64 : 220 }}
+                transition={{ duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
+                className={cn(
+                    "flex flex-col flex-shrink-0 overflow-hidden z-40",
+                    "bg-[var(--sidebar-bg)] border-r border-[var(--sidebar-border)]",
+                    "h-[100dvh] sticky top-0",
+                    "shadow-[1px_0_0_0_rgba(0,0,0,0.04)]"
+                )}
+                style={{ willChange: 'width' }}
+            >
+                {/* ── Logo & Toggle ────────────────────── */}
+                <div className="flex items-center justify-between px-3 py-4 border-b border-[var(--border)] min-h-[60px]">
+                    <div className="flex items-center gap-2.5 overflow-hidden">
+                        {company.logo ? (
+                            <img
+                                src={company.logo}
+                                alt={company.name}
+                                className="h-8 w-8 rounded-lg object-cover flex-shrink-0 shadow-sm"
+                            />
+                        ) : (
+                            <div className="h-8 w-8 rounded-lg bg-[var(--brand)] flex items-center justify-center flex-shrink-0">
+                                <span className="text-white text-xs font-bold">
+                                    {company.name?.[0]?.toUpperCase()}
+                                </span>
+                            </div>
+                        )}
+                        <AnimatePresence>
+                            {!collapsed && (
+                                <motion.span
+                                    initial={{ opacity: 0, x: -6 }}
+                                    animate={{ opacity: 1, x: 0 }}
+                                    exit={{ opacity: 0, x: -6 }}
+                                    transition={{ duration: 0.18 }}
+                                    className="text-sm font-semibold text-[var(--text-primary)] whitespace-nowrap truncate max-w-[128px]"
+                                >
+                                    {company.name}
+                                </motion.span>
+                            )}
+                        </AnimatePresence>
                     </div>
 
-                    <div className="mt-6">
-                        <div className="h-px w-full bg-gray-200 dark:bg-white/10 mb-4" />
-                        <div className="flex flex-col gap-2">
-                            {actions.map((link, idx) => (
-                                <SidebarLink key={idx} link={link} className={link.current ? "bg-[#FD295E]/10 rounded-lg text-[#FD295E]" : ""} />
-                            ))}
-                        </div>
-                    </div>
+                    <button
+                        onClick={() => setCollapsed(!collapsed)}
+                        className="flex-shrink-0 p-1 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-hover)] transition-colors"
+                    >
+                        <motion.div animate={{ rotate: collapsed ? 0 : 180 }} transition={{ duration: 0.25 }}>
+                            <ChevronRight className="w-4 h-4" />
+                        </motion.div>
+                    </button>
                 </div>
 
-                <div>
-                    {/* Toggle Theme */}
-                    <div className="mb-1">
-                        <SidebarLink
-                            link={{
-                                label: isDark ? "Modo Claro" : "Modo Escuro",
-                                onClick: () => setIsDark(!isDark),
-                                icon: isDark ? (
-                                    <Sun className="h-5 w-5 text-neutral-700 dark:text-neutral-200 flex-shrink-0" />
-                                ) : (
-                                    <Moon className="h-5 w-5 text-neutral-700 dark:text-neutral-200 flex-shrink-0" />
-                                ),
-                            }}
+                {/* ── Main Nav ─────────────────────────── */}
+                <nav className="flex-1 overflow-y-auto overflow-x-hidden py-4 px-2 flex flex-col gap-1">
+                    {navItems.map(({ label, view, icon: Icon }) => {
+                        const active = currentView === view;
+                        return (
+                            <NavItem
+                                key={view}
+                                label={label}
+                                icon={Icon}
+                                active={active}
+                                collapsed={collapsed}
+                                onClick={() => handleNav(view)}
+                            />
+                        );
+                    })}
+                </nav>
+
+                {/* ── Bottom Section ────────────────────── */}
+                <div className="px-2 py-3 border-t border-[var(--border)] flex flex-col gap-1">
+                    {bottomItems.map(({ label, view, icon: Icon }) => (
+                        <NavItem
+                            key={view}
+                            label={label}
+                            icon={Icon}
+                            active={currentView === view}
+                            collapsed={collapsed}
+                            onClick={() => handleNav(view)}
                         />
-                    </div>
+                    ))}
 
-                    <SidebarLink
-                        link={{
-                            label: "Trocar Empresa",
-                            onClick: () => onNavigate('home'),
-                            icon: (
-                                <Building2 className="text-neutral-700 dark:text-neutral-200 h-5 w-5 flex-shrink-0" />
-                            ),
-                        }}
+                    <NavItem
+                        label={isDark ? "Modo Claro" : "Modo Escuro"}
+                        icon={isDark ? Sun : Moon}
+                        active={false}
+                        collapsed={collapsed}
+                        onClick={() => setIsDark(!isDark)}
                     />
 
-                    <SidebarLink
-                        link={{
-                            label: "Sair",
-                            onClick: () => signOut(),
-                            icon: (
-                                <LogOut className="text-neutral-700 dark:text-neutral-200 h-5 w-5 flex-shrink-0" />
-                            ),
-                        }}
+                    <NavItem
+                        label="Trocar Empresa"
+                        icon={Building2}
+                        active={false}
+                        collapsed={collapsed}
+                        onClick={() => onNavigate('home')}
                     />
-                    <SidebarLink
-                        link={{
-                            label: user?.user_metadata?.name || user?.name || "Usuário",
-                            onClick: () => onNavigate('profile'),
-                            icon: (user?.user_metadata?.photoUrl || user?.photoUrl) ? (
-                                <img src={user.user_metadata?.photoUrl || user.photoUrl} alt="User" className="h-5 w-5 rounded-full object-cover flex-shrink-0" />
-                            ) : (
-                                <div className="h-5 w-5 flex-shrink-0 rounded-full bg-gray-200 dark:bg-white/20 flex items-center justify-center font-bold text-[10px] text-gray-700 dark:text-white uppercase">
-                                    {(user?.user_metadata?.name?.[0] || user?.name?.[0] || 'U')}
-                                </div>
-                            ),
-                        }}
+
+                    <NavItem
+                        label="Sair"
+                        icon={LogOut}
+                        active={false}
+                        collapsed={collapsed}
+                        onClick={() => signOut()}
+                        danger
                     />
+
+                    {/* ── User Avatar ────────────────── */}
+                    <button
+                        onClick={() => onNavigate('profile')}
+                        className={cn(
+                            "flex items-center gap-2.5 w-full mt-1 px-2 py-2 rounded-lg",
+                            "hover:bg-[var(--surface-hover)] transition-colors text-left"
+                        )}
+                    >
+                        {userPhoto ? (
+                            <img src={userPhoto} alt={userName} className="h-7 w-7 rounded-full object-cover flex-shrink-0 ring-2 ring-[var(--border)]" />
+                        ) : (
+                            <div className="h-7 w-7 rounded-full bg-[var(--brand)] flex items-center justify-center flex-shrink-0 ring-2 ring-[var(--brand-light)]">
+                                <span className="text-white text-xs font-bold">{userInitial}</span>
+                            </div>
+                        )}
+                        <AnimatePresence>
+                            {!collapsed && (
+                                <motion.span
+                                    initial={{ opacity: 0, x: -6 }}
+                                    animate={{ opacity: 1, x: 0 }}
+                                    exit={{ opacity: 0, x: -6 }}
+                                    transition={{ duration: 0.18 }}
+                                    className="text-xs font-medium text-[var(--text-secondary)] truncate whitespace-nowrap"
+                                >
+                                    {userName}
+                                </motion.span>
+                            )}
+                        </AnimatePresence>
+                    </button>
                 </div>
-            </SidebarBody>
-        </Sidebar >
+            </motion.aside>
+        </>
     );
 }
 
-export const Logo = ({ company, open }) => {
+function NavItem({ label, icon: Icon, active, collapsed, onClick, danger = false }) {
     return (
-        <div className="font-normal flex items-center justify-start text-sm text-black py-1 relative z-20 w-auto min-w-[50px] gap-3 mx-2 pl-1">
-            {company.logo ? (
-                <img src={company.logo} alt={company.name} className="h-9 w-9 rounded-lg object-cover flex-shrink-0 shadow-sm" />
-            ) : (
-                <div className="h-9 w-9 bg-black dark:bg-white rounded-lg flex-shrink-0" />
+        <button
+            onClick={onClick}
+            title={collapsed ? label : undefined}
+            className={cn(
+                "relative flex items-center gap-2.5 w-full px-2 py-2 rounded-lg text-sm font-medium transition-all duration-150",
+                active
+                    ? "bg-[var(--brand-light)] text-[var(--brand)]"
+                    : danger
+                        ? "text-[var(--danger)] hover:bg-[var(--danger-light)]"
+                        : "text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]"
             )}
-            <motion.span
-                animate={{
-                    width: open ? "auto" : 0,
-                    opacity: open ? 1 : 0
-                }}
-                className="font-medium text-black dark:text-white whitespace-nowrap overflow-hidden"
-            >
-                {company.name}
-            </motion.span>
-        </div>
+        >
+            {active && (
+                <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 bg-[var(--brand)] rounded-r-full" />
+            )}
+            <Icon className={cn(
+                "flex-shrink-0 w-[18px] h-[18px]",
+                active ? "text-[var(--brand)]" : danger ? "text-[var(--danger)]" : "text-[var(--text-secondary)]"
+            )} />
+            <AnimatePresence>
+                {!collapsed && (
+                    <motion.span
+                        initial={{ opacity: 0, x: -6 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -6 }}
+                        transition={{ duration: 0.18 }}
+                        className="whitespace-nowrap overflow-hidden"
+                    >
+                        {label}
+                    </motion.span>
+                )}
+            </AnimatePresence>
+        </button>
     );
-};
+}
+
+export const Logo = ({ company, open }) => (
+    <div className="flex items-center gap-2.5 px-3 py-2">
+        {company?.logo
+            ? <img src={company.logo} alt={company.name} className="h-8 w-8 rounded-lg object-cover flex-shrink-0" />
+            : <div className="h-8 w-8 bg-[var(--brand)] rounded-lg flex-shrink-0" />}
+        {open && <span className="font-semibold text-sm text-[var(--text-primary)] truncate">{company?.name}</span>}
+    </div>
+);

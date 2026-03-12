@@ -74,7 +74,7 @@ const PhaseMultiSelect = ({ label, type, selectedIds, phases, onSelect }) => {
     );
 };
 
-export function AdminSettings({ company, onSave }) {
+export function AdminSettings({ company, onSave, allCompanies = [], onCompanyChange }) {
     const [config, setConfig] = useState({
         id: null,
         name: '',
@@ -380,17 +380,23 @@ export function AdminSettings({ company, onSave }) {
         }
     };
 
-    const forceSync = async () => {
-        if (!config.id) return;
-        setTestStatus({ type: 'sync', msg: 'Sincronizando dados para a nuvem...', error: false });
+    const pipefySync = async () => {
+        if (!config.id) {
+            toast.error("Salve a empresa antes de sincronizar.");
+            return;
+        }
+        setTestStatus({ type: 'sync', msg: 'Sincronizando cards do Pipefy para o banco...', error: false });
         try {
-            await saveCompanyConfig(config);
-            setTestStatus({ type: 'sync', msg: 'Sucesso! Dados enviados para o banco de dados.', error: false });
-            toast.success("Dados sincronizados com a nuvem!");
+            const res = await fetch(`/api/sync/${config.id}/pipefy`, { method: 'POST' });
+            const result = await res.json();
+            if (!res.ok) throw new Error(result.error || 'Sync falhou');
+            const count = result.rowsUpserted ?? 0;
+            setTestStatus({ type: 'sync', msg: `Sucesso! ${count} registros sincronizados.`, error: false });
+            toast.success(`Pipefy sincronizado — ${count} cards salvos!`);
         } catch (e) {
-            console.error("Sync error:", e);
-            setTestStatus({ type: 'sync', msg: 'Erro ao sincronizar. Verifique o console.', error: true });
-            toast.error("Erro na sincronização.");
+            console.error("Pipefy sync error:", e);
+            setTestStatus({ type: 'sync', msg: `Erro: ${e.message}`, error: true });
+            toast.error(`Erro na sincronização: ${e.message}`);
         }
     };
 
@@ -513,9 +519,24 @@ export function AdminSettings({ company, onSave }) {
                     <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#FD295E]/10 text-[#FD295E] text-xs font-bold uppercase tracking-wider mb-3">
                         Configurações
                     </div>
-                    <h1 className="text-4xl font-extrabold text-gray-900 dark:text-white tracking-tight">
-                        {company.name}
-                    </h1>
+                    {allCompanies.length > 1 && onCompanyChange ? (
+                        <select
+                            value={company.id}
+                            onChange={e => {
+                                const chosen = allCompanies.find(c => c.id === e.target.value);
+                                if (chosen) onCompanyChange(chosen);
+                            }}
+                            className="text-3xl font-extrabold text-gray-900 dark:text-white tracking-tight bg-transparent border-none outline-none cursor-pointer hover:text-[#FD295E] transition-colors"
+                        >
+                            {allCompanies.map(c => (
+                                <option key={c.id} value={c.id}>{c.name}</option>
+                            ))}
+                        </select>
+                    ) : (
+                        <h1 className="text-4xl font-extrabold text-gray-900 dark:text-white tracking-tight">
+                            {company.name}
+                        </h1>
+                    )}
                     <p className="text-gray-500 dark:text-gray-400 mt-2 text-lg">Gerencie dados, acessos e integrações da sua organização.</p>
                 </div>
 
@@ -682,6 +703,9 @@ export function AdminSettings({ company, onSave }) {
                                     </button>
                                     <button onClick={testPipefy} className="px-4 py-2 bg-[#0065FF]/10 text-[#0065FF] rounded-lg hover:bg-[#0065FF]/20 font-bold text-xs uppercase tracking-wide flex items-center gap-2">
                                         <Play className="w-3 h-3" /> Testar
+                                    </button>
+                                    <button onClick={pipefySync} className="px-4 py-2 bg-green-500/10 text-green-700 dark:text-green-400 rounded-lg hover:bg-green-500/20 font-bold text-xs uppercase tracking-wide flex items-center gap-2">
+                                        ↻ Sincronizar
                                     </button>
                                 </div>
                             </div>

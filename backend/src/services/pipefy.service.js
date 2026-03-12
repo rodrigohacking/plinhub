@@ -162,7 +162,7 @@ class PipefyService {
     cards.forEach(card => {
       const createdAt = new Date(card.created_at);
       const updatedAt = new Date(card.updated_at);
-      const finishedAt = card.finished_at ? new Date(card.finished_at) : updatedAt;
+      const finishedAt = card.finished_at ? new Date(card.finished_at) : new Date(updatedAt.getTime());
 
       const createdDateStr = createdAt.toISOString().split('T')[0];
       const updatedDateStr = updatedAt.toISOString().split('T')[0];
@@ -317,6 +317,76 @@ class PipefyService {
     }
 
     return Array.from(tags);
+  }
+
+  /**
+   * Get a single card by ID (used by webhook handler to fetch full card data)
+   */
+  async getCardById(cardId, token) {
+    const query = `
+      query($cardId: ID!) {
+        card(id: $cardId) {
+          id
+          title
+          current_phase { id name }
+          labels { name }
+          created_at
+          updated_at
+          finished_at
+          fields { name value }
+          assignees { name }
+          created_by { name }
+          pipe { id }
+        }
+      }
+    `;
+    const response = await this.makeRequest(query, { cardId: String(cardId) }, token);
+    return response.data.card;
+  }
+
+  /**
+   * Get cards updated since a given ISO timestamp (incremental sync)
+   * Uses Pipefy allCards filter to avoid fetching thousands of stale cards.
+   */
+  async getUpdatedCards(pipeId, token, updatedSince) {
+    let allCards = [];
+    let hasPreviousPage = true;
+    let cursor = null;
+    let pagesFetched = 0;
+    const MAX_PAGES = 50; // max 2500 recently-changed cards
+
+    while (hasPreviousPage && pagesFetched < MAX_PAGES) {
+      const query = `
+        query($pipeId: ID!, $cursor: String, $updatedSince: DateTime) {
+          allCards(pipeId: $pipeId, last: 50, before: $cursor, filter: { updated_since: $updatedSince }) {
+            edges {
+              node {
+                id
+                title
+                current_phase { id name }
+                labels { name }
+                created_at
+                updated_at
+                finished_at
+                fields { name value }
+                assignees { name }
+                created_by { name }
+              }
+            }
+            pageInfo { hasPreviousPage startCursor }
+          }
+        }
+      `;
+
+      const response = await this.makeRequest(query, { pipeId, cursor, updatedSince }, token);
+      const pageCards = response.data.allCards.edges.map(e => e.node);
+      allCards = allCards.concat(pageCards);
+      hasPreviousPage = response.data.allCards.pageInfo.hasPreviousPage;
+      cursor = response.data.allCards.pageInfo.startCursor;
+      pagesFetched++;
+    }
+
+    return allCards;
   }
 
   /**

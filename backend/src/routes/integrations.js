@@ -61,8 +61,8 @@ router.post('/:companyId/pipefy', async (req, res) => {
             type: 'pipefy', // Unique key comb
             pipefyOrgId,
             pipefyPipeId,
-            // Prevent double encryption: Check if it looks like 'iv:content'
-            pipefyToken: (pipefyToken && pipefyToken.includes(':')) ? pipefyToken : encrypt(pipefyToken),
+            // Prevent double encryption: Check if it looks like CryptoJS 'U2Fsd' or old format ':'
+            pipefyToken: (pipefyToken && (pipefyToken.includes(':') || pipefyToken.startsWith('U2Fsd'))) ? pipefyToken : encrypt(pipefyToken),
             settings: settings || {}, // Save settings (phases, fields)
             isActive: true,
             updatedAt: new Date()
@@ -108,7 +108,7 @@ router.post('/:companyId/meta', async (req, res) => {
             companyId: companyId,
             type: 'meta_ads',
             metaAdAccountId,
-            metaAccessToken: encrypt(metaToken),
+            metaAccessToken: (metaToken && metaToken.startsWith('U2Fsd')) ? metaToken : encrypt(metaToken),
             isActive: true,
             updatedAt: new Date()
         };

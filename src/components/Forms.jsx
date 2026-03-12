@@ -128,8 +128,7 @@ export function Forms({ company, data, type, onSuccess }) {
                 items: 1, // simplified
                 status: 'concluída'
             };
-            data.sales.unshift(newSale); // Add to top
-            data.sales.unshift(newSale); // Add to top
+            data.sales.unshift(newSale);
             saveData(data);
             await minDelay;
             setStatus('success');
@@ -147,7 +146,6 @@ export function Forms({ company, data, type, onSuccess }) {
                 conversions: parseInt(formData.conversions || 0),
                 channel: formData.channel || 'Outros'
             };
-            data.campaigns.unshift(newCamp);
             data.campaigns.unshift(newCamp);
             saveData(data);
             await minDelay;

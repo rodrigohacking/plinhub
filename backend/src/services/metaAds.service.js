@@ -36,6 +36,47 @@ class MetaAdsService {
     }
 
     /**
+     * Get the timezone configured for an ad account.
+     * Returns { timezone_name, timezone_offset_hours_utc } or null on failure.
+     *
+     * We use this to compensate the date range sent to the Insights API:
+     * Meta always returns `date_start` in the ad account's timezone, which
+     * can differ from BRT (UTC-3). A US/Pacific account (UTC-8) means Meta
+     * "today" starts earlier than BRT "today", for example.
+     */
+    async getAccountTimezone(adAccountId, accessToken) {
+        try {
+            const actId = adAccountId.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
+            const response = await axios.get(`${META_API_BASE}/${actId}`, {
+                params: {
+                    access_token: accessToken,
+                    fields: 'timezone_name,timezone_offset_hours_utc'
+                }
+            });
+            return {
+                timezone_name: response.data.timezone_name || 'UTC',
+                timezone_offset_hours_utc: response.data.timezone_offset_hours_utc ?? 0
+            };
+        } catch (error) {
+            console.warn(`[MetaAds] Could not fetch account timezone: ${error.message}. Assuming UTC.`);
+            return { timezone_name: 'UTC', timezone_offset_hours_utc: 0 };
+        }
+    }
+
+    /**
+     * Calculate how many hours the ad account timezone differs from BRT (UTC-3).
+     * Positive = account is ahead of BRT; Negative = account is behind BRT.
+     *
+     * Example: account in UTC (offset=0) → BRT offsetDiff = 0 - (-3) = +3
+     * This means account "today" starts 3h after BRT "today" starts,
+     * so when we request `since: BRT_today`, we miss the last 3h of the UTC day.
+     */
+    getTimezoneOffsetVsBRT(accountOffsetHoursUtc) {
+        const BRT_OFFSET = -3; // BRT = UTC-3
+        return accountOffsetHoursUtc - BRT_OFFSET; // positive → account is ahead of BRT
+    }
+
+    /**
      * Get campaigns for an ad account
      */
     async getCampaigns(adAccountId, accessToken) {
@@ -116,7 +157,13 @@ class MetaAdsService {
                 break;
             }
 
-            const response = await axios.get(url, { params });
+            let response;
+            try {
+                response = await axios.get(url, { params });
+            } catch (err) {
+                 console.error(`[MetaAdsService] Axios Error GET ${url}`, err.response ? JSON.stringify(err.response.data) : err.message);
+                 throw err;
+            }
             const page = response.data?.data;
 
             if (page) allRows.push(...page);
@@ -150,45 +197,42 @@ class MetaAdsService {
         let leads = 0;
 
         if (Array.isArray(item.actions)) {
-            // DEBUG: Log actions for lead analysis
-            const actionTypes = item.actions.map(a => a.action_type);
-            console.log(`[MetaDebug] Actions for ${item.campaign_name}:`, actionTypes);
-            
             // 1. Try to find the most specific native lead form actions
             const leadAggregator = item.actions.find(a => a.action_type === 'lead');
             const nativeForm = item.actions.find(a => a.action_type === 'on_facebook_lead');
             const onsiteWeb = item.actions.find(a => a.action_type === 'onsite_web_lead');
 
             if (leadAggregator) {
-                console.log(`[MetaDebug] Found 'lead' aggregator: ${leadAggregator.value}`);
                 leads = parseInt(leadAggregator.value, 10) || 0;
             } else if (nativeForm) {
-                console.log(`[MetaDebug] Found 'on_facebook_lead': ${nativeForm.value}`);
                 leads = parseInt(nativeForm.value, 10) || 0;
             } else if (onsiteWeb) {
-                console.log(`[MetaDebug] Found 'onsite_web_lead': ${onsiteWeb.value}`);
                 leads = parseInt(onsiteWeb.value, 10) || 0;
             } else {
                 // Last effort: If no standard lead action is found, check for ANY action that includes 'lead'
                 // This covers custom conversions or edge cases
-                const customLeads = item.actions.filter(a => 
-                    a.action_type.toLowerCase().includes('lead') && 
+                const customLeads = item.actions.filter(a =>
+                    a.action_type.toLowerCase().includes('lead') &&
                     !['leads_atendidos', 'leads_perdidos', 'qualified_lead', 'qualified-lead'].includes(a.action_type.toLowerCase())
                 );
-                
+
                 if (customLeads.length > 0) {
                     // Get the maximum value among lead-like actions to avoid summing duplicates (like conversion + grouped)
                     leads = Math.max(...customLeads.map(l => parseInt(l.value, 10) || 0));
-                    console.log(`[MetaDebug] Found custom leads sum: ${leads} (Types: ${customLeads.map(l => l.action_type).join(', ')})`);
                 }
             }
         }
 
+        // Normalize date: always strip to YYYY-MM-DD only (Meta returns plain dates in account TZ)
+        const rawDateStart = item.date_start || null;
+        const rawDateStop = item.date_stop || null;
+        const normalizeDate = (d) => (d && d.length > 10 ? d.slice(0, 10) : d);
+
         return {
             campaign_id: item.campaign_id || null,
             campaign_name: item.campaign_name || null,
-            date: item.date_start || null,
-            date_stop: item.date_stop || null,
+            date: normalizeDate(rawDateStart),
+            date_stop: normalizeDate(rawDateStop),
             spend: parseFloat(item.spend || 0),
             impressions: parseInt(item.impressions || 0, 10),
             clicks: parseInt(item.clicks || 0, 10),

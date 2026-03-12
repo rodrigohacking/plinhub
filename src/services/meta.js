@@ -18,11 +18,6 @@ export async function fetchMetaCampaigns(adAccountId, token, productFilter = nul
         // Query Params:
         // - effective_status: include PAUSED campaigns
         // - limit: 500 to catch everything
-        // FIXED: Enforce specific Account ID as per requirement
-        const TARGET_ACT_ID = '631649546531729';
-
-        // BACK TO BASICS: No date_preset. Trusting API default (usually 28d or similar).
-        // This configuration worked before (albeit with date skew), so it restores data visibility.
         let query = `fields=${fields}&limit=500&access_token=${token}`;
 
         if (productFilter) {
@@ -34,7 +29,7 @@ export async function fetchMetaCampaigns(adAccountId, token, productFilter = nul
             query += `&filtering=${encodeURIComponent(JSON.stringify(filtering))}`;
         }
 
-        const response = await fetch(`${META_API_URL}/act_${TARGET_ACT_ID}/campaigns?${query}`, {
+        const response = await fetch(`${META_API_URL}/act_${actId}/campaigns?${query}`, {
             signal: controller.signal
         });
         clearTimeout(timeoutId);
@@ -71,7 +66,7 @@ export async function fetchMetaCampaigns(adAccountId, token, productFilter = nul
                     clicks: parseInt(day.clicks || 0, 10),
                     reach: parseInt(day.reach || 0, 10),
                     leads: leads,
-                    conversions: Math.floor(leads * 0.2) // Mock conversion based on leads
+                    conversions: 0 // Real conversion data should come from API actions
                 };
             });
 

@@ -128,11 +128,11 @@ class SyncService {
                     reach: 0
                 };
             }
-            metricsByDate[date].spend += row.spend;
-            metricsByDate[date].impressions += row.impressions;
-            metricsByDate[date].clicks += row.clicks;
-            metricsByDate[date].conversions += row.leads; // Map "leads" to "conversions" field in Metric table
-            metricsByDate[date].reach += row.reach;
+            metricsByDate[date].spend += (row.spend || 0);
+            metricsByDate[date].impressions += (row.impressions || 0);
+            metricsByDate[date].clicks += (row.clicks || 0);
+            metricsByDate[date].conversions += (row.leads || 0); // Map "leads" to "conversions" field
+            metricsByDate[date].reach += (row.reach || 0);
         });
 
         // Save specifically for "META ADS" tag for each date
@@ -177,8 +177,8 @@ class SyncService {
                 .from('campaigns')
                 .delete()
                 .eq('company_id', companyId)
-                .gte('start_date', startDate.toISOString())
-                .lte('start_date', endDate.toISOString());
+                .gte('start_date', startDate.toISOString().split('T')[0])  // use date-only (YYYY-MM-DD) to avoid BRT offset bug
+                .lte('start_date', endDate.toISOString().split('T')[0]);
 
             if (deleteError) {
                 console.error("Error cleaning old campaigns:", deleteError);

@@ -17,8 +17,8 @@ if (!isConfigured) {
 export const supabase = isConfigured
     ? createClient(supabaseUrl, supabaseAnonKey, {
         auth: {
-            autoRefreshToken: false,
-            persistSession: false
+            autoRefreshToken: true,
+            persistSession: true
         }
     })
     : {

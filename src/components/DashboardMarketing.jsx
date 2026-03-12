@@ -18,7 +18,7 @@ export function DashboardMarketing({ company, data, onRefresh, dateRange, setDat
 
     // Effective campaigns — sourced exclusively from Supabase DB (via data.campaigns)
     const effectiveCampaigns = useMemo(() => {
-        return (data.campaigns || []).filter(c => String(c.companyId) === String(company.id));
+        return (data.campaigns || []).filter(c => String(c.companyId || c.company_id) === String(company.id));
     }, [data.campaigns, company.id]);
 
     const handleSync = async () => {
@@ -117,76 +117,130 @@ export function DashboardMarketing({ company, data, onRefresh, dateRange, setDat
         }
     };
 
-    // AUTO-SYNC ON MOUNT & DATE CHANGE
+    // AUTO-SYNC ON MOUNT
+    // Runs once per company mount. Syncs both Meta campaigns AND Pipefy deals (sales table).
     const syncRan = React.useRef(false);
 
     React.useEffect(() => {
         let isMounted = true;
+        syncRan.current = false; // reset when company changes
 
         const autoSync = async () => {
             if (!company?.id) return;
+            if (syncRan.current) return;
+            syncRan.current = true;
 
             setIsSyncing(true);
-
             try {
-                // Trigger Backend Sync ONCE (on mount) to ensure database has latest numbers
-                if (!syncRan.current) {
-                    syncRan.current = true;
-                    try {
-                        const res = await fetch(`/api/sync/${company.id}/force`, { method: 'POST' });
-                        if (res.ok && onRefresh) {
-                            onRefresh();
-                        }
-                    } catch (e) {
-                        console.warn("Auto-Sync: Backend error", e);
-                    }
-                }
-            } catch (error) {
-                console.error("Auto-Sync Error:", error);
+                await Promise.allSettled([
+                    fetch(`/api/sync/${company.id}/meta?days=90`, { method: 'POST' }),
+                    fetch(`/api/sync/${company.id}/pipefy`, { method: 'POST' })
+                ]);
+                if (isMounted && onRefresh) onRefresh();
+            } catch (e) {
+                console.warn('Auto-Sync error:', e);
             } finally {
-                if (isMounted) {
-                    setIsSyncing(false);
-                }
+                if (isMounted) setIsSyncing(false);
             }
         };
 
         const timeout = setTimeout(autoSync, 500);
-
         return () => {
             isMounted = false;
             clearTimeout(timeout);
         };
-    }, [company.id, dateRange]); 
-// Re-run when dateRange changes
+    }, [company.id]);
 
     // Determine if company sells insurance products
     const isAndar = company?.name?.toLowerCase().includes('andar');
     const isInsuranceCompany = isAndar || company?.name?.toLowerCase().includes('apolar');
 
     // Tabs Configuration - conditional based on company type
-    // 4. Product Definitions (Master List for Auto-Detection)
+    // Product Definitions (Master List for Auto-Detection)
+    // Keywords cover all real naming patterns used in Meta Ads campaigns
     const PRODUCT_DEFINITIONS = [
-        { id: 'condominial', label: 'Condominial', keywords: ['condominial', 'condominio', 'predio'] },
-        { id: 'rc_sindico', label: 'RC Síndico', keywords: ['sindico', 'síndico', 'rc sindico'] },
-        { id: 'automovel', label: 'Automóvel', keywords: ['auto', 'automovel', 'automóvel', 'carro'] },
-        { id: 'residencial', label: 'Residencial', keywords: ['residencial', 'casa'] },
-        { id: 'administradora', label: 'Administradora', keywords: ['administradora', 'gestao', 'gestão'] },
-        { id: 'vida', label: 'Vida', keywords: ['vida', 'seguro vida'] },
-        { id: 'empresarial', label: 'Empresarial', keywords: ['empresa', 'empresarial', 'pme'] }
+        {
+            id: 'condominial',
+            label: 'Condominial',
+            keywords: ['condominial', 'condominio', 'condomínio', 'cond ', 'cond.', 'predio', 'prédio', 'sindical']
+        },
+        {
+            id: 'rc_sindico',
+            label: 'RC Síndico',
+            keywords: ['rc sindico', 'rc síndico', 'rc-sindico', 'rcsindico', 'rc_sindico',
+                       'sindico', 'síndico', 'r.c.', 'responsabilidade civil']
+        },
+        {
+            id: 'automovel',
+            label: 'Automóvel',
+            keywords: ['auto', 'automovel', 'automóvel', 'carro', 'veiculo', 'veículo', 'frota']
+        },
+        {
+            id: 'residencial',
+            label: 'Residencial',
+            keywords: ['residencial', 'casa', 'habitacional', 'apartamento', 'apto']
+        },
+        {
+            id: 'administradora',
+            label: 'Administradora',
+            keywords: ['administradora', 'gestao', 'gestão', 'adm ']
+        },
+        {
+            id: 'vida',
+            label: 'Vida',
+            keywords: ['vida', 'seguro vida', 'seg vida']
+        },
+        {
+            id: 'empresarial',
+            label: 'Empresarial',
+            keywords: ['empresa', 'empresarial', 'pme', 'comercial', 'negocio', 'negócio']
+        }
     ];
 
-    // Helper: Normalize Text for Matching
+    // Helper: Normalize Text for Matching (remove accents, lowercase)
     const normalize = (str) => str ? str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim() : "";
+
+    /**
+     * extractProductFromCampaignName
+     * 
+     * Parses structured campaign names used by Andar Seguros:
+     *   [ANDAR] [VIDEOS] [3.0] 07/11 CONDOMINIAL
+     *   [ANDAR] [IMG IA] [3.0] 12/02 RC SÍNDICO
+     * 
+     * Strategy:
+     *  1. Remove all bracket sections [...]
+     *  2. Remove the leading DD/MM date pattern
+     *  3. Return the remaining text as the product suffix
+     * 
+     * @param {string} name - Campaign name
+     * @returns {string} Normalized product suffix (e.g. "condominial", "rc sindico")
+     */
+    const extractProductFromCampaignName = (name) => {
+        if (!name) return '';
+        // Remove bracket tags: [ANDAR], [VIDEOS], [3.0], etc.
+        let clean = name.replace(/\[[^\]]*\]/g, '');
+        // Remove date pattern: 07/11, 12/02, etc.
+        clean = clean.replace(/\b\d{1,2}\/\d{1,2}\b/g, '');
+        // Remove extra whitespace
+        clean = clean.replace(/\s+/g, ' ').trim();
+        return normalize(clean);
+    };
 
     // Dynamic Product Detection based on Keywords in Campaign Names
     const detectedProducts = useMemo(() => {
         const found = new Set();
-        const campaignNames = effectiveCampaigns.map(c => normalize(c.name || ''));
 
-        PRODUCT_DEFINITIONS.forEach(prod => {
-            if (campaignNames.some(name => prod.keywords.some(kw => name.includes(normalize(kw))))) {
-                found.add(prod.id);
-            }
+        effectiveCampaigns.forEach(c => {
+            const normalName = normalize(c.name || '');
+            const productSuffix = extractProductFromCampaignName(c.name || '');
+
+            PRODUCT_DEFINITIONS.forEach(prod => {
+                const allKeywords = prod.keywords.map(kw => normalize(kw));
+                // Check both full name and extracted product suffix for best match
+                const matchesFull = allKeywords.some(kw => normalName.includes(kw));
+                const matchesSuffix = allKeywords.some(kw => productSuffix.includes(kw));
+                if (matchesFull || matchesSuffix) found.add(prod.id);
+            });
         });
 
         return Array.from(found);
@@ -240,7 +294,7 @@ export function DashboardMarketing({ company, data, onRefresh, dateRange, setDat
 
                     // Find latest metric for this product
                     const row = (data.metrics || [])
-                        .filter(m => String(m.companyId) === String(company.id) && m.label === pConfig.dbLabel)
+                        .filter(m => String(m.companyId || m.company_id) === String(company.id) && m.label === pConfig.dbLabel)
                         .sort((a, b) => new Date(a.date) - new Date(b.date))
                         .pop() || {};
 
@@ -260,7 +314,7 @@ export function DashboardMarketing({ company, data, onRefresh, dateRange, setDat
             } else {
                 // Non-insurance company: Use 'all' label
                 const row = (data.metrics || [])
-                    .filter(m => String(m.companyId) === String(company.id) && m.label === 'all' && m.source === 'manual')
+                    .filter(m => String(m.companyId || m.company_id) === String(company.id) && m.label === 'all' && m.source === 'manual')
                     .sort((a, b) => new Date(a.date) - new Date(b.date))
                     .pop() || {};
 
@@ -274,7 +328,7 @@ export function DashboardMarketing({ company, data, onRefresh, dateRange, setDat
             // OVERRIDE: Prioritize Explicit Sales Goals (from Forms/LocalStorage) for 'geral'
             if (activeTab === 'geral' && data.goals) {
                 const currentMonth = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }).slice(0, 7);
-                const salesGoal = data.goals.find(g => String(g.companyId) === String(company.id) && g.month === currentMonth);
+                const salesGoal = data.goals.find(g => String(g.companyId || g.company_id) === String(company.id) && g.month === currentMonth);
 
                 if (salesGoal) {
                     // Force the explicit goals set in "Definir Metas"
@@ -287,7 +341,7 @@ export function DashboardMarketing({ company, data, onRefresh, dateRange, setDat
         } else {
             // Specific Product
             const row = (data.metrics || [])
-                .filter(m => String(m.companyId) === String(company.id) && m.label === activeScope?.dbLabel)
+                .filter(m => String(m.companyId || m.company_id) === String(company.id) && m.label === activeScope?.dbLabel)
                 .sort((a, b) => new Date(a.date) - new Date(b.date))
                 .pop() || {};
 
@@ -308,26 +362,44 @@ export function DashboardMarketing({ company, data, onRefresh, dateRange, setDat
 
         // 3. Calculate Realized (Actuals)
         // A. Pipefy Data (Leads & Sales)
-        const companySales = data.sales.filter(s => String(s.companyId) === String(company.id));
+        const companySales = data.sales.filter(s => String(s.companyId || s.company_id) === String(company.id));
         const filteredByDate = filterByDateRange(companySales, dateRange, 'createdAt'); // for Leads
         const filteredByDateClosed = filterByDateRange(companySales, dateRange, 'date'); // for Sales
 
         // Product Filter Logic
+        // Priority: insuranceType/product field → utm_campaign name → utm_content
         const filterByProduct = (deals) => {
-            if (activeTab === 'geral') {
-                // Return ALL deals for Geral to ensure everything is counted
-                return deals;
-            } 
-            
+            if (activeTab === 'geral') return deals;
+
             const scope = productMapping[activeTab];
             if (!scope) return deals;
-            
-            const keywords = scope.keywords || [];
+
+            const keywords = (scope.keywords || []).map(kw => normalize(kw));
+
             return deals.filter(d => {
-                const type = normalize(d.insuranceType || d.product || '');
-                return keywords.some(kw => type.includes(kw));
+                // 1. Check insuranceType or product field (most reliable)
+                const typeField = normalize(d.insuranceType || d.product || '');
+                if (typeField && keywords.some(kw => typeField.includes(kw))) return true;
+
+                // 2. Fallback: check utm_campaign (campaign name from Meta Ads)
+                //    Strips structured parts [ANDAR] [FORMAT] [VER] DD/MM and checks product suffix
+                const utmCampaign = d.utm_campaign || d.utmCampaign || '';
+                if (utmCampaign) {
+                    const normalFull = normalize(utmCampaign);
+                    // Extract product suffix from structured name
+                    let cleanUtm = utmCampaign.replace(/\[[^\]]*\]/g, '').replace(/\b\d{1,2}\/\d{1,2}\b/g, '');
+                    const normalSuffix = normalize(cleanUtm.replace(/\s+/g, ' ').trim());
+                    if (keywords.some(kw => normalFull.includes(kw) || normalSuffix.includes(kw))) return true;
+                }
+
+                // 3. Fallback: check utm_content
+                const utmContent = normalize(d.utm_content || d.utmContent || '');
+                if (utmContent && keywords.some(kw => utmContent.includes(kw))) return true;
+
+                return false;
             });
         };
+
 
         // META ADS Filter Logic - Apply to ALL tabs (Aggregated Definition)
         const filterByMetaAds = (deals) => {
@@ -370,7 +442,7 @@ export function DashboardMarketing({ company, data, onRefresh, dateRange, setDat
         // Re-populate wonDeals (List) using the EXACT SAME LOGIC as the "Vendas" Card
         // A. Filter Won Deals by 'won_date' (real policy closing date) if available
         const wonDealsRaw = (data.sales || []).filter(s => {
-            const isCurrentCompany = String(s.companyId) === String(company.id);
+            const isCurrentCompany = String(s.companyId || s.company_id) === String(company.id);
             const pName = (s.phaseName || '').toLowerCase();
             const normP = (str) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
             const normPhase = normP(pName);
@@ -407,27 +479,39 @@ export function DashboardMarketing({ company, data, onRefresh, dateRange, setDat
         // We use COHORT LOGIC: Count leads CREATED in the period, and check IF they are lost.
         // This ensures consistent data (Created 20 - Lost 5 = Qualified 15).
 
-        // A. Leads Created (Meta)
-        const leadsList = (data.sales || []).filter(s => {
-            // Strict Meta Check (Labels ONLY - User Request)
-            const hasMeta = s.labels?.some(l => l?.toUpperCase().includes('META ADS') || l?.toUpperCase() === 'META ADS');
+        // A. Leads Created (Meta) — filtered by company, date range, Meta tag and product
+        const leadsListRaw = (data.sales || []).filter(s => {
+            // Must be from this company
+            if (String(s.companyId || s.company_id) !== String(company.id)) return false;
+
+            // Flexible Meta Check (Labels)
+            const hasMeta = s.labels?.some(l => {
+                if (!l) return false;
+                const labelText = (typeof l === 'string' ? l : l.name || '').toLowerCase();
+                return labelText.includes('meta') || labelText.includes('facebook') || labelText.includes('ig ') || labelText.includes('instagram');
+            });
 
             // Use createdAt for "Leads Generated"
-            const inRange = isDateInSelectedRange(s.createdAt || s.date, dateRange);
+            const effectiveDate = s.createdAt || s.created_at || s.date;
+            const inRange = isDateInSelectedRange(effectiveDate, dateRange);
             return hasMeta && inRange;
         });
+
+        // Apply product filter to leads (so Condominial tab only shows Condominial leads)
+        const leadsList = filterByProduct(leadsListRaw);
+
 
         // B. Leads Lost (Meta - Subset of Created)
         // User Request: Strict adherence to "Perdido" status for these leads.
         const lostList = leadsList.filter(s => {
-            const pName = (s.phaseName || '').toLowerCase();
-            const normalize = (str) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-            const normPhase = normalize(pName);
+            const pName = (s.phaseName || s.phase_name || '').toLowerCase();
+            const normalizeStr = (str) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+            const normPhase = normalizeStr(pName);
 
             // Strict Status Check (Phase ID or Name)
             // IDs: 338889931 (Andar Lose)
             const isLost = s.status === 'lost' ||
-                ['338889931'].includes(String(s.phaseId)) ||
+                ['338889931'].includes(String(s.phaseId || s.phase_id)) ||
                 normPhase.includes('perdido') ||
                 normPhase.includes('cancelado') ||
                 normPhase.includes('descarte') ||
@@ -459,32 +543,46 @@ export function DashboardMarketing({ company, data, onRefresh, dateRange, setDat
         // instead of 'data.metrics' (Metric table). This avoids DB Sync gaps and allows Name-based filtering.
 
         // NEW STRATEGY: Iterate effectiveCampaigns (merged DB + Live)
-        const relevantCampaigns = effectiveCampaigns.filter(c => String(c.companyId) === String(company.id));
-        console.log(`[DashboardMarketing] ${company.name} - Relevant Campaigns:`, relevantCampaigns.length);
+        const relevantCampaigns = effectiveCampaigns.filter(c => String(c.companyId || c.company_id) === String(company.id));
+        console.log(`[DashboardMarketing] ${company.name} - Relevant Campaigns:`, relevantCampaigns.length, relevantCampaigns);
 
         relevantCampaigns.forEach(campaign => {
             // 1. Check Product Scope
             let isProductMatch = false;
             const cName = normalize(campaign.name || '');
+            // Extract the product suffix from structured name: [ANDAR] [FORMAT] [VER] DD/MM PRODUTO
+            const cSuffix = (() => {
+                let clean = (campaign.name || '').replace(/\[[^\]]*\]/g, ''); // remove [...]
+                clean = clean.replace(/\b\d{1,2}\/\d{1,2}\b/g, '');           // remove DD/MM
+                return normalize(clean.replace(/\s+/g, ' ').trim());
+            })();
 
             if (activeTab === 'geral') {
                 isProductMatch = true;
             } else if (activeScopeResolved) {
-                const keywords = activeScopeResolved.keywords;
-                if (keywords.some(kw => cName.includes(kw))) {
-                    isProductMatch = true;
-                }
+                const keywords = activeScopeResolved.keywords.map(kw => normalize(kw));
+                // Match against full name OR extracted product suffix
+                isProductMatch = keywords.some(kw => cName.includes(kw) || cSuffix.includes(kw));
             }
 
             if (isProductMatch) {
-                // Remove redundant date check: the LIVE API already filters insights by date range.
-                // Keeping this check here would exclude campaigns that started BEFORE the range
-                // but had spend/leads WITHIN the range.
-                
-                investmentRealized += parseFloat(campaign.investment || 0);
-                impressions += parseFloat(campaign.impressions || 0);
-                clicks += parseFloat(campaign.clicks || 0);
-                adsLeads += parseFloat(campaign.leads || 0);
+                // If the campaign brings dailyInsights from the Backend Proxy, we filter exactly by the selected dates
+                if (campaign.dailyInsights && Array.isArray(campaign.dailyInsights) && campaign.dailyInsights.length > 0) {
+                    campaign.dailyInsights.forEach(day => {
+                        if (isDateInSelectedRange(day.date, dateRange)) {
+                            investmentRealized += parseFloat(day.spend || 0);
+                            impressions += parseInt(day.impressions || 0, 10);
+                            clicks += parseInt(day.clicks || 0, 10);
+                            adsLeads += parseInt(day.leads || 0, 10);
+                        }
+                    });
+                } else {
+                    // Fallback for cached DB campaigns (Lifetime)
+                    investmentRealized += parseFloat(campaign.investment || campaign.spend || 0);
+                    impressions += parseFloat(campaign.impressions || 0);
+                    clicks += parseFloat(campaign.clicks || 0);
+                    adsLeads += parseFloat(campaign.leads || 0);
+                }
             }
         });
 
@@ -548,7 +646,7 @@ export function DashboardMarketing({ company, data, onRefresh, dateRange, setDat
     // Group leads by product keywords (from campaign name)
     // Group sales by the NEW 'product' column
     const productStats = {};
-    const campaignsList = effectiveCampaigns.filter(c => String(c.companyId) === String(company.id)); // Assuming effectiveCampaigns is available
+    const campaignsList = effectiveCampaigns.filter(c => String(c.companyId || c.company_id) === String(company.id)); // Assuming effectiveCampaigns is available
 
     // 1. Group Active Leads by Campaign Tags
     leadsList.forEach(lead => {
@@ -683,15 +781,15 @@ export function DashboardMarketing({ company, data, onRefresh, dateRange, setDat
                 >
 
                     {/* BLOCK 1: PERFORMANCE (ROI Highlight) */}
-                    <div className="bg-slate-900 rounded-3xl p-8 text-white shadow-2xl relative overflow-hidden">
+                    <div className="bg-slate-900 rounded-2xl md:rounded-3xl p-5 sm:p-6 md:p-8 text-white shadow-2xl relative overflow-hidden">
                         <div className="absolute top-0 right-0 w-96 h-96 bg-emerald-500/10 rounded-full -mr-32 -mt-32 blur-3xl"></div>
-                        <div className="relative z-10 flex justify-between items-center">
+                        <div className="relative z-10 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                             <div>
-                                <h3 className="text-2xl font-bold mb-1">Retorno sobre Investimento</h3>
-                                <p className="text-slate-400">{activeTab === 'geral' ? 'Geral' : TABS.find(t => t.id === activeTab)?.label} ROI</p>
+                                <h3 className="text-lg sm:text-2xl font-bold mb-1">Retorno sobre Investimento</h3>
+                                <p className="text-slate-400 text-sm">{activeTab === 'geral' ? 'Geral' : TABS.find(t => t.id === activeTab)?.label} ROI</p>
                             </div>
-                            <div className="text-right">
-                                <span className={cn("text-5xl font-black tracking-tighter", roi >= 0 ? "text-emerald-400" : "text-red-400")}>
+                            <div className="text-left sm:text-right">
+                                <span className={cn("text-3xl sm:text-4xl md:text-5xl font-black tracking-tighter", roi >= 0 ? "text-emerald-400" : "text-red-400")}>
                                     {roi > 0 ? '+' : ''}{formatNumber(roi.toFixed(0))}%
                                 </span>
                             </div>
@@ -700,162 +798,194 @@ export function DashboardMarketing({ company, data, onRefresh, dateRange, setDat
 
                     {/* ADDITIONAL METRICS - Show in Geral tab for all companies */}
                     {activeTab === 'geral' && (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-7 gap-4">
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-9 gap-3">
                             {/* Investimento */}
-                            <div className="bg-white dark:bg-[#111] p-4 lg:p-6 rounded-2xl shadow-lg border border-gray-100 dark:border-white/5 min-w-[140px]">
-                                <div className="flex items-center gap-2 mb-3">
-                                    <DollarSign className="w-5 h-5 text-red-500 flex-shrink-0" />
-                                    <p className="text-[10px] lg:text-xs font-bold text-gray-400 uppercase truncate">Investimento</p>
+                            <div className="bg-white dark:bg-[#111] rounded-2xl border border-gray-100 dark:border-white/5 shadow-sm hover:shadow-md transition-all duration-200 hover:-translate-y-0.5 overflow-hidden">
+                                <div className="h-[3px] bg-gradient-to-r from-red-400 to-rose-500" />
+                                <div className="p-4">
+                                    <div className="flex items-center gap-2 mb-3">
+                                        <div className="w-7 h-7 rounded-lg bg-red-50 dark:bg-red-500/10 flex items-center justify-center flex-shrink-0">
+                                            <DollarSign className="w-3.5 h-3.5 text-red-500" />
+                                        </div>
+                                        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide leading-tight">Investimento</p>
+                                    </div>
+                                    <p className="text-lg font-black text-gray-900 dark:text-white truncate" title={formatCurrency(realized.investment)}>
+                                        {formatCurrency(realized.investment)}
+                                    </p>
                                 </div>
-                                <p className="text-lg lg:text-2xl font-black text-gray-900 dark:text-white truncate" title={formatCurrency(realized.investment)}>
-                                    {formatCurrency(realized.investment)}
-                                </p>
                             </div>
 
                             {/* Leads Gerados */}
-                            <div className="bg-white dark:bg-[#111] p-4 lg:p-6 rounded-2xl shadow-lg border border-gray-100 dark:border-white/5 min-w-[140px]">
-                                <div className="flex items-center gap-2 mb-3">
-                                    <UserPlus className="w-5 h-5 text-blue-500 flex-shrink-0" />
-                                    <p className="text-[10px] lg:text-xs font-bold text-gray-400 uppercase truncate">Leads</p>
+                            <div className="bg-white dark:bg-[#111] rounded-2xl border border-gray-100 dark:border-white/5 shadow-sm hover:shadow-md transition-all duration-200 hover:-translate-y-0.5 overflow-hidden">
+                                <div className="h-[3px] bg-gradient-to-r from-blue-400 to-blue-600" />
+                                <div className="p-4">
+                                    <div className="flex items-center gap-2 mb-3">
+                                        <div className="w-7 h-7 rounded-lg bg-blue-50 dark:bg-blue-500/10 flex items-center justify-center flex-shrink-0">
+                                            <UserPlus className="w-3.5 h-3.5 text-blue-500" />
+                                        </div>
+                                        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide leading-tight">Leads</p>
+                                    </div>
+                                    <p className="text-lg font-black text-gray-900 dark:text-white truncate" title={formatNumber(realized.leads)}>
+                                        {formatNumber(realized.leads)}
+                                    </p>
                                 </div>
-                                <p className="text-lg lg:text-2xl font-black text-gray-900 dark:text-white truncate" title={formatNumber(realized.leads)}>
-                                    {formatNumber(realized.leads)}
-                                </p>
                             </div>
 
                             {/* Leads Orgânicos */}
-                            <div className="bg-white dark:bg-[#111] p-4 lg:p-6 rounded-2xl shadow-lg border border-gray-100 dark:border-white/5 min-w-[140px]">
-                                <div className="flex items-center gap-2 mb-3">
-                                    <Leaf className="w-5 h-5 text-green-500 flex-shrink-0" />
-                                    <p className="text-[10px] lg:text-xs font-bold text-gray-400 uppercase truncate">Leads Orgânicos</p>
+                            <div className="bg-white dark:bg-[#111] rounded-2xl border border-gray-100 dark:border-white/5 shadow-sm hover:shadow-md transition-all duration-200 hover:-translate-y-0.5 overflow-hidden">
+                                <div className="h-[3px] bg-gradient-to-r from-green-400 to-emerald-500" />
+                                <div className="p-4">
+                                    <div className="flex items-center gap-2 mb-3">
+                                        <div className="w-7 h-7 rounded-lg bg-green-50 dark:bg-green-500/10 flex items-center justify-center flex-shrink-0">
+                                            <Leaf className="w-3.5 h-3.5 text-green-500" />
+                                        </div>
+                                        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide leading-tight">Leads Orgânicos</p>
+                                    </div>
+                                    <p className="text-lg font-black text-gray-900 dark:text-white truncate">
+                                        {(() => {
+                                            const organicLeads = data?.sales?.filter(s => {
+                                                const isCurrentCompany = String(s.companyId || s.company_id) === String(company.id);
+                                                const isInRange = filterByDateRange([s], dateRange, 'createdAt').length > 0;
+                                                const hasOrganicTag = s.labels?.some(label =>
+                                                    label?.toUpperCase().includes('ORGÂNICO IG')
+                                                );
+                                                return isCurrentCompany && isInRange && hasOrganicTag;
+                                            }).length || 0;
+                                            return formatNumber(organicLeads);
+                                        })()}
+                                    </p>
                                 </div>
-                                <p className="text-lg lg:text-2xl font-black text-gray-900 dark:text-white truncate">
-                                    {(() => {
-                                        const organicLeads = data?.sales?.filter(s => {
-                                            const isCurrentCompany = String(s.companyId) === String(company.id);
-                                            const isInRange = filterByDateRange([s], dateRange, 'createdAt').length > 0;
-                                            const hasOrganicTag = s.labels?.some(label =>
-                                                label?.toUpperCase().includes('ORGÂNICO IG')
-                                            );
-                                            return isCurrentCompany && isInRange && hasOrganicTag;
-                                        }).length || 0;
-                                        return formatNumber(organicLeads);
-                                    })()}
-                                </p>
                             </div>
 
                             {/* Custo por Lead */}
-                            <div className="bg-white dark:bg-[#111] p-4 lg:p-6 rounded-2xl shadow-lg border border-gray-100 dark:border-white/5 min-w-[140px]">
-                                <div className="flex items-center gap-2 mb-3">
-                                    <Target className="w-5 h-5 text-emerald-500 flex-shrink-0" />
-                                    <p className="text-[10px] lg:text-xs font-bold text-gray-400 uppercase truncate">CPL</p>
+                            <div className="bg-white dark:bg-[#111] rounded-2xl border border-gray-100 dark:border-white/5 shadow-sm hover:shadow-md transition-all duration-200 hover:-translate-y-0.5 overflow-hidden">
+                                <div className="h-[3px] bg-gradient-to-r from-emerald-400 to-teal-500" />
+                                <div className="p-4">
+                                    <div className="flex items-center gap-2 mb-3">
+                                        <div className="w-7 h-7 rounded-lg bg-emerald-50 dark:bg-emerald-500/10 flex items-center justify-center flex-shrink-0">
+                                            <Target className="w-3.5 h-3.5 text-emerald-500" />
+                                        </div>
+                                        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide leading-tight">CPL</p>
+                                    </div>
+                                    <p className="text-lg font-black text-gray-900 dark:text-white truncate" title={formatCurrency(realized.cpl)}>
+                                        {formatCurrency(realized.cpl)}
+                                    </p>
                                 </div>
-                                <p className="text-lg lg:text-2xl font-black text-gray-900 dark:text-white truncate" title={formatCurrency(realized.cpl)}>
-                                    {formatCurrency(realized.cpl)}
-                                </p>
                             </div>
 
                             {/* CAC */}
-                            <div className="bg-white dark:bg-[#111] p-4 lg:p-6 rounded-2xl shadow-lg border border-gray-100 dark:border-white/5 min-w-[140px]">
-                                <div className="flex items-center gap-2 mb-3">
-                                    <Users className="w-5 h-5 text-pink-500 flex-shrink-0" />
-                                    <p className="text-[10px] lg:text-xs font-bold text-gray-400 uppercase truncate">CAC</p>
+                            <div className="bg-white dark:bg-[#111] rounded-2xl border border-gray-100 dark:border-white/5 shadow-sm hover:shadow-md transition-all duration-200 hover:-translate-y-0.5 overflow-hidden">
+                                <div className="h-[3px] bg-gradient-to-r from-pink-400 to-rose-500" />
+                                <div className="p-4">
+                                    <div className="flex items-center gap-2 mb-3">
+                                        <div className="w-7 h-7 rounded-lg bg-pink-50 dark:bg-pink-500/10 flex items-center justify-center flex-shrink-0">
+                                            <Users className="w-3.5 h-3.5 text-pink-500" />
+                                        </div>
+                                        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide leading-tight">CAC</p>
+                                    </div>
+                                    <p className="text-lg font-black text-gray-900 dark:text-white truncate">
+                                        {(() => {
+                                            const metaSales = data?.sales?.filter(s => {
+                                                const isCurrentCompany = String(s.companyId || s.company_id) === String(company.id);
+                                                const isInRange = filterByDateRange([s], dateRange, 'wonDate').length > 0;
+                                                const pName = s.phaseName ? s.phaseName.toLowerCase() : '';
+                                                const isWon = s.status === 'won' ||
+                                                    ['338889923', '338889934', '341604257'].includes(String(s.phaseId)) ||
+                                                    pName.includes('ganho') || pName.includes('fechado') || pName.includes('enviado ao cliente');
+                                                const hasMetaTag = s.labels?.some(label =>
+                                                    label?.toUpperCase().includes('META ADS') || label?.toUpperCase() === 'META ADS'
+                                                ) || [s.utm_source, s.utm_medium, s.utm_campaign].some(val => {
+                                                    const v = (val || '').toLowerCase();
+                                                    return v.includes('meta') || v.includes('facebook') || v.includes('instagram');
+                                                });
+                                                return isCurrentCompany && isInRange && isWon && hasMetaTag;
+                                            }).length || 0;
+                                            return metaSales > 0 ? formatCurrency(realized.investment / metaSales) : formatCurrency(0);
+                                        })()}
+                                    </p>
+                                    <p className="text-[10px] text-pink-400 font-medium mt-1">Custo Aquisição</p>
                                 </div>
-                                <p className="text-lg lg:text-2xl font-black text-gray-900 dark:text-white truncate">
-                                    {(() => {
-                                        const metaSales = data?.sales?.filter(s => {
-                                            const isCurrentCompany = String(s.companyId) === String(company.id);
-                                            const isInRange = filterByDateRange([s], dateRange, 'wonDate').length > 0;
+                            </div>
 
-                                            // Robust Won Check
+                            {/* Vendas (Meta) */}
+                            <div className="bg-white dark:bg-[#111] rounded-2xl border border-gray-100 dark:border-white/5 shadow-sm hover:shadow-md transition-all duration-200 hover:-translate-y-0.5 overflow-hidden">
+                                <div className="h-[3px] bg-gradient-to-r from-purple-400 to-violet-500" />
+                                <div className="p-4">
+                                    <div className="flex items-center gap-2 mb-3">
+                                        <div className="w-7 h-7 rounded-lg bg-purple-50 dark:bg-purple-500/10 flex items-center justify-center flex-shrink-0">
+                                            <Instagram className="w-3.5 h-3.5 text-purple-500" />
+                                        </div>
+                                        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide leading-tight">Vendas</p>
+                                    </div>
+                                    <p className="text-lg font-black text-gray-900 dark:text-white truncate">
+                                        {data?.sales?.filter(s => {
+                                            const isCurrentCompany = String(s.companyId || s.company_id) === String(company.id);
+                                            const isInRange = filterByDateRange([s], dateRange, 'wonDate').length > 0;
                                             const pName = s.phaseName ? s.phaseName.toLowerCase() : '';
                                             const isWon = s.status === 'won' ||
                                                 ['338889923', '338889934', '341604257'].includes(String(s.phaseId)) ||
                                                 pName.includes('ganho') || pName.includes('fechado') || pName.includes('enviado ao cliente');
-
-                                            // Robust Meta Check (Labels + UTMs)
                                             const hasMetaTag = s.labels?.some(label =>
                                                 label?.toUpperCase().includes('META ADS') || label?.toUpperCase() === 'META ADS'
                                             ) || [s.utm_source, s.utm_medium, s.utm_campaign].some(val => {
                                                 const v = (val || '').toLowerCase();
                                                 return v.includes('meta') || v.includes('facebook') || v.includes('instagram');
                                             });
-
                                             return isCurrentCompany && isInRange && isWon && hasMetaTag;
-                                        }).length || 0;
-
-                                        return metaSales > 0 ? formatCurrency(realized.investment / metaSales) : formatCurrency(0);
-                                    })()}
-                                </p>
-                                <p className="text-[10px] text-gray-400 mt-1 truncate">Custo Aquisição</p>
-                            </div>
-
-                            {/* Vendas (Meta) */}
-                            <div className="bg-white dark:bg-[#111] p-4 lg:p-6 rounded-2xl shadow-lg border border-gray-100 dark:border-white/5 min-w-[140px]">
-                                <div className="flex items-center gap-2 mb-3">
-                                    <Instagram className="w-5 h-5 text-purple-500 flex-shrink-0" />
-                                    <p className="text-[10px] lg:text-xs font-bold text-gray-400 uppercase truncate">Vendas</p>
+                                        }).length || 0}
+                                    </p>
                                 </div>
-                                <p className="text-lg lg:text-2xl font-black text-gray-900 dark:text-white truncate">
-                                    {data?.sales?.filter(s => {
-                                        const isCurrentCompany = String(s.companyId) === String(company.id);
-                                        const isInRange = filterByDateRange([s], dateRange, 'wonDate').length > 0;
-
-                                        // Robust Won Check
-                                        const pName = s.phaseName ? s.phaseName.toLowerCase() : '';
-                                        const isWon = s.status === 'won' ||
-                                            ['338889923', '338889934', '341604257'].includes(String(s.phaseId)) ||
-                                            pName.includes('ganho') || pName.includes('fechado') || pName.includes('enviado ao cliente');
-
-                                        // Robust Meta Check (Labels + UTMs)
-                                        const hasMetaTag = s.labels?.some(label =>
-                                            label?.toUpperCase().includes('META ADS') || label?.toUpperCase() === 'META ADS'
-                                        ) || [s.utm_source, s.utm_medium, s.utm_campaign].some(val => {
-                                            const v = (val || '').toLowerCase();
-                                            return v.includes('meta') || v.includes('facebook') || v.includes('instagram');
-                                        });
-
-                                        return isCurrentCompany && isInRange && isWon && hasMetaTag;
-                                    }).length || 0}
-                                </p>
                             </div>
 
                             {/* ROI */}
-                            <div className="bg-white dark:bg-[#111] p-4 lg:p-6 rounded-2xl shadow-lg border border-gray-100 dark:border-white/5 min-w-[140px]">
-                                <div className="flex items-center gap-2 mb-3 overflow-hidden">
-                                    <TrendingUp className="w-5 h-5 text-purple-500 flex-shrink-0" />
-                                    <p className="text-[10px] lg:text-xs font-bold text-gray-400 uppercase whitespace-normal leading-tight">Retorno sobre Invest.</p>
+                            <div className="bg-white dark:bg-[#111] rounded-2xl border border-gray-100 dark:border-white/5 shadow-sm hover:shadow-md transition-all duration-200 hover:-translate-y-0.5 overflow-hidden">
+                                <div className="h-[3px] bg-gradient-to-r from-violet-400 to-indigo-500" />
+                                <div className="p-4">
+                                    <div className="flex items-center gap-2 mb-3">
+                                        <div className="w-7 h-7 rounded-lg bg-violet-50 dark:bg-violet-500/10 flex items-center justify-center flex-shrink-0">
+                                            <TrendingUp className="w-3.5 h-3.5 text-violet-500" />
+                                        </div>
+                                        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide leading-tight">Retorno s/ Invest.</p>
+                                    </div>
+                                    <p className="text-lg font-black text-gray-900 dark:text-white truncate" title={`${(realized.roi || 0).toFixed(1)}x`}>
+                                        {(realized.roi || 0).toFixed(1)}x
+                                    </p>
                                 </div>
-                                <p className="text-lg lg:text-2xl font-black text-gray-900 dark:text-white truncate" title={`${(realized.roi || 0).toFixed(1)}x`}>
-                                    {(realized.roi || 0).toFixed(1)}x
-                                </p>
                             </div>
 
                             {/* Taxa de Conversão */}
-                            <div className="bg-white dark:bg-[#111] p-4 lg:p-6 rounded-2xl shadow-lg border border-gray-100 dark:border-white/5 min-w-[140px]">
-                                <div className="flex items-center gap-2 mb-3 overflow-hidden">
-                                    <Activity className="w-5 h-5 text-indigo-500 flex-shrink-0" />
-                                    <p className="text-[10px] lg:text-xs font-bold text-gray-400 uppercase whitespace-normal leading-tight">Taxa de Conversão</p>
-                                </div>
-                                <div className="flex items-baseline gap-2">
-                                    <p className="text-lg lg:text-2xl font-black text-gray-900 dark:text-white truncate" title={`${(realized.conversionRate || 0).toFixed(1)}%`}>
+                            <div className="bg-white dark:bg-[#111] rounded-2xl border border-gray-100 dark:border-white/5 shadow-sm hover:shadow-md transition-all duration-200 hover:-translate-y-0.5 overflow-hidden">
+                                <div className="h-[3px] bg-gradient-to-r from-indigo-400 to-blue-500" />
+                                <div className="p-4">
+                                    <div className="flex items-center gap-2 mb-3">
+                                        <div className="w-7 h-7 rounded-lg bg-indigo-50 dark:bg-indigo-500/10 flex items-center justify-center flex-shrink-0">
+                                            <Activity className="w-3.5 h-3.5 text-indigo-500" />
+                                        </div>
+                                        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide leading-tight">Tx. Conversão</p>
+                                    </div>
+                                    <p className="text-lg font-black text-gray-900 dark:text-white truncate" title={`${(realized.conversionRate || 0).toFixed(1)}%`}>
                                         {(realized.conversionRate || 0).toFixed(1)}%
                                     </p>
                                 </div>
                             </div>
 
                             {/* Leads Perdidos */}
-                            <div className="bg-white dark:bg-[#111] p-4 lg:p-6 rounded-2xl shadow-lg border border-gray-100 dark:border-white/5 min-w-[140px]">
-                                <div className="flex items-center gap-2 mb-3">
-                                    <Ban className="w-5 h-5 text-red-500" />
-                                    <p className="text-xs font-bold text-gray-400 uppercase">Perdidos</p>
+                            <div className="bg-white dark:bg-[#111] rounded-2xl border border-gray-100 dark:border-white/5 shadow-sm hover:shadow-md transition-all duration-200 hover:-translate-y-0.5 overflow-hidden">
+                                <div className="h-[3px] bg-gradient-to-r from-red-400 to-orange-500" />
+                                <div className="p-4">
+                                    <div className="flex items-center gap-2 mb-3">
+                                        <div className="w-7 h-7 rounded-lg bg-red-50 dark:bg-red-500/10 flex items-center justify-center flex-shrink-0">
+                                            <Ban className="w-3.5 h-3.5 text-red-500" />
+                                        </div>
+                                        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide leading-tight">Perdidos</p>
+                                    </div>
+                                    <p className="text-lg font-black text-red-500">
+                                        {realized.lost}
+                                    </p>
+                                    <p className="text-[10px] text-red-400 font-medium mt-1">
+                                        Churn: {realized.leads > 0 ? ((realized.lost / realized.leads) * 100).toFixed(1) : 0}%
+                                    </p>
                                 </div>
-                                <p className="text-3xl font-black text-red-500">
-                                    {realized.lost}
-                                </p>
-                                <p className="text-xs text-red-400 mt-1">
-                                    Churn: {realized.leads > 0 ? ((realized.lost / realized.leads) * 100).toFixed(1) : 0}%
-                                </p>
                             </div>
                         </div>
                     )}

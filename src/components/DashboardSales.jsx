@@ -9,6 +9,8 @@ import { KPICard } from './KPICard';
 import { ChartCard } from './ChartCard';
 import { formatCurrency, formatNumber, formatPercent } from '../lib/utils';
 import { DateRangeFilter, filterByDateRange, isDateInSelectedRange } from './DateRangeFilter';
+import { SDRPerformanceTab } from './sales/SDRPerformanceTab';
+import { GeneralPerformanceTab } from './sales/GeneralPerformanceTab';
 
 export function DashboardSales({ company, data, dateRange, setDateRange }) {
     // dateRange comes from App.jsx (global persistence)
@@ -30,9 +32,6 @@ export function DashboardSales({ company, data, dateRange, setDateRange }) {
         // Clean up underscores and capitalize if no match
         return String(val).replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
     };
-
-    // DEBUG: Inspect Apolar Data
-    const debugApolar = data.sales.filter(s => s.companyId === company.id).slice(0, 5);
 
     // Initialize tab from URL or default to 'geral'
     const [activeTab, setActiveTab] = useState(() => {
@@ -62,6 +61,14 @@ export function DashboardSales({ company, data, dateRange, setDateRange }) {
     const [filterChannel, setFilterChannel] = useState('all');
     const [filterInsuranceType, setFilterInsuranceType] = useState('all');
     const [isMobile, setIsMobile] = useState(false);
+
+    // Reset filters when company changes to avoid stale state from previous company
+    useEffect(() => {
+        setCurrentPage(1);
+        setSortOption('date-desc');
+        setFilterChannel('all');
+        setFilterInsuranceType('all');
+    }, [company?.id]);
 
     useEffect(() => {
         const checkMobile = () => setIsMobile(window.innerWidth < 768);
@@ -340,982 +347,9 @@ export function DashboardSales({ company, data, dateRange, setDateRange }) {
     };
 
     // Render Content based on Tab
-    // Render Content based on Tab
-    const renderGeral = () => (
-        <motion.div
-            key="geral"
-            variants={tabVariants}
-            initial="initial"
-            animate="animate"
-            exit="exit"
-            className="space-y-8"
-        >
-
-
-            {/* 1. Hero Banner (Premium - Geral) */}
-            <div className="bg-gradient-to-r from-blue-600 to-indigo-900 rounded-3xl p-10 text-white shadow-2xl relative overflow-hidden">
-                <div className="absolute top-0 right-0 w-96 h-96 bg-white/10 rounded-full -mr-32 -mt-32 blur-3xl"></div>
-                <div className="relative z-10 flex flex-col md:flex-row justify-between items-end gap-6">
-                    <div>
-                        <h2 className="text-4xl font-black mb-2 tracking-tight text-white">Visão Geral</h2>
-                        <p className="text-blue-100 text-lg">Resumo estratégico e métricas principais.</p>
-                    </div>
-                    {/* Badge Removed */}
-                </div>
-            </div>
-
-            {/* 2. Premium KPI Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-                {/* Card 1: Entraram */}
-                <div className="bg-white dark:bg-[#111] p-8 rounded-3xl shadow-xl border border-gray-100 dark:border-white/5 relative overflow-hidden group hover:shadow-2xl transition-all duration-300">
-                    <div className="flex justify-between items-start mb-6">
-                        <div>
-                            <p className="text-gray-500 dark:text-gray-400 font-medium mb-1">Leads Entraram</p>
-                            <h3 className="text-4xl font-black text-gray-900 dark:text-white">{metrics.leadsCreatedCount}</h3>
-                        </div>
-                        <div className="p-3 bg-blue-50 rounded-2xl text-blue-600">
-                            <Target className="w-6 h-6" />
-                        </div>
-                    </div>
-                    <div className="w-full bg-gray-100 h-1 rounded-full overflow-hidden">
-                        <div className="h-full bg-blue-500 w-full"></div>
-                    </div>
-                    <p className="text-xs text-gray-400 mt-3 font-bold uppercase">Oportunidades</p>
-                </div>
-
-                {/* Card 2: Qualificados */}
-                <div className="bg-white dark:bg-[#111] p-8 rounded-3xl shadow-xl border border-gray-100 dark:border-white/5 relative overflow-hidden group hover:shadow-2xl transition-all duration-300">
-                    <div className="flex justify-between items-start mb-6">
-                        <div>
-                            <p className="text-gray-500 dark:text-gray-400 font-medium mb-1">Qualificados</p>
-                            <h3 className="text-4xl font-black text-blue-600 dark:text-blue-400">{metrics.qualifiedCount}</h3>
-                        </div>
-                        <div className="p-3 bg-indigo-50 rounded-2xl text-indigo-600">
-                            <Users className="w-6 h-6" />
-                        </div>
-                    </div>
-                    <div className="w-full bg-gray-100 h-1 rounded-full overflow-hidden">
-                        <div className="h-full bg-indigo-500" style={{ width: `${(metrics.qualifiedCount / (metrics.leadsCreatedCount || 1)) * 100}%` }}></div>
-                    </div>
-                    <p className="text-xs text-gray-400 mt-3 font-bold uppercase">
-                        {((metrics.qualifiedCount / (metrics.leadsCreatedCount || 1)) * 100).toFixed(0)}% Conversão
-                    </p>
-                </div>
-
-                {/* Card 3: Vendas */}
-                <div className="bg-white dark:bg-[#111] p-8 rounded-3xl shadow-xl border border-gray-100 dark:border-white/5 relative overflow-hidden group hover:shadow-2xl transition-all duration-300">
-                    <div className="flex justify-between items-start mb-6">
-                        <div>
-                            <p className="text-gray-500 dark:text-gray-400 font-medium mb-1">Vendas Fechadas</p>
-                            <h3 className="text-4xl font-black text-green-600 dark:text-green-400">{metrics.wonCount}</h3>
-                        </div>
-                        <div className="p-3 bg-green-50 rounded-2xl text-green-600">
-                            <CircleDollarSign className="w-6 h-6" />
-                        </div>
-                    </div>
-                    <div className="w-full bg-gray-100 h-1 rounded-full overflow-hidden">
-                        <div className="h-full bg-green-500" style={{ width: `${(metrics.wonCount / (metrics.qualifiedCount || 1)) * 100}%` }}></div>
-                    </div>
-                    <p className="text-xs text-gray-400 mt-3 font-bold uppercase">
-                        {((metrics.wonCount / (metrics.qualifiedCount || 1)) * 100).toFixed(0)}% Fechamento
-                    </p>
-                </div>
-                {/* Card 4: Perdidos */}
-                <div className="bg-white dark:bg-[#111] p-8 rounded-3xl shadow-xl border border-gray-100 dark:border-white/5 relative overflow-hidden group hover:shadow-2xl transition-all duration-300">
-                    <div className="flex justify-between items-start mb-6">
-                        <div>
-                            <p className="text-gray-500 dark:text-gray-400 font-medium mb-1">Leads Perdidos</p>
-                            <h3 className="text-4xl font-black text-red-500 dark:text-red-400">{metrics.lostCount}</h3>
-                        </div>
-                        <div className="p-3 bg-red-50 rounded-2xl text-red-500">
-                            <Ban className="w-6 h-6" />
-                        </div>
-                    </div>
-                    <div className="w-full bg-gray-100 h-1 rounded-full overflow-hidden">
-                        <div className="h-full bg-red-500" style={{ width: `${Math.min(metrics.churnRate, 100)}%` }}></div>
-                    </div>
-                    <p className="text-xs text-gray-400 mt-3 font-bold uppercase">
-                        {metrics.churnRate.toFixed(0)}% Perdidos
-                    </p>
-                </div>
-            </div>
 
 
 
-            {/* 3. Financial Cards (Row 2) */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Faturamento */}
-                <div className="bg-white dark:bg-[#111] p-8 rounded-3xl shadow-xl border border-gray-100 dark:border-white/5 relative overflow-hidden group hover:shadow-2xl transition-all duration-300">
-                    <div className="flex items-center gap-6">
-                        <div className="p-4 bg-emerald-50 dark:bg-emerald-900/20 rounded-2xl text-emerald-600 dark:text-emerald-400">
-                            <CircleDollarSign className="w-8 h-8" />
-                        </div>
-                        <div>
-                            <p className="text-gray-500 dark:text-gray-400 text-sm font-bold uppercase tracking-wide">
-                                {(company.name || '').toLowerCase().includes('apolar') ? 'Contratos Fechados' : 'Apólices Fechadas'}
-                            </p>
-                            <h3 className="text-xl md:text-2xl lg:text-4xl font-black text-gray-900 dark:text-white mt-1 break-all">{formatCurrency(metrics.wonValue)}</h3>
-                        </div>
-                    </div>
-                </div>
-
-                {/* Ticket Médio */}
-                <div className="bg-white dark:bg-[#111] p-8 rounded-3xl shadow-xl border border-gray-100 dark:border-white/5 relative overflow-hidden group hover:shadow-2xl transition-all duration-300">
-                    <div className="flex items-center gap-6">
-                        <div className="p-4 bg-purple-50 dark:bg-purple-900/20 rounded-2xl text-purple-600 dark:text-purple-400">
-                            <BarChartIcon className="w-8 h-8" />
-                        </div>
-                        <div>
-                            <p className="text-gray-500 dark:text-gray-400 text-sm font-bold uppercase tracking-wide">Ticket Médio</p>
-                            <h3 className="text-xl md:text-2xl lg:text-4xl font-black text-gray-900 dark:text-white mt-1 break-all">{formatCurrency(metrics.avgTicket)}</h3>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            {/* Section 3: Charts */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="bg-white dark:bg-[#111] p-6 rounded-3xl border border-gray-100 dark:border-white/5 shadow-xl h-[400px]">
-                    <div className="mb-6">
-                        <h3 className="text-xl font-bold text-gray-900 dark:text-white">Motivos de Perda</h3>
-                        <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">Análise de churn por motivo</p>
-                    </div>
-                    <ResponsiveContainer width="100%" height={260}>
-                        {filteredDeals.filter(d => d.status === 'lost').length > 0 ? (
-                            <BarChart data={(() => {
-                                const counts = {};
-                                filteredDeals.filter(d => d.status === 'lost').forEach(d => {
-                                    const reason = d.lossReason || 'Outros';
-                                    counts[reason] = (counts[reason] || 0) + 1;
-                                });
-                                return Object.keys(counts).map(k => ({ name: k, value: counts[k] })).sort((a, b) => b.value - a.value);
-                            })()} layout="vertical" margin={{ left: 10, right: 30 }}>
-                                <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} />
-                                <XAxis type="number" hide />
-                                <YAxis dataKey="name" type="category" width={100} axisLine={false} tickLine={false} tick={{ fontSize: 11 }} />
-                                <Tooltip cursor={{ fill: '#f8fafc' }} />
-                                <Bar dataKey="value" fill="#ef4444" radius={[0, 4, 4, 0]} barSize={24}>
-                                    {/* Optional: Add labels on bars for clarity */}
-                                </Bar>
-                            </BarChart>
-                        ) : (
-                            <div className="flex h-full items-center justify-center text-gray-400 text-sm">
-                                Nenhuma perda registrada neste período.
-                            </div>
-                        )}
-                    </ResponsiveContainer>
-                </div>
-
-                {/* Origem dos Leads - Conditional Display */}
-                {(company.name || '').toLowerCase().includes('apolar') || !(String(company.pipefyPipeId) === '306438109' || (company.name || '').toLowerCase().includes('andar')) ? (
-                    // TABLE FORMAT (Apolar and other non-insurance companies)
-                    <div className="bg-white dark:bg-[#111] p-6 rounded-3xl border border-gray-100 dark:border-white/5 shadow-xl h-[400px] flex flex-col">
-                        <div className="mb-6">
-                            <h3 className="text-xl font-bold text-gray-900 dark:text-white">Origem dos Leads</h3>
-                            <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">Distribuição por canal de aquisição</p>
-                        </div>
-                        <div className="overflow-x-auto overflow-y-auto flex-1">
-                            {(() => {
-                                // Calculate metrics per channel
-                                const channelMetrics = {};
-
-                                // Count leads per channel
-                                createdDeals.forEach(d => {
-                                    const channel = d.channel || 'Não Identificado';
-                                    if (!channelMetrics[channel]) {
-                                        channelMetrics[channel] = {
-                                            leads: 0,
-                                            sales: 0,
-                                            totalValue: 0
-                                        };
-                                    }
-                                    channelMetrics[channel].leads += 1;
-                                });
-
-                                // Count sales per channel
-                                metrics.wonDeals.forEach(d => {
-                                    const channel = d.channel || 'Não Identificado';
-                                    if (!channelMetrics[channel]) {
-                                        channelMetrics[channel] = {
-                                            leads: 0,
-                                            sales: 0,
-                                            totalValue: 0
-                                        };
-                                    }
-                                    channelMetrics[channel].sales += 1;
-                                    channelMetrics[channel].totalValue += d.amount || 0;
-                                });
-
-                                // Convert to array and sort by lead count
-                                const channelData = Object.entries(channelMetrics)
-                                    .map(([name, data]) => ({
-                                        name,
-                                        leads: data.leads,
-                                        sales: data.sales,
-                                        avgTicket: data.sales > 0 ? data.totalValue / data.sales : 0,
-                                        conversion: data.leads > 0 ? (data.sales / data.leads) * 100 : 0
-                                    }))
-                                    .sort((a, b) => b.leads - a.leads);
-
-                                // Color mapping for channels
-                                const channelColors = {
-                                    'META ADS': '#3b82f6',
-                                    'HARDROCK': '#06b6d4',
-                                    'DISCADOR': '#8b5cf6',
-                                    'BOT': '#a855f7',
-                                    'OUT': '#ec4899',
-                                    'ORGÂNICO IG': '#10b981',
-                                    'PARCEIROS': '#f59e0b',
-                                    'Outros': '#6b7280'
-                                };
-
-                                return (
-                                    <table className="w-full">
-                                        <thead>
-                                            <tr className="border-b border-gray-200 dark:border-white/10">
-                                                <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Canal</th>
-                                                <th className="text-right py-3 px-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Leads</th>
-                                                <th className="text-right py-3 px-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Vendas</th>
-                                                <th className="text-right py-3 px-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Ticket Médio</th>
-                                                <th className="text-right py-3 px-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Conversão</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {channelData.map((channel, index) => {
-                                                const color = channelColors[channel.name] || '#6b7280';
-
-                                                return (
-                                                    <tr
-                                                        key={channel.name}
-                                                        className="border-b border-gray-100 dark:border-white/5 hover:bg-gray-50 dark:hover:bg-white/5 transition-colors"
-                                                    >
-                                                        <td className="py-3 px-4">
-                                                            <div className="flex items-center gap-3">
-                                                                <div
-                                                                    className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-                                                                    style={{ backgroundColor: color }}
-                                                                />
-                                                                <span className="font-semibold text-gray-900 dark:text-white text-sm">
-                                                                    {channel.name}
-                                                                </span>
-                                                            </div>
-                                                        </td>
-                                                        <td className="py-3 px-4 text-right">
-                                                            <span className="font-bold text-gray-900 dark:text-white text-sm">
-                                                                {formatNumber(channel.leads)}
-                                                            </span>
-                                                        </td>
-                                                        <td className="py-3 px-4 text-right">
-                                                            <span className="font-bold text-gray-900 dark:text-white text-sm">
-                                                                {formatNumber(channel.sales)}
-                                                            </span>
-                                                        </td>
-                                                        <td className="py-3 px-4 text-right">
-                                                            <span className="font-bold text-gray-900 dark:text-white text-sm">
-                                                                {formatCurrency(channel.avgTicket)}
-                                                            </span>
-                                                        </td>
-                                                        <td className="py-3 px-4 text-right">
-                                                            <span className={`inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-bold ${channel.conversion > 0
-                                                                ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
-                                                                : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
-                                                                }`}>
-                                                                {formatPercent(channel.conversion)}
-                                                            </span>
-                                                        </td>
-                                                    </tr>
-                                                );
-                                            })}
-                                        </tbody>
-                                    </table>
-                                );
-                            })()}
-                        </div>
-                    </div>
-                ) : (
-                    // PIE CHART (Andar Seguros)
-                    <div className="bg-white dark:bg-[#111] p-6 rounded-3xl border border-gray-100 dark:border-white/5 shadow-xl h-[400px]">
-                        <div className="mb-6">
-                            <h3 className="text-xl font-bold text-gray-900 dark:text-white">Origem das Vendas</h3>
-                            <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">Distribuição por canal de aquisição</p>
-                        </div>
-                        <ResponsiveContainer width="100%" height={260}>
-                            <PieChart>
-                                <Pie
-                                    data={(() => {
-                                        const counts = {};
-                                        metrics.wonDeals.forEach(d => {
-                                            const ch = d.channel || 'Desconhecido';
-                                            counts[ch] = (counts[ch] || 0) + 1;
-                                        });
-
-                                        // Group small values into "Outros"
-                                        let data = Object.keys(counts).map(k => ({ name: k, value: counts[k] })).sort((a, b) => b.value - a.value);
-
-                                        if (data.length > 5) {
-                                            const top5 = data.slice(0, 5);
-                                            const others = data.slice(5).reduce((acc, curr) => acc + curr.value, 0);
-                                            if (others > 0) {
-                                                top5.push({ name: 'Outros', value: others });
-                                            }
-                                            return top5;
-                                        }
-                                        return data;
-                                    })()}
-                                    cx="50%"
-                                    cy="50%"
-                                    innerRadius={60}
-                                    outerRadius={90}
-                                    paddingAngle={5}
-                                    dataKey="value"
-                                >
-                                    {[...Array(6)].map((_, index) => (
-                                        <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
-                                    ))}
-                                </Pie>
-                                <Tooltip />
-                                <Legend
-                                    verticalAlign={isMobile ? 'bottom' : 'middle'}
-                                    align={isMobile ? 'center' : 'right'}
-                                    layout={isMobile ? 'horizontal' : 'vertical'}
-                                    wrapperStyle={{ fontSize: '12px', paddingTop: isMobile ? '20px' : '0' }}
-                                />
-                            </PieChart>
-                        </ResponsiveContainer>
-                    </div>
-                )}
-            </div>
-
-            {(String(company.pipefyPipeId) === '306438109' || (company.name || '').toLowerCase().includes('andar')) && (
-                <div className="grid grid-cols-1 gap-6 mt-6">
-                    {/* NEW: Conversion by Type Table */}
-                    <div className="bg-white dark:bg-[#111] p-6 rounded-3xl border border-gray-100 dark:border-white/5 shadow-xl h-[400px] overflow-hidden flex flex-col">
-                        <div className="mb-6">
-                            <h3 className="text-xl font-bold text-gray-900 dark:text-white">Conversão por Seguro</h3>
-                            <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">Eficiência por produto (Vendas / Leads)</p>
-                        </div>
-                        <div className="overflow-y-auto flex-1 pr-2">
-                            <table className="w-full text-sm text-left">
-                                <thead className="text-xs text-gray-400 uppercase border-b border-gray-100 dark:border-white/5 bg-gray-50/50 dark:bg-white/5">
-                                    <tr>
-                                        <th className="px-3 py-3">Produto</th>
-                                        <th className="px-3 py-3 text-right">Leads</th>
-                                        <th className="px-3 py-3 text-right">Vendas</th>
-                                        <th className="px-3 py-3 text-right">Ticket Médio</th>
-                                        <th className="px-3 py-3 text-right">Conv.</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-100 dark:divide-white/5">
-                                    {insuranceStats.map((stat, i) => (
-                                        <tr key={i} className="hover:bg-gray-50 dark:hover:bg-white/5">
-                                            <td className="px-3 py-3 font-medium text-gray-900 dark:text-white text-xs">{stat.name}</td>
-                                            <td className="px-3 py-3 text-right text-gray-500">{stat.total}</td>
-                                            <td className="px-3 py-3 text-right text-green-600 font-bold">{stat.won}</td>
-                                            <td className="px-3 py-3 text-right text-gray-700 dark:text-gray-300 font-medium">{formatCurrency(stat.avgTicket)}</td>
-                                            <td className="px-3 py-3 text-right">
-                                                <span className={`px-2 py-1 rounded-full text-xs font-bold ${stat.conversion >= 10 ? 'bg-green-100 text-green-700' :
-                                                    stat.conversion >= 5 ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-600'
-                                                    }`}>
-                                                    {stat.conversion.toFixed(1)}%
-                                                </span>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Section 4: Últimas Vendas ("Recent Sales" Table) */}
-            <div className="bg-white dark:bg-[#111] rounded-3xl border border-gray-100 dark:border-white/5 shadow-xl overflow-hidden">
-                <div className="p-8 border-b border-gray-100 dark:border-white/5 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                    <div>
-                        <h3 className="text-xl font-bold text-gray-900 dark:text-white">Histórico de Vendas</h3>
-                        <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">Registro detalhado de fechamentos</p>
-                    </div>
-
-                    {/* Filter and Sort Controls */}
-                    <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
-                        {/* Channel Filter */}
-                        <select
-                            value={filterChannel}
-                            onChange={(e) => {
-                                setFilterChannel(e.target.value);
-                                setCurrentPage(1);
-                            }}
-                            className="bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-gray-700 dark:text-gray-300 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 outline-none"
-                        >
-                            <option value="all">Todos os Canais</option>
-                            {/* Dynamic Channels */}
-                            {Array.from(new Set(metrics.wonDeals?.map(d => d.channel || 'Desconhecido') || [])).map(ch => (
-                                <option key={ch} value={ch}>{ch}</option>
-                            ))}
-                        </select>
-
-                        {/* INSURANCE TYPE FILTER (Andar Only) */}
-                        {(String(company.pipefyPipeId) === '306438109' || (company.name || '').toLowerCase().includes('andar')) && (
-                            <select
-                                value={filterInsuranceType}
-                                onChange={(e) => {
-                                    setFilterInsuranceType(e.target.value);
-                                    setCurrentPage(1);
-                                }}
-                                className="bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-gray-700 dark:text-gray-300 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 outline-none"
-                            >
-                                <option value="all">Todos os Seguros</option>
-                                {Array.from(new Set(metrics.wonDeals?.map(d => normalizeProduct(d.product || d.insuranceType)) || [])).filter(t => t !== 'Não Identificado').sort().map(type => (
-                                    <option key={type} value={type}>{type}</option>
-                                ))}
-                            </select>
-                        )}
-
-                        {/* Sort Control */}
-                        <select
-                            value={sortOption}
-                            onChange={(e) => setSortOption(e.target.value)}
-                            className="bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-gray-700 dark:text-gray-300 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 outline-none"
-                        >
-                            <option value="date-desc">Mais Recentes</option>
-                            <option value="date-asc">Mais Antigas</option>
-                            <option value="value-desc">Maior Valor</option>
-                            <option value="value-asc">Menor Valor</option>
-                        </select>
-                    </div>
-                </div>
-
-                <div className="overflow-x-auto">
-                    <table className="w-full text-sm text-left">
-                        <thead className="bg-gray-50 dark:bg-white/5 text-gray-500 dark:text-gray-400 uppercase font-semibold">
-                            <tr>
-                                <th className="px-6 py-4">Data</th>
-                                <th className="px-6 py-4">Cliente / Título</th>
-                                <th className="px-6 py-4">Vendedor</th>
-                                <th className="px-6 py-4">Canal</th>
-                                {(String(company.pipefyPipeId) === '306438109' || (company.name || '').toLowerCase().includes('andar')) && (
-                                    <th className="px-6 py-4">Tipo Seguro</th>
-                                )}
-                                <th className="px-6 py-4">Valor</th>
-                                <th className="px-6 py-4">Status</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-100 dark:divide-white/5">
-                            {(() => {
-                                // 1. Source: Use 'wonDeals' (Cohort View) calculated in metrics
-                                // This ensures the table matches the "10" count exactly.
-                                let tableData = [...(metrics.wonDeals || [])];
-
-                                // 2. Filter Logic
-                                if (filterChannel !== 'all') {
-                                    tableData = tableData.filter(d => (d.channel || 'Desconhecido') === filterChannel);
-                                }
-                                if (filterInsuranceType !== 'all') {
-                                    tableData = tableData.filter(d => normalizeProduct(d.product || d.insuranceType) === filterInsuranceType);
-                                }
-
-                                // 3. Sort Logic
-                                tableData.sort((a, b) => {
-                                    const dateA = new Date(a.date || a.createdAt);
-                                    const dateB = new Date(b.date || b.createdAt);
-                                    const valA = a.amount || 0;
-                                    const valB = b.amount || 0;
-
-                                    switch (sortOption) {
-                                        case 'date-desc': return dateB - dateA;
-                                        case 'date-asc': return dateA - dateB;
-                                        case 'value-desc': return valB - valA;
-                                        case 'value-asc': return valA - valB;
-                                        default: return 0;
-                                    }
-                                });
-
-                                // 4. Pagination Logic
-                                const totalPages = Math.ceil(tableData.length / itemsPerPage);
-                                const startIndex = (currentPage - 1) * itemsPerPage;
-                                const currentData = tableData.slice(startIndex, startIndex + itemsPerPage);
-
-                                if (currentData.length === 0) {
-                                    return (
-                                        <tr>
-                                            <td colSpan="6" className="px-6 py-12 text-center text-gray-400">
-                                                Nenhuma venda encontrada com estes filtros.
-                                            </td>
-                                        </tr>
-                                    );
-                                }
-
-                                return (
-                                    <>
-                                        {currentData.map((deal) => (
-                                            <tr key={deal.id} className="hover:bg-gray-50 dark:hover:bg-white/5 transition-colors">
-                                                <td className="px-6 py-4 text-gray-600 dark:text-gray-400">
-                                                    {new Date(deal.won_date || deal.date || deal.createdAt).toLocaleDateString('pt-BR')}
-                                                </td>
-                                                <td className="px-6 py-4 font-medium text-gray-900 dark:text-white">
-                                                    {deal.client || deal.title}
-                                                </td>
-                                                <td className="px-6 py-4 text-gray-600 dark:text-gray-400">
-                                                    {(deal.seller || 'N/A').replace(/[\[\]"]/g, '').trim()}
-                                                </td>
-                                                <td className="px-6 py-4">
-                                                    <span className="px-2 py-1 rounded-full text-xs font-semibold bg-gray-100 dark:bg-white/10 text-gray-600 dark:text-gray-300 whitespace-nowrap">
-                                                        {deal.channel || 'N/A'}
-                                                    </span>
-                                                </td>
-                                                {(String(company.pipefyPipeId) === '306438109' || (company.name || '').toLowerCase().includes('andar')) && (
-                                                    <td className="px-6 py-4 text-xs font-medium text-gray-500">
-                                                        {normalizeProduct(deal.product || deal.insuranceType)}
-                                                    </td>
-                                                )}
-                                                <td className="px-6 py-4 font-bold text-gray-900 dark:text-white">
-                                                    {formatCurrency(deal.amount)}
-                                                </td>
-                                                <td className="px-6 py-4">
-                                                    <span className="px-2 py-1 rounded-full text-xs font-bold uppercase bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">
-                                                        Vendido
-                                                    </span>
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </>
-                                );
-                            })()}
-                        </tbody>
-                    </table>
-                </div>
-
-                {/* Pagination Controls */}
-                {(() => {
-                    // Clone Logic for Pagination Count (Repeated logic, could be extracted but keeping inline for safety)
-                    let tableData = [...(metrics.wonDeals || [])];
-                    if (filterChannel !== 'all') {
-                        tableData = tableData.filter(d => (d.channel || 'Desconhecido') === filterChannel);
-                    }
-                    if (filterInsuranceType !== 'all') {
-                        tableData = tableData.filter(d => normalizeProduct(d.product || d.insuranceType) === filterInsuranceType);
-                    }
-
-                    const totalItems = tableData.length;
-                    const totalPages = Math.ceil(totalItems / itemsPerPage);
-                    // Reset page if out of bounds (Handled in filter change, but safety here)
-                    // Note: Cannot call setState in render. Rely on useEffect if needed, or simple display logic.
-
-                    if (totalItems > 0) {
-                        return (
-                            <div className="flex flex-col md:flex-row items-center justify-between px-6 py-4 border-t border-gray-100 dark:border-white/5 bg-gray-50 dark:bg-white/5 gap-4">
-                                <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-                                    <span>Linhas por página:</span>
-                                    <select
-                                        value={itemsPerPage}
-                                        onChange={(e) => {
-                                            setItemsPerPage(Number(e.target.value));
-                                            setCurrentPage(1);
-                                        }}
-                                        className="bg-white dark:bg-[#111] border border-gray-300 dark:border-white/10 rounded-md text-sm p-1 focus:ring-2 focus:ring-blue-500 outline-none"
-                                    >
-                                        <option value={5}>5</option>
-                                        <option value={10}>10</option>
-                                        <option value={20}>20</option>
-                                        <option value={50}>50</option>
-                                    </select>
-                                </div>
-
-                                <div className="flex items-center gap-4 text-sm text-gray-600">
-                                    <span>
-                                        Página {currentPage} de {totalPages || 1}
-                                    </span>
-                                    <div className="flex items-center gap-1">
-                                        <button
-                                            onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                                            disabled={currentPage === 1}
-                                            className="p-1 rounded-md hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                                        >
-                                            <ChevronLeft className="w-5 h-5" />
-                                        </button>
-                                        <button
-                                            onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                                            disabled={currentPage === totalPages || totalPages === 0}
-                                            className="p-1 rounded-md hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                                        >
-                                            <ChevronRight className="w-5 h-5" />
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        );
-                    }
-                    return null;
-                })()}
-
-            </div>
-        </motion.div>
-    );
-
-    const renderSDRView = () => (
-        <motion.div
-            key="sdr-view-v2"
-            variants={tabVariants}
-            initial="initial"
-            animate="animate"
-            exit="exit"
-            className="space-y-8"
-        >
-            {/* 1. Hero Banner (SDR Theme - Violet/Dark) */}
-            <div className="bg-gradient-to-r from-violet-600 to-fuchsia-900 rounded-3xl p-10 text-white shadow-2xl relative overflow-hidden">
-                <div className="absolute top-0 right-0 w-96 h-96 bg-white/10 rounded-full -mr-32 -mt-32 blur-3xl"></div>
-                <div className="relative z-10 flex flex-col md:flex-row justify-between items-end gap-6">
-                    <div>
-                        <h2 className="text-4xl font-black mb-2 tracking-tight text-white">Performance do Time</h2>
-                        <p className="text-violet-100 text-lg">Análise detalhada de produtividade e conversão.</p>
-                    </div>
-                    <div className="flex gap-4">
-                        <div className="bg-white/10 backdrop-blur-md px-6 py-3 rounded-2xl border border-white/20">
-                            <p className="text-xs uppercase font-bold text-violet-200 mb-1">SDRs Ativos</p>
-                            <p className="text-2xl font-black text-white">{sdrStats.length}</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            {/* 1.5 Competitive Ranking */}
-            <div className="bg-white dark:bg-[#111] p-8 rounded-3xl shadow-xl border border-gray-100 dark:border-white/5">
-                <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-6 flex items-center gap-2">
-                    🏆 Ranking de Vendedores
-                </h3>
-                <div className="space-y-4">
-                    {sdrStats.sort((a, b) => b.wonValue - a.wonValue).map((sdr, index) => {
-                        const count = sdrStats.length || 1;
-                        const revenueGoal = metrics.goals.revenue || 60000;
-                        const individualGoal = metrics.goals.sdrGoals?.[sdr.name]?.revenue || (revenueGoal / count);
-                        const percent = (sdr.wonValue / (individualGoal || 1)) * 100;
-                        const visualPercent = Math.min(percent, 100);
-
-                        let rankColor = "bg-gray-100 dark:bg-white/10 text-gray-600 dark:text-gray-400";
-                        let rankBorder = "border-transparent";
-                        let cardStyle = "border-gray-50 dark:border-white/5 hover:bg-gray-50 dark:hover:bg-white/5";
-                        let barColor = "bg-[#FD295E]";
-
-                        if (index === 0) {
-                            rankColor = "bg-yellow-100 text-yellow-700 border-yellow-200 shadow-yellow-100";
-                            cardStyle = "border-yellow-200 bg-yellow-50/50 dark:bg-yellow-900/10";
-                            barColor = "bg-yellow-500";
-                        }
-                        if (index === 1) {
-                            rankColor = "bg-slate-200 text-slate-700 border-slate-300";
-                            cardStyle = "border-slate-200 bg-slate-50/50 dark:bg-slate-900/10";
-                            barColor = "bg-slate-500";
-                        }
-                        if (index === 2) {
-                            rankColor = "bg-orange-100 text-orange-800 border-orange-200";
-                            cardStyle = "border-orange-200 bg-orange-50/50 dark:bg-orange-900/10";
-                            barColor = "bg-orange-500";
-                        }
-
-                        return (
-                            <div key={index} className={`flex items-center gap-4 p-4 rounded-2xl border ${cardStyle} transition-all`}>
-                                <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-black text-lg border-2 ${rankColor}`}>
-                                    {index + 1}º
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                    <div className="flex justify-between items-start mb-2 gap-2">
-                                        <p className="font-bold text-gray-900 dark:text-white text-lg truncate">{sdr.name}</p>
-                                        <div className="text-right">
-                                            <p className="font-black text-gray-900 dark:text-white">{formatCurrency(sdr.wonValue)}</p>
-                                            <p className="text-[10px] text-gray-400 uppercase font-bold">Meta: {formatCurrency(individualGoal)}</p>
-                                        </div>
-                                    </div>
-                                    {/* Progress Bar */}
-                                    <div className="w-full bg-gray-100 dark:bg-white/10 h-2.5 rounded-full overflow-hidden">
-                                        <div
-                                            className={`h-full rounded-full ${barColor} shadow-lg`}
-                                            style={{ width: `${visualPercent}%` }}
-                                        ></div>
-                                    </div>
-
-                                    {/* ANDAR SPECIFIC: Product Conversion Breakdown */}
-                                    {(String(company.pipefyPipeId) === '306438109' || (company.name || '').toLowerCase().includes('andar')) && (
-                                        <div className="mt-4 pt-3 border-t border-gray-100 dark:border-white/5">
-                                            <p className="text-xs font-bold text-gray-500 uppercase mb-2">Conversão por Produto</p>
-                                            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                                                {Object.entries(sdr.insuranceBreakdown || {})
-                                                    .map(([type, stats]) => ({
-                                                        type,
-                                                        ...stats,
-                                                        // Fix: If total is 0 but we have sales (backlog), assume 100% for display (or relative to won)
-                                                        conv: (stats.total || stats.won) ? (stats.won / (stats.total || stats.won)) * 100 : 0
-                                                    }))
-                                                    .filter(i => i.total > 0 || i.won > 0) // Show if created OR sold
-                                                    .sort((a, b) => b.won - a.won)
-                                                    .slice(0, 4) // Show top 4
-                                                    .map((item, i) => (
-                                                        <div key={i} className="bg-gray-50 dark:bg-white/5 rounded-lg p-2 text-xs">
-                                                            <div className="font-semibold text-gray-700 dark:text-gray-300 truncate mb-1">{item.type}</div>
-                                                            <div className="flex justify-between items-end">
-                                                                {/* <span className="text-gray-400">{item.won}/{item.total}</span> */}
-                                                                <span className={`font-bold ${item.conv > 10 ? 'text-green-600' : 'text-blue-500'}`}>
-                                                                    {item.conv.toFixed(0)}%
-                                                                </span>
-                                                            </div>
-                                                        </div>
-                                                    ))}
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                        );
-                    })}
-                </div>
-            </div>
-
-            {/* 2. KPI Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                {/* Card 1: Leads Atendidos */}
-                <div className="bg-white dark:bg-[#111] p-8 rounded-3xl shadow-xl border border-gray-100 dark:border-white/5 relative overflow-hidden group hover:shadow-2xl transition-all duration-300">
-                    <div className="flex justify-between items-start mb-6">
-                        <div>
-                            <p className="text-gray-500 dark:text-gray-400 font-medium mb-1">Leads Atendidos</p>
-                            <h3 className="text-4xl font-black text-gray-900 dark:text-white">{metrics.leadsCreatedCount}</h3>
-                        </div>
-                        <div className="p-3 bg-[#FD295E]/10 rounded-2xl text-[#FD295E]">
-                            <Users className="w-6 h-6" />
-                        </div>
-                    </div>
-                    <div className="w-full bg-gray-100 h-1 rounded-full overflow-hidden">
-                        <div className="h-full bg-[#FD295E] w-full"></div>
-                    </div>
-                    <p className="text-xs text-gray-400 mt-3 font-bold uppercase">Volume Total</p>
-                </div>
-
-                {/* Card 2: Vendas Fechadas */}
-                <div className="bg-white dark:bg-[#111] p-8 rounded-3xl shadow-xl border border-gray-100 dark:border-white/5 relative overflow-hidden group hover:shadow-2xl transition-all duration-300">
-                    <div className="flex justify-between items-start mb-6">
-                        <div>
-                            <p className="text-gray-500 dark:text-gray-400 font-medium mb-1">Vendas Fechadas</p>
-                            <h3 className="text-4xl font-black text-green-600 dark:text-green-400">{metrics.wonCount}</h3>
-                        </div>
-                        <div className="p-3 bg-green-50 rounded-2xl text-green-600">
-                            <CircleDollarSign className="w-6 h-6" />
-                        </div>
-                    </div>
-                    <div className="w-full bg-gray-100 h-1 rounded-full overflow-hidden">
-                        <div className="h-full bg-green-500 w-full"></div>
-                    </div>
-                    <p className="text-xs text-gray-400 mt-3 font-bold uppercase">Sucesso Absoluto</p>
-                </div>
-
-                {/* Card 3: Tempo Médio */}
-                <div className="bg-white dark:bg-[#111] p-8 rounded-3xl shadow-xl border border-gray-100 dark:border-white/5 relative overflow-hidden group hover:shadow-2xl transition-all duration-300">
-                    <div className="flex justify-between items-start mb-6">
-                        <div>
-                            <p className="text-gray-500 dark:text-gray-400 font-medium mb-1">Tempo Médio</p>
-                            <h3 className="text-4xl font-black text-orange-500 dark:text-orange-400">{metrics.avgClosingTime.toFixed(1)} <span className="text-lg text-gray-400 font-medium">dias</span></h3>
-                        </div>
-                        <div className="p-3 bg-orange-50 rounded-2xl text-orange-500">
-                            <Clock className="w-6 h-6" />
-                        </div>
-                    </div>
-                    <div className="w-full bg-gray-100 h-1 rounded-full overflow-hidden">
-                        <div className="h-full bg-orange-500 w-1/2"></div>
-                    </div>
-                    <p className="text-xs text-gray-400 mt-3 font-bold uppercase">Ciclo de Venda</p>
-                </div>
-
-                {/* Card 4: Taxa Conversão */}
-                <div className="bg-white dark:bg-[#111] p-8 rounded-3xl shadow-xl border border-gray-100 dark:border-white/5 relative overflow-hidden group hover:shadow-2xl transition-all duration-300">
-                    <div className="flex justify-between items-start mb-6">
-                        <div>
-                            <p className="text-gray-500 dark:text-gray-400 font-medium mb-1">Conversão Global</p>
-                            <h3 className="text-4xl font-black text-purple-600 dark:text-purple-400">{formatPercent(metrics.conversionRate)}</h3>
-                        </div>
-                        <div className="p-3 bg-purple-50 rounded-2xl text-purple-600">
-                            <Percent className="w-6 h-6" />
-                        </div>
-                    </div>
-                    <div className="w-full bg-gray-100 h-1 rounded-full overflow-hidden">
-                        <div className="h-full bg-purple-500" style={{ width: `${Math.min(metrics.conversionRate, 100)}%` }}></div>
-                    </div>
-                    <p className="text-xs text-gray-400 mt-3 font-bold uppercase">Eficiência do Time</p>
-                </div>
-            </div>
-
-            {/* 3. Section: Performance Individual */}
-            <div className="bg-white dark:bg-[#111] p-8 rounded-3xl shadow-xl border border-gray-100 dark:border-white/5">
-                <div className="mb-8">
-                    <h3 className="text-xl font-bold text-gray-900 dark:text-white">Performance Individual dos SDR's</h3>
-                    <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">Análise detalhada por representante</p>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-8 h-auto md:h-[350px]">
-                    {/* Conversion by SDR */}
-                    <div className="p-4 rounded-2xl bg-gray-50 dark:bg-white/5 border border-gray-100 dark:border-white/5 h-[300px] md:h-full">
-                        <h3 className="text-xs font-bold uppercase text-gray-400 mb-6">Taxa de Conversão</h3>
-                        <ResponsiveContainer width="100%" height="85%">
-                            <BarChart data={sdrStats.sort((a, b) => b.conversion - a.conversion)} margin={{ bottom: 20 }}>
-                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                                <XAxis
-                                    dataKey="name"
-                                    axisLine={false}
-                                    tickLine={false}
-                                    fontSize={10}
-                                    tick={{ fill: '#64748b', angle: -20, textAnchor: 'end' }}
-                                    interval={0}
-                                    height={40}
-                                />
-                                <YAxis hide />
-                                <Tooltip
-                                    formatter={(value) => [`${value.toFixed(1)}%`, 'Conversão']}
-                                    cursor={{ fill: '#f1f5f9' }}
-                                    contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                                />
-                                <Bar dataKey="conversion" fill="#8b5cf6" radius={[6, 6, 0, 0]} barSize={32} />
-                            </BarChart>
-                        </ResponsiveContainer>
-                    </div>
-
-                    {/* Avg Time by SDR */}
-                    <div className="p-4 rounded-2xl bg-gray-50 dark:bg-white/5 border border-gray-100 dark:border-white/5 h-[300px] md:h-full">
-                        <h3 className="text-xs font-bold uppercase text-gray-400 mb-6">Tempo Médio (Dias)</h3>
-                        <ResponsiveContainer width="100%" height="85%">
-                            <BarChart data={sdrStats.sort((a, b) => a.avgTime - b.avgTime)} layout="vertical" margin={{ left: 10 }}>
-                                <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#e2e8f0" />
-                                <XAxis type="number" hide />
-                                <YAxis dataKey="name" type="category" width={80} axisLine={false} tickLine={false} fontSize={10} tick={{ fill: '#64748b' }} />
-                                <Tooltip
-                                    cursor={{ fill: '#f1f5f9' }}
-                                    formatter={(value) => [`${value.toFixed(1)} dias`, 'Tempo Médio']}
-                                    contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                                />
-                                <Bar dataKey="avgTime" fill="#f59e0b" radius={[0, 6, 6, 0]} barSize={24} />
-                            </BarChart>
-                        </ResponsiveContainer>
-                    </div>
-
-                    {/* Sales Value by SDR */}
-                    <div className="p-4 rounded-2xl bg-gray-50 dark:bg-white/5 border border-gray-100 dark:border-white/5 h-[300px] md:h-full">
-                        <h3 className="text-xs font-bold uppercase text-gray-400 mb-6">Valor de Vendas</h3>
-                        <ResponsiveContainer width="100%" height="85%">
-                            <BarChart data={sdrStats} margin={{ bottom: 20 }}>
-                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                                <XAxis
-                                    dataKey="name"
-                                    axisLine={false}
-                                    tickLine={false}
-                                    fontSize={10}
-                                    tick={{ fill: '#64748b', angle: -20, textAnchor: 'end' }}
-                                    interval={0}
-                                    height={40}
-                                />
-                                <YAxis hide />
-                                <Tooltip
-                                    formatter={(value) => [formatCurrency(value), 'Vendas']}
-                                    cursor={{ fill: '#f1f5f9' }}
-                                    contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                                />
-                                <Bar dataKey="wonValue" fill="#10b981" radius={[6, 6, 0, 0]} barSize={32} />
-                            </BarChart>
-                        </ResponsiveContainer>
-                    </div>
-                </div>
-            </div>
-
-            {/* 4. Section: Funnel Gauges */}
-            <div>
-                <div className="mb-6 px-2">
-                    <h3 className="text-xl font-bold text-gray-900 dark:text-white">Conversão entre Etapas</h3>
-                    <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">Eficiência do funil de vendas</p>
-                </div>
-                <div className={`grid grid-cols-1 md:grid-cols-2 ${(String(company.pipefyPipeId) === '306438109' || (company.name || '').toLowerCase().includes('andar')) ? 'lg:grid-cols-3' : 'lg:grid-cols-4'} gap-6`}>
-                    {(() => {
-                        const isAndar = String(company.pipefyPipeId) === '306438109' || (company.name || '').toLowerCase().includes('andar');
-
-                        if (isAndar) {
-                            // ANDAR: 3 metrics
-                            return [
-                                { label: 'Lead Novo → Qualificado', val: metrics.leadToQualifiedRate, color: '#3b82f6' },
-                                { label: 'Qualificado → Proposta', val: metrics.qualifiedToMeetingRate, color: '#8b5cf6' },
-                                { label: 'Proposta → Contrato', val: metrics.proposalToContractRate, color: '#10b981' },
-                            ];
-                        } else {
-                            // APOLAR: 4 metrics
-                            return [
-                                { label: 'Lead Novo → Qualificado', val: metrics.leadToQualifiedRate, color: '#3b82f6' },
-                                { label: 'Qualificado → Reunião Agendada', val: metrics.qualifiedToMeetingRate, color: '#8b5cf6' },
-                                { label: 'Reunião Agendada → Proposta Enviada', val: metrics.meetingToProposalRate, color: '#f59e0b' },
-                                { label: 'Proposta → Contrato', val: metrics.proposalToContractRate, color: '#10b981' },
-                            ];
-                        }
-                    })().map((gauge, idx) => (
-                        <div key={idx} className="bg-white dark:bg-[#111] p-8 rounded-3xl border border-gray-100 dark:border-white/5 shadow-xl flex flex-col items-center justify-center relative overflow-hidden">
-                            <h3 className="text-xs font-bold uppercase text-gray-400 mb-4 tracking-wide">{gauge.label}</h3>
-                            <div className="relative w-32 h-32 flex items-center justify-center">
-                                {/* Gauge Background */}
-                                <div className="absolute inset-0 rounded-full border-[12px] border-slate-100 dark:border-slate-800"></div>
-                                {/* Gauge Value (Static simplified visual for now) */}
-                                <svg className="absolute inset-0 w-full h-full -rotate-90">
-                                    <circle
-                                        cx="64"
-                                        cy="64"
-                                        r="52" // 64 - 12
-                                        fill="transparent"
-                                        stroke={gauge.color}
-                                        strokeWidth="12"
-                                        strokeDasharray={`${(Math.min(gauge.val, 100) / 100) * (2 * Math.PI * 52)} 1000`}
-                                        strokeLinecap="round"
-                                    />
-                                </svg>
-                                <span className="text-3xl font-black text-gray-800 dark:text-white z-10">{gauge.val.toFixed(0)}%</span>
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            </div>
-
-            {/* 5. Section: Motivos de Perda */}
-            <div className="bg-white dark:bg-[#111] p-8 rounded-3xl shadow-xl border border-gray-100 dark:border-white/5 h-[450px] flex flex-col">
-                <div className="mb-6">
-                    <h3 className="text-xl font-bold text-gray-900 dark:text-white">Motivos de Perda (Detalhado)</h3>
-                    <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">Principais razões de churn</p>
-                </div>
-                <div className="flex-1 w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={sdrStats}>
-                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                            <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b' }} />
-                            <YAxis tick={{ fill: '#64748b' }} />
-                            <Tooltip
-                                contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                                cursor={{ fill: '#f1f5f9' }}
-                            />
-                            <Legend wrapperStyle={{ paddingTop: '20px', fontSize: '11px' }} />
-                            {(() => {
-                                // Extract unique reasons dynamically
-                                const allReasons = new Set();
-                                sdrStats.forEach(s => {
-                                    Object.keys(s.lostReasons || {}).forEach(r => allReasons.add(r));
-                                });
-                                const reasonsList = Array.from(allReasons);
-                                // Palette for dynamic reasons
-                                const REASON_COLORS = ['#ef4444', '#f59e0b', '#3b82f6', '#8b5cf6', '#ec4899', '#6366f1'];
-
-                                return reasonsList.map((reason, idx) => (
-                                    <Bar
-                                        key={reason}
-                                        dataKey={`lostReasons.${reason}`}
-                                        name={reason}
-                                        stackId="a"
-                                        fill={REASON_COLORS[idx % REASON_COLORS.length]}
-                                        radius={idx === reasonsList.length - 1 ? [4, 4, 0, 0] : [0, 0, 0, 0]}
-                                    />
-                                ));
-                            })()}
-                        </BarChart>
-                    </ResponsiveContainer>
-                </div>
-            </div>
-
-        </motion.div>
-    );
 
     return (
         <div className="space-y-8 animate-in fade-in duration-500 pb-12">
@@ -1350,8 +384,24 @@ export function DashboardSales({ company, data, dateRange, setDateRange }) {
             </div>
 
             <AnimatePresence mode="wait">
-                {activeTab === 'geral' && renderGeral()}
-                {activeTab === 'sdr' && renderSDRView()}
+                {activeTab === 'geral' && (
+                     <GeneralPerformanceTab
+                        metrics={metrics}
+                        company={company}
+                        tabVariants={tabVariants}
+                        filteredDeals={filteredDeals}
+                        createdDeals={createdDeals}
+                        isMobile={isMobile}
+                     />
+                )}
+                {activeTab === 'sdr' && (
+                    <SDRPerformanceTab
+                        metrics={metrics}
+                        sdrStats={sdrStats}
+                        company={company}
+                        tabVariants={tabVariants}
+                    />
+                )}
                 {activeTab === 'metas' && (
                     <motion.div
                         key="metas"
@@ -1371,21 +421,21 @@ export function DashboardSales({ company, data, dateRange, setDateRange }) {
                             const daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
                             return (
-                                <div className="bg-gradient-to-r from-[#FD295E] to-indigo-700 rounded-3xl p-10 text-white shadow-2xl relative overflow-hidden">
+                                <div className="bg-gradient-to-r from-[#FD295E] to-indigo-700 rounded-2xl md:rounded-3xl p-5 sm:p-8 md:p-10 text-white shadow-2xl relative overflow-hidden">
                                     <div className="absolute top-0 right-0 w-96 h-96 bg-white/10 rounded-full -mr-32 -mt-32 blur-3xl"></div>
-                                    <div className="relative z-10 flex flex-col md:flex-row justify-between items-end gap-6">
+                                    <div className="relative z-10 flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4">
                                         <div>
-                                            <h2 className="text-4xl font-black mb-2 tracking-tight text-white">Metas de {capitalizedMonth}</h2>
-                                            <p className="text-white/80 text-lg">Acompanhamento em tempo real da performance do time.</p>
+                                            <h2 className="text-2xl sm:text-3xl md:text-4xl font-black mb-2 tracking-tight text-white">Metas de {capitalizedMonth}</h2>
+                                            <p className="text-white/80 text-sm sm:text-base md:text-lg">Acompanhamento em tempo real da performance do time.</p>
                                         </div>
-                                        <div className="flex gap-4">
-                                            <div className="bg-white/10 backdrop-blur-md px-6 py-3 rounded-2xl border border-white/20">
+                                        <div className="flex gap-2 sm:gap-4">
+                                            <div className="bg-white/10 backdrop-blur-md px-3 sm:px-6 py-2 sm:py-3 rounded-xl sm:rounded-2xl border border-white/20">
                                                 <p className="text-xs uppercase font-bold text-white/70 mb-1">Dias Restantes</p>
-                                                <p className="text-2xl font-black text-white">{daysRemaining} Dias</p>
+                                                <p className="text-lg sm:text-2xl font-black text-white">{daysRemaining}d</p>
                                             </div>
-                                            <div className="bg-white/10 backdrop-blur-md px-6 py-3 rounded-2xl border border-white/20">
+                                            <div className="bg-white/10 backdrop-blur-md px-3 sm:px-6 py-2 sm:py-3 rounded-xl sm:rounded-2xl border border-white/20">
                                                 <p className="text-xs uppercase font-bold text-white/70 mb-1">Status Geral</p>
-                                                <p className="text-2xl font-black text-emerald-300">Na Meta 🚀</p>
+                                                <p className="text-lg sm:text-2xl font-black text-emerald-300">Na Meta 🚀</p>
                                             </div>
                                         </div>
                                     </div>
@@ -1394,9 +444,9 @@ export function DashboardSales({ company, data, dateRange, setDateRange }) {
                         })()}
 
                         {/* Main Goals Grid */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-8">
                             {/* Revenue Goal */}
-                            <div className="bg-white dark:bg-[#111] p-8 rounded-3xl shadow-xl border border-gray-100 dark:border-white/5 relative overflow-hidden group hover:shadow-2xl transition-all duration-300">
+                            <div className="bg-white dark:bg-[#111] p-5 sm:p-6 md:p-8 rounded-2xl md:rounded-3xl shadow-xl border border-gray-100 dark:border-white/5 relative overflow-hidden group hover:shadow-2xl transition-all duration-300">
                                 <div className="flex justify-between items-start mb-6">
                                     <div>
                                         <h3 className="text-xl font-bold text-gray-900 dark:text-white">Meta de Faturamento</h3>
@@ -1407,7 +457,7 @@ export function DashboardSales({ company, data, dateRange, setDateRange }) {
                                     </div>
                                 </div>
 
-                                <div className="flex flex-col sm:flex-row items-center gap-4 sm:gap-8">
+                                <div className="flex flex-col items-center gap-4">
                                     <div className="w-40 h-40 relative flex items-center justify-center shrink-0">
                                         <ResponsiveContainer width="100%" height="100%">
                                             <RadialBarChart
@@ -1444,7 +494,7 @@ export function DashboardSales({ company, data, dateRange, setDateRange }) {
                             </div>
 
                             {/* Deals Goal */}
-                            <div className="bg-white dark:bg-[#111] p-8 rounded-3xl shadow-xl border border-gray-100 dark:border-white/5 relative overflow-hidden group hover:shadow-2xl transition-all duration-300">
+                            <div className="bg-white dark:bg-[#111] p-5 sm:p-6 md:p-8 rounded-2xl md:rounded-3xl shadow-xl border border-gray-100 dark:border-white/5 relative overflow-hidden group hover:shadow-2xl transition-all duration-300">
                                 <div className="flex justify-between items-start mb-6">
                                     <div>
                                         <h3 className="text-xl font-bold text-gray-900 dark:text-white">Meta de Volume</h3>
@@ -1455,7 +505,7 @@ export function DashboardSales({ company, data, dateRange, setDateRange }) {
                                     </div>
                                 </div>
 
-                                <div className="flex flex-col sm:flex-row items-center gap-4 sm:gap-8">
+                                <div className="flex flex-col items-center gap-4">
                                     <div className="w-40 h-40 relative flex items-center justify-center shrink-0">
                                         <ResponsiveContainer width="100%" height="100%">
                                             <RadialBarChart
@@ -1492,7 +542,7 @@ export function DashboardSales({ company, data, dateRange, setDateRange }) {
                             </div>
 
                             {/* Leads Goal */}
-                            <div className="bg-white dark:bg-[#111] p-8 rounded-3xl shadow-xl border border-gray-100 dark:border-white/5 relative overflow-hidden group hover:shadow-2xl transition-all duration-300">
+                            <div className="bg-white dark:bg-[#111] p-5 sm:p-6 md:p-8 rounded-2xl md:rounded-3xl shadow-xl border border-gray-100 dark:border-white/5 relative overflow-hidden group hover:shadow-2xl transition-all duration-300">
                                 <div className="flex justify-between items-start mb-6">
                                     <div>
                                         <h3 className="text-xl font-bold text-gray-900 dark:text-white">Meta de Leads</h3>
@@ -1503,7 +553,7 @@ export function DashboardSales({ company, data, dateRange, setDateRange }) {
                                     </div>
                                 </div>
 
-                                <div className="flex flex-col sm:flex-row items-center gap-4 sm:gap-8">
+                                <div className="flex flex-col items-center gap-4">
                                     <div className="w-40 h-40 relative flex items-center justify-center shrink-0">
                                         <ResponsiveContainer width="100%" height="100%">
                                             <RadialBarChart
@@ -1541,7 +591,7 @@ export function DashboardSales({ company, data, dateRange, setDateRange }) {
                         </div>
 
                         {/* Team Goals */}
-                        <div className="bg-white dark:bg-[#111] p-8 rounded-3xl shadow-xl border border-gray-100 dark:border-white/5">
+                        <div className="bg-white dark:bg-[#111] p-4 sm:p-6 md:p-8 rounded-2xl md:rounded-3xl shadow-xl border border-gray-100 dark:border-white/5">
                             <div className="flex justify-between items-center mb-8">
                                 <h3 className="text-xl font-bold text-gray-900 dark:text-white">Performance do Time vs Meta</h3>
                                 <button onClick={() => handleTabChange('sdr')} className="text-sm font-bold text-[#FD295E] hover:text-[#e11d48]">Ver Detalhes</button>

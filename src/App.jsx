@@ -1,4 +1,5 @@
 import React, { useState, useEffect, Suspense } from 'react';
+import { motion } from 'framer-motion';
 import { Layout } from './components/Layout';
 // Lazy Loading for optimization
 const CompanySelection = React.lazy(() => import('./components/CompanySelection').then(module => ({ default: module.CompanySelection })));
@@ -108,10 +109,11 @@ function MainApp() {
 
     useEffect(() => {
         if (user) {
-            // Reset state on login
-            setData(null);
-            setSelectedCompany(null);
-            setIsLoading(true);
+            // Do not destroy existing data if we are merely refetching dates
+            // This prevents the UX from unmounting the Layout and showing the black loading screen
+            if (!data) {
+                setIsLoading(true);
+            }
 
             console.log("APP: Loading Data...");
             getData(dateRange).then(d => {
@@ -156,13 +158,11 @@ function MainApp() {
             
             if (!hasData) {
                 console.log(`[The Comeback] Silent sync triggered for ${selectedCompany.name}...`);
-                fetch(`/api/sync/${selectedCompany.id}/force`, { method: 'POST' })
-                    .then(res => {
-                        if (res.ok) {
-                             // Refresh data after sync
-                             return getData();
-                        }
-                    })
+                Promise.allSettled([
+                    fetch(`/api/sync/${selectedCompany.id}/meta?days=90`, { method: 'POST' }),
+                    fetch(`/api/sync/${selectedCompany.id}/pipefy`, { method: 'POST' })
+                ])
+                    .then(() => getData(dateRange))
                     .then(freshData => {
                         if (freshData) {
                             console.log("[The Comeback] Data restored successfully.");
@@ -200,19 +200,22 @@ function MainApp() {
         }
     }, [authLoading, user]);
 
+    // Mark boot as done after a small delay so user sees the animation first time
+    useEffect(() => {
+        if (isFirstSessionBoot) {
+            const timer = setTimeout(() => {
+                sessionStorage.setItem('plin_boot_done', 'true');
+            }, 5000);
+            return () => clearTimeout(timer);
+        }
+    }, [isFirstSessionBoot]);
+
     if (authLoading) return <Loading variant={isFirstSessionBoot ? 'boot' : 'simple'} />;
     if (!user) return <LoginPage />;
 
     // Diagnostic Check: if !data, show minimal loading
     if (!data) return <Loading variant="simple" />;
 
-    // If we reached here, data is loaded and user is auth
-    // Mark boot as done after a small delay so user sees the animation first time
-    if (isFirstSessionBoot && data) {
-        setTimeout(() => {
-            sessionStorage.setItem('plin_boot_done', 'true');
-        }, 5000); // Wait for the typing animation to reach a good point
-    }
 
     if (!selectedCompany) {
         console.log("APP: Rendering CompanySelection");
@@ -260,6 +263,11 @@ function MainApp() {
                 return <AdminSettings
                     data={data}
                     company={selectedCompany}
+                    allCompanies={data?.companies || []}
+                    onCompanyChange={(c) => {
+                        setSelectedCompany(c);
+                        localStorage.setItem('plin_company_id', c.id);
+                    }}
                     onSave={() => {
                         console.log("APP: Settings Saved. Refreshing Data...");
                         getData().then(freshData => {
@@ -300,6 +308,16 @@ function MainApp() {
 
     return (
         <>
+            {isLoading && data && (
+                <div className="fixed top-0 left-0 w-full h-1 z-[99999] pointer-events-none">
+                    <motion.div
+                        initial={{ width: "0%" }}
+                        animate={{ width: "100%" }}
+                        transition={{ duration: 15, ease: "easeOut" }}
+                        className="h-full bg-gradient-to-r from-blue-500 to-violet-600 shadow-[0_0_15px_rgba(59,130,246,0.6)]"
+                    />
+                </div>
+            )}
             <Layout
                 currentView={currentView}
                 onViewChange={handleViewChange}

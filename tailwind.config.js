@@ -56,22 +56,15 @@ export default {
                 },
                 border: 'var(--border)',
                 input: 'var(--input)',
-                // OVERRIDE: Mapping 'blue' classes to Plin Brand Pink (#FD295E)
-                // This ensures all legacy 'bg-blue-600' buttons automatically become the correct pink brand color.
-                blue: {
-                    50: '#fff1f2',
-                    100: '#ffe4e6',
-                    200: '#fecdd3',
-                    300: '#fda4af',
-                    400: '#fb7185',
-                    500: '#f43f5e',
-                    600: '#FD295E', // PLIN BRAND COLOR
-                    700: '#e11d48',
-                    800: '#be123c',
-                    900: '#9f1239',
-                    950: '#881337',
-                },
                 ring: 'var(--ring)',
+                // Brand tokens mapped from CSS variables
+                brand: {
+                    DEFAULT: 'var(--brand)',
+                    light: 'var(--brand-light)',
+                    dark: 'var(--brand-dark)',
+                },
+                page: 'var(--bg-page)',
+                surface: 'var(--surface)',
             }
         },
     },

@@ -93,28 +93,32 @@ export function DateRangeFilter({ value, onChange }) {
 // Internal Helper moved out
 function toBrazilYMD(val) {
     if (!val) return null;
+
+    // Helper: shift any Date to BRT (UTC-3) and return YYYY-MM-DD
+    const shiftToBRT = (d) => {
+        const brt = new Date(d.getTime() - (3 * 60 * 60 * 1000));
+        const y = brt.getUTCFullYear();
+        const m = String(brt.getUTCMonth() + 1).padStart(2, '0');
+        const day = String(brt.getUTCDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+    };
+
     if (typeof val === 'string') {
-        // If YYYY-MM-DD already
+        // Already a plain date — no conversion needed
         if (val.match(/^\d{4}-\d{2}-\d{2}$/)) return val;
-        // If ISO string (YYYY-MM-DDTHH:mm:ss...), split and take date part
-        // Standardize: Replace ' ' with 'T' if DB uses spaces (Postgres default)
+
+        // ISO/datetime string — parse properly so timezone offsets are respected,
+        // then convert the resulting UTC instant to BRT date.
         const tVal = val.includes(' ') ? val.replace(' ', 'T') : val;
-        if (tVal.includes('T')) return tVal.split('T')[0];
+        if (tVal.includes('T')) {
+            const d = new Date(tVal);
+            if (!isNaN(d.getTime())) return shiftToBRT(d);
+        }
     }
 
-    // Fallback for Date objects or other formats
     const d = new Date(val);
     if (isNaN(d.getTime())) return null;
-
-    // If it's a Date object, we might still want to be careful.
-    // Ideally we shouldn't reach here for Campaign dates which come as strings.
-    // But for 'new Date()' (system time), we usually want "Brazil Time".
-
-    const brazilShifted = new Date(d.getTime() - (3 * 60 * 60 * 1000));
-    const y = brazilShifted.getUTCFullYear();
-    const m = String(brazilShifted.getUTCMonth() + 1).padStart(2, '0');
-    const day = String(brazilShifted.getUTCDate()).padStart(2, '0');
-    return `${y}-${m}-${day}`;
+    return shiftToBRT(d);
 }
 
 // 3. Helper: Check if a single date is in range (Exported)
@@ -145,6 +149,9 @@ export function isDateInSelectedRange(dateVal, range) {
         case 'last-7-days':
         case 'last-30-days':
         case 'last-3-months':
+        case 'last-7-days':
+        case 'last-30-days':
+        case 'last-3-months':
         case 'last-6-months': {
             const daysMap = {
                 'last-7-days': 7,
@@ -154,14 +161,15 @@ export function isDateInSelectedRange(dateVal, range) {
             };
             const days = daysMap[range];
 
-            const startShifted = new Date(brazilNowShifted.getTime() - (days * 24 * 60 * 60 * 1000));
+            // 1 day ago (yesterday)
+            const dEnd = new Date(brazilNowShifted.getTime() - (1 * 24 * 60 * 60 * 1000));
+            // 'days' days ago
+            const dStart = new Date(brazilNowShifted.getTime() - (days * 24 * 60 * 60 * 1000));
 
-            const yStart = startShifted.getUTCFullYear();
-            const mStart = String(startShifted.getUTCMonth() + 1).padStart(2, '0');
-            const dStart = String(startShifted.getUTCDate()).padStart(2, '0');
-            const startYMD = `${yStart}-${mStart}-${dStart}`;
+            const endYMD = `${dEnd.getUTCFullYear()}-${String(dEnd.getUTCMonth() + 1).padStart(2, '0')}-${String(dEnd.getUTCDate()).padStart(2, '0')}`;
+            const startYMD = `${dStart.getUTCFullYear()}-${String(dStart.getUTCMonth() + 1).padStart(2, '0')}-${String(dStart.getUTCDate()).padStart(2, '0')}`;
 
-            return itemYMD >= startYMD && itemYMD <= todayYMD;
+            return itemYMD >= startYMD && itemYMD <= endYMD;
         }
 
         case 'all-time':

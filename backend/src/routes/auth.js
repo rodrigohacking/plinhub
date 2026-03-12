@@ -54,7 +54,7 @@ router.get('/meta/callback',
     async (req, res) => {
         try {
             const { accessToken } = req.user;
-            const companyId = parseInt(req.session.companyId);
+            const companyId = req.session.companyId;
 
             if (!companyId) {
                 throw new Error('Company ID not found in session');
@@ -123,7 +123,7 @@ router.post('/meta/disconnect', async (req, res) => {
         const { data: existing } = await supabase
             .from('Integration')
             .select('id')
-            .eq('companyId', parseInt(companyId))
+            .eq('companyId', companyId)
             .eq('type', 'meta_ads')
             .single();
 

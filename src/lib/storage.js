@@ -455,7 +455,12 @@ export async function getData(range = 'this-month') {
                     channel: s.channel || 'Orgânico',
                     seller: s.seller,
                     lossReason: s.loss_reason,
-                    daysToClose: s.days_to_close
+                    daysToClose: s.days_to_close,
+                    utm_source: s.utm_source,
+                    utm_medium: s.utm_medium,
+                    utm_campaign: s.utm_campaign,
+                    utm_content: s.utm_content,
+                    utm_term: s.utm_term
                 };
             });
         }
@@ -474,7 +479,8 @@ export async function getData(range = 'this-month') {
                 leads: Number(c.leads || 0),
                 impressions: Number(c.impressions || 0),
                 clicks: Number(c.clicks || 0),
-                channel: c.channel || 'Meta Ads'
+                channel: c.channel || 'Meta Ads',
+                dailyInsights: c.dailyInsights || []
             }));
         }
 

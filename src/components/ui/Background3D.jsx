@@ -9,17 +9,17 @@ export function Background3D({ children }) {
         const ctx = canvas.getContext('2d');
         let animationFrameId;
 
-        // Scene Config: NIGHT GOLD THEME
+        // Scene Config: LIGHT BLUE DAY THEME
         const CONFIG = {
             focalLength: 400,
             cameraY: 150,
-            speed: 4,
-            skyColorTop: '#020617',    // slate-950 (Deep Night)
-            skyColorBottom: '#1e293b', // slate-800
-            buildingBaseColor: '#0f172a', // slate-900 (Silhouette)
-            buildingStroke: '#334155',    // slate-700 (Subtle edge)
-            windowColor: 'rgba(253, 41, 94,', // #FD295E (Pink) base for windows
-            starCount: 100
+            speed: 3,
+            skyColorTop: '#dde8f5',    // soft periwinkle
+            skyColorBottom: '#e8edf5', // page background
+            buildingBaseColor: '#f0f4f9', // very light blue-gray
+            buildingStroke: '#c8d5e8',    // subtle edge
+            windowColor: 'rgba(59, 130, 246,', // blue-500 for windows
+            starCount: 0  // no stars in day mode
         };
 
         let buildings = [];
@@ -205,10 +205,11 @@ export function Background3D({ children }) {
     }, []);
 
     return (
-        <div className="relative min-h-screen w-full bg-slate-950">
+        <div className="relative min-h-screen w-full" style={{ backgroundColor: '#e8edf5' }}>
             <canvas
                 ref={canvasRef}
-                className="fixed inset-0 z-0 bg-slate-950"
+                className="fixed inset-0 z-0"
+                style={{ backgroundColor: '#e8edf5' }}
             />
             <div className="relative z-10 w-full min-h-screen">
                 {children}

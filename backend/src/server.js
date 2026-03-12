@@ -1,8 +1,8 @@
 const path = require('path');
-// Load .env from root (../../.env relative to src/server.js)
+// Load root .env as base defaults
 require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
-// Also try loading local .env for overrides
-require('dotenv').config();
+// Load backend/.env with override — backend-specific values WIN (e.g. PORT)
+require('dotenv').config({ override: true });
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -37,7 +37,7 @@ const PORT = process.env.PORT || 3001;
 // Middleware
 app.use(helmet());
 app.use(cors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
     credentials: true
 }));
 app.use(morgan('dev'));

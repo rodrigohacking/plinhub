@@ -14,15 +14,9 @@ router.post('/:companyId/force', async (req, res) => {
         const { companyId } = req.params;
 
         let company;
-        if (company) {
-            // Already have company
-        } else {
-            // Try searching by name if ID search failed or logic isn't appropriate for UUID
-            // Actually, Supabase .eq('id', uuid) works. 
-            // We can just try to find by ID first.
-            const { data } = await supabase.from('Company').select('*').eq('id', companyId).single();
-            if (data) company = data;
-        }
+        // Find company by ID
+        const { data } = await supabase.from('Company').select('*').eq('id', companyId).single();
+        if (data) company = data;
 
         if (!company) {
             const { data } = await supabase.from('Company')
