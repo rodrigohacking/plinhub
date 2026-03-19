@@ -9,17 +9,17 @@ export function Background3D({ children }) {
         const ctx = canvas.getContext('2d');
         let animationFrameId;
 
-        // Scene Config: LIGHT BLUE DAY THEME
+        // Scene Config: DARK ZINC NIGHT THEME
         const CONFIG = {
             focalLength: 400,
             cameraY: 150,
-            speed: 3,
-            skyColorTop: '#dde8f5',    // soft periwinkle
-            skyColorBottom: '#e8edf5', // page background
-            buildingBaseColor: '#f0f4f9', // very light blue-gray
-            buildingStroke: '#c8d5e8',    // subtle edge
-            windowColor: 'rgba(59, 130, 246,', // blue-500 for windows
-            starCount: 0  // no stars in day mode
+            speed: 2,
+            skyColorTop: '#09090b',    // zinc-950
+            skyColorBottom: '#09090b', // zinc-950
+            buildingBaseColor: '#18181b', // zinc-900
+            buildingStroke: '#27272a',    // zinc-800
+            windowColor: 'rgba(225, 29, 72,', // brand pink for windows
+            starCount: 80  // stars in night mode
         };
 
         let buildings = [];
@@ -137,8 +137,8 @@ export function Background3D({ children }) {
                 }
 
                 // 3. Roof Top (Perspective)
-                ctx.fillStyle = '#020617'; // Darker top
-                ctx.strokeStyle = '#334155';
+                ctx.fillStyle = '#09090b'; // zinc-950
+                ctx.strokeStyle = '#27272a'; // zinc-800
                 ctx.beginPath();
                 ctx.moveTo(screenX - screenW / 2, roofY);
                 ctx.lineTo(screenX + screenW / 2, roofY);
@@ -205,11 +205,11 @@ export function Background3D({ children }) {
     }, []);
 
     return (
-        <div className="relative min-h-screen w-full" style={{ backgroundColor: '#e8edf5' }}>
+        <div className="relative min-h-screen w-full" style={{ backgroundColor: '#09090b' }}>
             <canvas
                 ref={canvasRef}
                 className="fixed inset-0 z-0"
-                style={{ backgroundColor: '#e8edf5' }}
+                style={{ backgroundColor: '#09090b' }}
             />
             <div className="relative z-10 w-full min-h-screen">
                 {children}

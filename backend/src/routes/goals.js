@@ -5,13 +5,13 @@ const supabase = require('../utils/supabase');
 // POST /api/goals - UPSERT a goal for a company/month
 router.post('/', async (req, res) => {
     try {
-        const { companyId, month: monthStr, revenue, deals, leads } = req.body;
+        const { companyId, month: monthStr, revenue, deals, leads, investment, cpl } = req.body;
 
         if (!companyId || !monthStr) {
             return res.status(400).json({ error: 'Missing companyId or month' });
         }
 
-        console.log(`🎯 Setting Goal for ${companyId} - ${monthStr}:`, { revenue, deals, leads });
+        console.log(`🎯 Setting Goal for ${companyId} - ${monthStr}:`, { revenue, deals, leads, investment, cpl });
 
         // Parse YYYY-MM
         const [yearStr, mStr] = monthStr.split('-');
@@ -19,14 +19,16 @@ router.post('/', async (req, res) => {
         const month = parseInt(mStr);
 
         // Map to DB Schema (Snake Case)
-        // Schema: company_id, year, month, sales_goal, sales_count_goal, leads_goal
+        // Schema: company_id, year, month, sales_goal, sales_count_goal, leads_goal, investment_goal, roi_goal (repurposed for CPL)
         const payload = {
             company_id: companyId,
             year: year,
             month: month,
             sales_goal: parseFloat(revenue) || 0,
             sales_count_goal: parseInt(deals) || 0,
-            leads_goal: parseInt(leads) || 0
+            leads_goal: parseInt(leads) || 0,
+            investment_goal: parseFloat(investment) || 0,
+            roi_goal: parseFloat(cpl) || 0  // repurposing roi_goal to store CPL target
         };
 
         // Use UPSERT on conflict (company_id, year, month)

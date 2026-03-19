@@ -46,7 +46,7 @@ export function LoginPage() {
 
             <div className="relative z-10 w-full max-w-[400px]">
                 {/* Card */}
-                <div className="bg-white dark:bg-[var(--surface)] rounded-2xl border border-[var(--border)] shadow-[var(--shadow-lg)] p-8">
+                <div className="bg-white dark:bg-[var(--surface)] rounded-2xl border border-[var(--border)] shadow-[var(--shadow-lg)] p-5 sm:p-8">
 
                     {/* Logo */}
                     <div className="flex flex-col items-center mb-8">

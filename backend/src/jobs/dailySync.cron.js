@@ -41,7 +41,7 @@ async function syncAllCompanies(daysToSync = 7) {
 
             const { data: metaInt } = await supabase
                 .from('Integration')
-                .select('metaAdAccountId, metaAccessToken, metaStatus')
+                .select('id, metaAdAccountId, metaAccessToken, metaStatus, metaTokenExpiry')
                 .eq('companyId', company.id)
                 .eq('type', 'meta_ads')
                 .eq('isActive', true)
@@ -94,6 +94,83 @@ async function syncAllCompanies(daysToSync = 7) {
 }
 
 /**
+ * Sincroniza Pipefy para todas as empresas com integração ativa.
+ * Usa o token do banco de dados; se ausente, cai para PIPEFY_TOKEN do .env.
+ */
+async function syncPipefy() {
+    const { data: activeIntegrations, error } = await supabase
+        .from('Integration')
+        .select('companyId')
+        .eq('type', 'pipefy')
+        .eq('isActive', true);
+
+    if (error) throw new Error(error.message);
+
+    const companyIds = [...new Set((activeIntegrations || []).map(i => i.companyId))];
+
+    if (companyIds.length === 0) {
+        // Nenhuma integração no banco — tenta fallback de env se houver
+        if (process.env.PIPEFY_TOKEN) {
+            console.log('  ↳ Nenhuma integração Pipefy no banco. Nada a sincronizar (PIPEFY_TOKEN de env não tem companyId associado).');
+        }
+        return;
+    }
+
+    for (const companyId of companyIds) {
+        try {
+            const { data: pipefyInt } = await supabase
+                .from('Integration')
+                .select('*')
+                .eq('companyId', companyId)
+                .eq('type', 'pipefy')
+                .eq('isActive', true)
+                .single();
+
+            if (!pipefyInt) continue;
+
+            // Resolve token: banco → fallback env
+            let token;
+            try {
+                token = pipefyInt.pipefyToken ? decrypt(pipefyInt.pipefyToken) : null;
+            } catch (e) {
+                token = pipefyInt.pipefyToken;
+            }
+            if (!token) token = process.env.PIPEFY_TOKEN;
+
+            if (!token) {
+                console.warn(`  ↳ Sem token Pipefy para company ${companyId}, pulando.`);
+                continue;
+            }
+
+            // Usa integração com token resolvido
+            const intWithToken = { ...pipefyInt, pipefyToken: token };
+
+            await syncService.syncPipefy(companyId, intWithToken, 7).catch(e => {
+                console.error(`  ↳ Pipefy metrics sync falhou para ${companyId}:`, e.message);
+            });
+
+            try {
+                let settings = {};
+                if (pipefyInt.settings) {
+                    try { settings = typeof pipefyInt.settings === 'string' ? JSON.parse(pipefyInt.settings) : pipefyInt.settings; } catch (e) {}
+                }
+                const { syncPipefyDeals } = require('../controllers/pipefySync.controller');
+                const result = await syncPipefyDeals(companyId, pipefyInt.pipefyPipeId, token, settings);
+                console.log(`  ↳ Pipefy cards synced: ${result.rowsUpserted} rows para company ${companyId}`);
+                await supabase.from('Integration')
+                    .update({ lastSync: new Date().toISOString() })
+                    .eq('companyId', companyId)
+                    .eq('type', 'pipefy');
+            } catch (e) {
+                console.error(`  ↳ Pipefy cards sync falhou para company ${companyId}:`, e.message);
+            }
+        } catch (e) {
+            console.error(`  ↳ Erro ao sincronizar Pipefy para company ${companyId}:`, e.message);
+        }
+    }
+}
+
+/**
  * Daily sync cron job
  * Runs every day at 6 AM
  */
@@ -131,7 +208,26 @@ function startCronJobs() {
         }
     });
 
-    console.log(`📅 Cron job scheduled: ${schedule} (diário) | ${hourlySchedule} (horário)`);
+    // ─── Cron Pipefy — sincroniza a cada 2 horas (dados do dia atual) ──────────
+    // Mantém o dashboard atualizado enquanto webhooks não estão disponíveis.
+    // Quando os webhooks do Pipefy forem liberados, este cron pode ser desativado
+    // setando SYNC_PIPEFY_SCHEDULE=disabled no .env
+    const pipefySchedule = process.env.SYNC_PIPEFY_SCHEDULE || '0 */2 * * *';
+    if (pipefySchedule !== 'disabled') {
+        cron.schedule(pipefySchedule, async () => {
+            console.log('🔁 [Pipefy] Syncing Pipefy data...');
+            const startTime = Date.now();
+            try {
+                await syncPipefy();
+                const duration = Date.now() - startTime;
+                console.log(`✅ [Pipefy] Done in ${duration}ms`);
+            } catch (error) {
+                console.error('❌ [Pipefy] Sync failed:', error);
+            }
+        });
+    }
+
+    console.log(`📅 Cron job scheduled: ${schedule} (diário) | ${hourlySchedule} (Meta horário) | ${pipefySchedule} (Pipefy 2h)`);
 
 }
 

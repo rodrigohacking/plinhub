@@ -1,4 +1,5 @@
 const axios = require('axios');
+const { getValidPipefyToken, invalidateCache } = require('./pipefyToken.service');
 
 const PIPEFY_API_URL = 'https://api.pipefy.com/graphql';
 
@@ -8,20 +9,22 @@ class PipefyService {
    */
   async testConnection(token) {
     try {
+      // Use `me` query — works for PAT. For OAuth2 service accounts, falls back to org query.
       const query = `
         query {
-          me {
-            id
-            name
-            email
-          }
+          me { id name email }
+          organizations { id name }
         }
       `;
 
       const response = await this.makeRequest(query, {}, token);
+      const user = response.data?.me || null;
+      const orgs = response.data?.organizations || [];
+
       return {
         success: true,
-        user: response.data.me
+        user,
+        organizations: orgs
       };
     } catch (error) {
       throw new Error(`Pipefy connection failed: ${error.message}`);
@@ -95,16 +98,28 @@ class PipefyService {
         }
       `;
 
-      const response = await this.makeRequest(query, { pipeId, cursor }, token);
+      const response = await this.makeRequest(query, { pipeId, cursor }, token); // token como fallback
 
-      if (!pipeInfo) pipeInfo = response.data.pipe;
+      // Guard: response.data can be undefined if makeRequest returns an empty body
+      if (!response || !response.data) {
+        console.warn('[PipefyService] getPipeCards: empty response from makeRequest — stopping.');
+        break;
+      }
 
-      const pageCards = response.data.allCards.edges.map(edge => edge.node);
+      if (!pipeInfo) pipeInfo = response.data.pipe || null;
+
+      const allCardsData = response.data.allCards;
+      if (!allCardsData) {
+        console.warn('[PipefyService] allCards is null/undefined — stopping pagination.');
+        break;
+      }
+
+      const pageCards = (allCardsData.edges || []).map(edge => edge.node);
 
       allCards = allCards.concat(pageCards);
 
-      hasPreviousPage = response.data.allCards.pageInfo.hasPreviousPage;
-      cursor = response.data.allCards.pageInfo.startCursor;
+      hasPreviousPage = allCardsData.pageInfo?.hasPreviousPage || false;
+      cursor = allCardsData.pageInfo?.startCursor || null;
       pagesFetched++;
     }
 
@@ -120,7 +135,7 @@ class PipefyService {
   async getPipeMetrics(pipeId, token, startDate, endDate) {
     const pipeData = await this.getPipeCards(pipeId, token);
     const cards = pipeData.cards;
-    const pipeLabels = pipeData.pipe.labels;
+    const pipeLabels = pipeData.pipe?.labels || [];
     const start = new Date(startDate);
     const end = new Date(endDate);
 
@@ -280,7 +295,7 @@ class PipefyService {
       metricsByTag, // Backward compatibility for now (or removal)
       dailyMetrics, // NEW: grouped by day
       availableTags: uniqueTags,
-      pipeLabels: pipeData.pipe.labels
+      pipeLabels: pipeData.pipe?.labels || []
     };
   }
 
@@ -340,13 +355,15 @@ class PipefyService {
         }
       }
     `;
-    const response = await this.makeRequest(query, { cardId: String(cardId) }, token);
+    const response = await this.makeRequest(query, { cardId: String(cardId) }, token); // token como fallback
     return response.data.card;
   }
 
   /**
-   * Get cards updated since a given ISO timestamp (incremental sync)
-   * Uses Pipefy allCards filter to avoid fetching thousands of stale cards.
+   * Get cards updated since a given ISO timestamp (incremental sync).
+   * NOTE: Pipefy's AdvancedSearch does NOT support `updated_since` filter for service accounts.
+   * We fetch the most recent cards (newest first via `last:`) and stop early once we reach
+   * cards older than updatedSince — this is efficient for recent changes.
    */
   async getUpdatedCards(pipeId, token, updatedSince) {
     let allCards = [];
@@ -354,11 +371,12 @@ class PipefyService {
     let cursor = null;
     let pagesFetched = 0;
     const MAX_PAGES = 50; // max 2500 recently-changed cards
+    const sinceDate = updatedSince ? new Date(updatedSince) : null;
 
     while (hasPreviousPage && pagesFetched < MAX_PAGES) {
       const query = `
-        query($pipeId: ID!, $cursor: String, $updatedSince: DateTime) {
-          allCards(pipeId: $pipeId, last: 50, before: $cursor, filter: { updated_since: $updatedSince }) {
+        query($pipeId: ID!, $cursor: String) {
+          allCards(pipeId: $pipeId, last: 50, before: $cursor) {
             edges {
               node {
                 id
@@ -378,32 +396,85 @@ class PipefyService {
         }
       `;
 
-      const response = await this.makeRequest(query, { pipeId, cursor, updatedSince }, token);
-      const pageCards = response.data.allCards.edges.map(e => e.node);
+      const response = await this.makeRequest(query, { pipeId, cursor }, token);
+
+      if (!response || !response.data) {
+        console.warn('[PipefyService] getUpdatedCards: empty response — stopping.');
+        break;
+      }
+
+      const allCardsData = response.data.allCards;
+      if (!allCardsData) {
+        console.warn('[PipefyService] getUpdatedCards: allCards is null — stopping.');
+        break;
+      }
+
+      const pageCards = (allCardsData.edges || []).map(e => e.node);
+
+      // Stop paginating once all cards on this page are older than updatedSince
+      if (sinceDate && pageCards.length > 0) {
+        const allOlderThanSince = pageCards.every(c => new Date(c.updated_at) < sinceDate);
+        if (allOlderThanSince) {
+          // Add only the cards in this batch that are recent enough
+          const recentCards = pageCards.filter(c => new Date(c.updated_at) >= sinceDate);
+          allCards = allCards.concat(recentCards);
+          break;
+        }
+      }
+
       allCards = allCards.concat(pageCards);
-      hasPreviousPage = response.data.allCards.pageInfo.hasPreviousPage;
-      cursor = response.data.allCards.pageInfo.startCursor;
+      hasPreviousPage = allCardsData.pageInfo?.hasPreviousPage || false;
+      cursor = allCardsData.pageInfo?.startCursor || null;
       pagesFetched++;
+    }
+
+    // Final client-side filter by updatedSince
+    if (sinceDate) {
+      allCards = allCards.filter(c => new Date(c.updated_at) >= sinceDate);
     }
 
     return allCards;
   }
 
   /**
-   * Make GraphQL request to Pipefy
+   * Make GraphQL request to Pipefy.
+   * Resolve o token automaticamente via OAuth2 (conta de serviço).
+   * Se receber 401, invalida o cache e tenta uma vez com token novo.
+   *
+   * @param {string} query - GraphQL query string
+   * @param {object} variables - GraphQL variables
+   * @param {string|null} fallbackToken - Token do banco (usado como último recurso)
    */
-  async makeRequest(query, variables, token) {
-    try {
-      const response = await axios.post(
-        PIPEFY_API_URL,
-        { query, variables },
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
+  async makeRequest(query, variables, fallbackToken = null) {
+    const doRequest = async (token) => axios.post(
+      PIPEFY_API_URL,
+      { query, variables },
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
         }
-      );
+      }
+    );
+
+    try {
+      // Obtém token válido (cache → OAuth2 → env → banco)
+      const token = await getValidPipefyToken(fallbackToken);
+      let response;
+
+      try {
+        response = await doRequest(token);
+      } catch (err) {
+        // Se 401, invalida cache e tenta renovar uma vez
+        if (err.response?.status === 401) {
+          console.warn('[PipefyService] 401 recebido, renovando token...');
+          invalidateCache();
+          const freshToken = await getValidPipefyToken(fallbackToken);
+          response = await doRequest(freshToken);
+        } else {
+          throw err;
+        }
+      }
 
       if (response.data.errors) {
         throw new Error(response.data.errors[0].message);

@@ -278,6 +278,13 @@ function MainApp() {
                             }
                         });
                     }}
+                    onDelete={() => {
+                        // Navigate back to company selection after deletion
+                        setSelectedCompany(null);
+                        localStorage.removeItem('plin_company_id');
+                        setCurrentView('home');
+                        getData().then(freshData => setData(freshData));
+                    }}
                 />;
             case 'add-sale':
                 return <Forms type="add-sale" data={data} company={selectedCompany} onSuccess={() => {
@@ -290,13 +297,14 @@ function MainApp() {
                     updateUrl(selectedCompany.id, 'marketing');
                 }} />;
             case 'set-goals':
-                return <Forms type="set-goals" data={data} company={selectedCompany} onSuccess={() => {
+                return <Forms type="set-goals" data={data} company={selectedCompany} onSuccess={(returnTo) => {
                     setIsLoading(true);
                     getData().then(d => {
                         setData(d);
                         setIsLoading(false);
-                        setCurrentView('sales');
-                        updateUrl(selectedCompany.id, 'sales');
+                        const view = returnTo || 'sales';
+                        setCurrentView(view);
+                        updateUrl(selectedCompany.id, view);
                     });
                 }} />;
             case 'profile':

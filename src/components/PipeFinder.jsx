@@ -6,13 +6,12 @@ import { List } from 'lucide-react';
 
 const PIPEFY_API_URL = '/api/pipefy';
 
-export function PipeFinder({ token }) {
+export function PipeFinder() {
     const [pipes, setPipes] = useState([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
 
     const fetchPipes = async () => {
-        if (!token) return;
         setLoading(true);
         setError(null);
 
@@ -27,12 +26,10 @@ export function PipeFinder({ token }) {
         }`;
 
         try {
+            // No Authorization header — backend proxy uses PIPEFY_TOKEN env var as fallback
             const res = await fetch(PIPEFY_API_URL, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ query })
             });
             const json = await res.json();

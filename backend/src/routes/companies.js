@@ -92,15 +92,19 @@ router.get('/', async (req, res) => {
  */
 router.post('/', async (req, res) => {
     try {
-        const { name } = req.body;
+        const { name, cnpj, logo } = req.body;
 
         if (!name) {
             return res.status(400).json({ error: 'Company name is required' });
         }
 
+        const payload = { name };
+        if (cnpj !== undefined) payload.cnpj = cnpj;
+        if (logo !== undefined) payload.logo = logo;
+
         const { data, error } = await supabase
             .from('Company')
-            .upsert({ name }, { onConflict: 'name' })
+            .upsert(payload, { onConflict: 'name' })
             .select()
             .single();
 
@@ -120,11 +124,16 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
     try {
         const { id } = req.params;
-        const { name } = req.body;
+        const { name, cnpj, logo } = req.body;
+
+        const updates = {};
+        if (name !== undefined) updates.name = name;
+        if (cnpj !== undefined) updates.cnpj = cnpj;
+        if (logo !== undefined) updates.logo = logo;
 
         const { data, error } = await supabase
             .from('Company')
-            .update({ name })
+            .update(updates)
             .eq('id', id)
             .select()
             .single();
@@ -144,12 +153,31 @@ router.put('/:id', async (req, res) => {
 
 /**
  * DELETE /api/companies/:id
- * Delete a company
+ * Delete a company and ALL related records (cascade via service role)
  */
 router.delete('/:id', async (req, res) => {
     try {
         const { id } = req.params;
 
+        // Delete child records first to avoid FK constraint violations
+        const childDeletes = await Promise.all([
+            supabase.from('sales').delete().eq('company_id', id),
+            supabase.from('campaigns').delete().eq('company_id', id),
+            supabase.from('goals').delete().eq('company_id', id),
+            supabase.from('Metric').delete().eq('companyId', id),
+            supabase.from('Integration').delete().eq('companyId', id),
+            supabase.from('SyncLog').delete().eq('companyId', id),
+            supabase.from('CompanyUser').delete().eq('companyId', id),
+        ]);
+
+        // Log any child-delete errors (non-fatal — table might be empty)
+        childDeletes.forEach(({ error }, i) => {
+            if (error && error.code !== 'PGRST116') {
+                console.warn(`Child delete [${i}] warning:`, error.message);
+            }
+        });
+
+        // Now delete the company itself
         const { error } = await supabase
             .from('Company')
             .delete()
@@ -160,6 +188,76 @@ router.delete('/:id', async (req, res) => {
         res.json({ success: true, message: 'Company deleted successfully' });
     } catch (error) {
         console.error('Error deleting company:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+/**
+ * GET /api/companies/:id/users
+ * List users for a company
+ */
+router.get('/:id/users', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { data, error } = await supabase
+            .from('CompanyUser')
+            .select('*')
+            .eq('companyId', id)
+            .order('createdAt', { ascending: true });
+
+        // Table may not exist yet — return empty list gracefully
+        if (error && error.code === 'PGRST205') return res.json([]);
+        if (error) throw error;
+        res.json(data || []);
+    } catch (error) {
+        console.error('Error fetching company users:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+/**
+ * POST /api/companies/:id/users
+ * Add a user to a company
+ */
+router.post('/:id/users', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { email, role } = req.body;
+
+        if (!email) return res.status(400).json({ error: 'Email is required' });
+
+        const { data, error } = await supabase
+            .from('CompanyUser')
+            .upsert({ companyId: id, email, role: role || 'viewer' }, { onConflict: 'companyId,email' })
+            .select()
+            .single();
+
+        if (error) throw error;
+        res.status(201).json(data);
+    } catch (error) {
+        console.error('Error adding company user:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+/**
+ * DELETE /api/companies/:id/users/:email
+ * Remove a user from a company
+ */
+router.delete('/:id/users/:email', async (req, res) => {
+    try {
+        const { id, email } = req.params;
+
+        const { error } = await supabase
+            .from('CompanyUser')
+            .delete()
+            .eq('companyId', id)
+            .eq('email', decodeURIComponent(email));
+
+        if (error) throw error;
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Error removing company user:', error);
         res.status(500).json({ error: error.message });
     }
 });

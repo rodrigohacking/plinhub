@@ -1,9 +1,16 @@
 const express = require('express');
 const router = express.Router();
+const { createClient } = require('@supabase/supabase-js');
+
+const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY;
+const supabase = createClient(supabaseUrl, supabaseServiceKey, {
+    auth: { autoRefreshToken: false, persistSession: false }
+});
 
 /**
- * POST /api/invite
- * Sends an email invitation to a user.
+ * POST /api/invites
+ * Saves user to CompanyUser table AND sends a real Supabase auth invite email.
  * Body: { email, companyId, role, companyName }
  */
 router.post('/', async (req, res) => {
@@ -14,26 +21,44 @@ router.post('/', async (req, res) => {
     }
 
     try {
-        // SIMULATION: Sending email
-        console.log(`\n--- [MOCK EMAIL SERVICE] ---`);
-        console.log(`To: ${email}`);
-        console.log(`Subject: Convite para acessar ${companyName || 'PLIN HUB'}`);
-        console.log(`Body:`);
-        console.log(`Olá,`);
-        console.log(`Você foi convidado para acessar a organização ${companyName || 'no PLIN HUB'} com o perfil de acesso: ${role.toUpperCase()}.`);
-        console.log(`Acesse o sistema para continuar.`);
-        console.log(`--- [END MOCK EMAIL] ---\n`);
+        // 1. Upsert into CompanyUser table
+        const { error: dbError } = await supabase
+            .from('CompanyUser')
+            .upsert(
+                { companyId, email, role: role || 'viewer' },
+                { onConflict: 'companyId,email' }
+            );
 
-        // In a real implementation, we would use Resend or Nodemailer here.
-        // await resend.emails.send({ ... });
+        if (dbError) {
+            console.error('CompanyUser upsert error:', dbError);
+            // Non-fatal: continue with invite even if upsert has minor issues
+        }
 
-        // Simulate network delay
-        await new Promise(resolve => setTimeout(resolve, 500));
+        // 2. Send real Supabase auth invite (creates user + sends email with magic link)
+        const { data: inviteData, error: inviteError } = await supabase.auth.admin.inviteUserByEmail(email, {
+            data: {
+                companyId,
+                companyName: companyName || 'PLIN HUB',
+                role
+            },
+            redirectTo: process.env.FRONTEND_URL || 'http://localhost:5173'
+        });
 
-        res.json({ success: true, message: 'Invite sent successfully (Mock)' });
+        if (inviteError) {
+            // User might already exist — treat as soft error
+            console.warn('Supabase invite warning:', inviteError.message);
+            return res.json({
+                success: true,
+                message: `Acesso salvo. ${inviteError.message.includes('already') ? 'Usuário já possui conta.' : 'Email de convite não pôde ser enviado.'}`,
+                warning: inviteError.message
+            });
+        }
+
+        console.log(`[INVITE] Sent to ${email} for company ${companyName} (role: ${role})`);
+        res.json({ success: true, message: `Convite enviado para ${email}` });
     } catch (error) {
-        console.error('Error sending invite:', error);
-        res.status(500).json({ error: 'Failed to send invitation' });
+        console.error('Error in invite route:', error);
+        res.status(500).json({ error: error.message || 'Failed to send invitation' });
     }
 });
 

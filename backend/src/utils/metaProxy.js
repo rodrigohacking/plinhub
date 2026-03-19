@@ -1,90 +1,92 @@
-const { decrypt } = require('./encryption');
-const axios = require('axios');
+const metaAdsService = require('../services/metaAds.service');
+const { ensureValidMetaToken } = require('../services/metaToken.service');
 
-const META_API_URL = 'https://graph.facebook.com/v24.0';
+function clampDateStr(value) {
+    if (!value) return null;
+    return value.includes('T') ? value.split('T')[0] : value;
+}
 
-async function fetchLiveMetaCampaigns(adAccountId, encryptedToken, startDateStr, endDateStr) {
-    if (!encryptedToken || !adAccountId) return null;
+function addDays(dateStr, days) {
+    const d = new Date(`${dateStr}T00:00:00`);
+    d.setDate(d.getDate() + days);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+}
+
+async function fetchLiveMetaCampaigns(integration, startDateStr, endDateStr) {
+    if (!integration || !integration.metaAccessToken || !integration.metaAdAccountId) return null;
     try {
-        const token = decrypt(encryptedToken);
-        const actId = adAccountId.replace('act_', '');
+        const { accessToken } = await ensureValidMetaToken(integration);
+        if (!accessToken) return null;
 
-        let dateQuery = 'date_preset=maximum';
-        if (startDateStr && endDateStr) {
-            const startStr = startDateStr.split('T')[0];
-            const endStr = endDateStr.split('T')[0];
-            const timeRangeObj = { since: startStr, until: endStr };
-            dateQuery = `time_range=${encodeURIComponent(JSON.stringify(timeRangeObj))}`;
+        let startStr = clampDateStr(startDateStr) || clampDateStr(endDateStr);
+        let endStr = clampDateStr(endDateStr) || clampDateStr(startDateStr);
+
+        if (!startStr || !endStr) return null;
+
+        // Adjust for ad account timezone to avoid missing "today" data
+        try {
+            const tz = await metaAdsService.getAccountTimezone(integration.metaAdAccountId, accessToken);
+            const offsetVsBRT = metaAdsService.getTimezoneOffsetVsBRT(tz.timezone_offset_hours_utc);
+            if (offsetVsBRT > 0) {
+                endStr = addDays(endStr, 1);
+            }
+        } catch (e) {
+            // Silent fallback to provided dates
         }
 
-        const fields = 'id,name,start_time,stop_time,status,objective,insights.time_increment(1).limit(90){date_start,date_stop,spend,impressions,clicks,actions,cpc,cpm,reach}';
-        const query = `fields=${fields}&limit=500&${dateQuery}&access_token=${token}`;
-        
-        const url = `${META_API_URL}/act_${actId}/campaigns?${query}`;
-        console.log("Meta API URL:", url.replace(token, 'TOKEN'));
-        
-        const response = await axios.get(url, { timeout: 15000 });
-        const result = response.data;
+        const rows = await metaAdsService.getDailyInsights(
+            integration.metaAdAccountId,
+            accessToken,
+            { startDate: startStr, endDate: endStr }
+        );
 
-        if (result.error) throw new Error(result.error.message || 'Meta API Error');
+        if (!rows || rows.length === 0) return [];
 
-        const campaigns = result.data || [];
+        const byCampaign = new Map();
 
-        return campaigns.map(camp => {
-            const rawInsights = camp.insights?.data || [];
+        rows.forEach(r => {
+            const id = r.campaign_id || 'unknown';
+            if (!byCampaign.has(id)) {
+                byCampaign.set(id, {
+                    id, // expose as id for UI lookups
+                    campaignId: id,
+                    name: r.campaign_name || 'Unknown',
+                    start_date: r.date || null,
+                    end_date: r.date_stop || r.date || null,
+                    status: null,
+                    investment: 0,
+                    channel: 'Instagram/Facebook',
+                    impressions: 0,
+                    clicks: 0,
+                    leads: 0,
+                    dailyInsights: []
+                });
+            }
 
-            const dailyData = rawInsights.map(day => {
-                const actions = day.actions || [];
-
-                // Priority-based lead extraction (same priority as metaAds.service.js)
-                const leadTypes = [
-                    'lead',                              // Meta aggregate (most reliable)
-                    'on_facebook_lead',                  // Native lead form
-                    'onsite_web_lead',                   // Onsite web
-                    'offsite_conversion.fb_pixel_lead',  // Pixel conversion
-                    'onsite_conversion.lead_grouped',    // Grouped onsite
-                ];
-                let leads = 0;
-                for (const type of leadTypes) {
-                    const action = actions.find(a => a.action_type === type);
-                    if (action) { leads = parseInt(action.value, 10) || 0; break; }
-                }
-                // Last resort: any action containing 'lead' (max value)
-                if (leads === 0) {
-                    const customLeads = actions.filter(a =>
-                        a.action_type.toLowerCase().includes('lead')
-                    );
-                    if (customLeads.length > 0) {
-                        leads = Math.max(...customLeads.map(l => parseInt(l.value, 10) || 0));
-                    }
-                }
-
-                return {
-                    date: day.date_start,
-                    spend: parseFloat(day.spend || 0),
-                    impressions: parseInt(day.impressions || 0, 10),
-                    clicks: parseInt(day.clicks || 0, 10),
-                    reach: parseInt(day.reach || 0, 10),
-                    leads,
-                    conversions: 0
-                };
+            const entry = byCampaign.get(id);
+            entry.dailyInsights.push({
+                date: r.date,
+                spend: r.spend,
+                impressions: r.impressions,
+                clicks: r.clicks,
+                reach: r.reach,
+                leads: r.leads,
+                conversions: 0
             });
 
-            return {
-                campaignId: camp.id,
-                name: camp.name,
-                objective: camp.objective,
-                start_date: camp.start_time,
-                end_date: camp.stop_time,
-                status: camp.status,
-                investment: dailyData.reduce((acc, d) => acc + d.spend, 0),
-                channel: 'Instagram/Facebook',
-                impressions: dailyData.reduce((acc, d) => acc + d.impressions, 0),
-                clicks: dailyData.reduce((acc, d) => acc + d.clicks, 0),
-                leads: dailyData.reduce((acc, d) => acc + d.leads, 0),
-                dailyInsights: dailyData
-            };
+            entry.investment += r.spend || 0;
+            entry.impressions += r.impressions || 0;
+            entry.clicks += r.clicks || 0;
+            entry.leads += r.leads || 0;
+
+            if (!entry.start_date || (r.date && r.date < entry.start_date)) entry.start_date = r.date;
+            if (!entry.end_date || (r.date_stop && r.date_stop > entry.end_date)) entry.end_date = r.date_stop;
         });
+
+        return Array.from(byCampaign.values());
     } catch (e) {
         console.error("Meta Proxy Error:", e.response ? e.response.data : e.message);
         return null;

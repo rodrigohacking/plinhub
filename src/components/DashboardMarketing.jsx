@@ -4,17 +4,25 @@ import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
     LineChart, Line, Legend, Cell, PieChart, Pie
 } from 'recharts';
-import { DollarSign, UserPlus, Target, MousePointer, TrendingUp, Filter, Instagram, Globe, Search, Users, Ban, CircleDollarSign, PieChart as PieChartIcon, Leaf, RefreshCw, Activity } from 'lucide-react';
+import { DollarSign, UserPlus, Target, MousePointer, TrendingUp, TrendingDown, Minus, Filter, Instagram, Globe, Search, Users, Ban, CircleDollarSign, PieChart as PieChartIcon, Leaf, RefreshCw, Activity, ChevronDown, ChevronUp } from 'lucide-react';
 import { toast } from 'sonner';
 import { KPICard } from './KPICard';
+import { GoalProgress } from './GoalProgress';
 import { formatCurrency, formatNumber, formatPercent, cn } from '../lib/utils';
 import { DateRangeFilter, filterByDateRange, isDateInSelectedRange } from './DateRangeFilter';
+import { TOOLTIP_STYLE, GRID_PROPS, AXIS_TICK, AXIS_SHARED } from '../lib/chartTheme';
 
 export function DashboardMarketing({ company, data, onRefresh, dateRange, setDateRange }) {
     // dateRange comes from App.jsx (global persistence)
     const [activeTab, setActiveTab] = useState('geral');
     const [creativesTab, setCreativesTab] = useState('creatives'); // 'creatives' or 'campaigns'
     const [isSyncing, setIsSyncing] = useState(false);
+    const [showExtraCards, setShowExtraCards] = useState(() => {
+        try { return JSON.parse(localStorage.getItem('plin_mkt_extraCards') || 'false'); } catch { return false; }
+    });
+    const [showDetails, setShowDetails] = useState(() => {
+        try { return JSON.parse(localStorage.getItem('plin_mkt_showDetails') || 'false'); } catch { return false; }
+    });
 
     // Effective campaigns — sourced exclusively from Supabase DB (via data.campaigns)
     const effectiveCampaigns = useMemo(() => {
@@ -285,63 +293,74 @@ export function DashboardMarketing({ company, data, onRefresh, dateRange, setDat
         if (activeTab === 'geral') {
             // For insurance companies: Sum of specific 4 products
             // For non-insurance companies: Use 'all' label directly
-            if (true) { // Enable dynamic summing for all
-                const products = Array.from(new Set([...detectedProducts, 'condominial', 'rc_sindico', 'automovel', 'residencial']));
+            // Sum per product label (insurance products)
+            const products = Array.from(new Set([...detectedProducts, 'condominial', 'rc_sindico', 'automovel', 'residencial']));
 
-                products.forEach(pKey => {
-                    const pConfig = productMapping[pKey];
-                    if (!pConfig) return;
+            products.forEach(pKey => {
+                const pConfig = productMapping[pKey];
+                if (!pConfig) return;
 
-                    // Find latest metric for this product
-                    const row = (data.metrics || [])
-                        .filter(m => String(m.companyId || m.company_id) === String(company.id) && m.label === pConfig.dbLabel)
-                        .sort((a, b) => new Date(a.date) - new Date(b.date))
-                        .pop() || {};
+                // Find latest manual goal for this product (source='manual' excludes live Meta Ads data)
+                const row = (data.metrics || [])
+                    .filter(m => String(m.companyId || m.company_id) === String(company.id) && m.label === pConfig.dbLabel && m.source === 'manual')
+                    .sort((a, b) => new Date(a.date) - new Date(b.date))
+                    .pop() || {};
 
-                    targetSum.investment += (row.spend || 0);
-                    targetSum.sales += (row.cardsConverted || 0);
+                targetSum.investment += (row.spend || 0);
+                targetSum.sales += (row.cardsConverted || 0);
 
-                    // Calculate leads target for this product
-                    const pInvest = row.spend || 0;
-                    const pCpc = row.cpc || 0;
-                    const pLeads = (pInvest && pCpc) ? Math.round(pInvest / pCpc) : (row.cardsCreated || 0);
-                    targetSum.leads += pLeads;
-                });
+                const pInvest = row.spend || 0;
+                const pCpc = row.cpc || 0;
+                const pLeads = (pInvest && pCpc) ? Math.round(pInvest / pCpc) : (row.cardsCreated || 0);
+                targetSum.leads += pLeads;
+            });
 
-                // Average Target CPL (Weighted)
-                // Target CPL = Total Target Investment / Total Target Leads
-                weightedCplSum = targetSum.leads > 0 ? targetSum.investment / targetSum.leads : 0;
-            } else {
-                // Non-insurance company: Use 'all' label
+            // Fallback: if no product-specific goals found, try 'all' label (non-insurance companies)
+            if (targetSum.investment === 0) {
                 const row = (data.metrics || [])
                     .filter(m => String(m.companyId || m.company_id) === String(company.id) && m.label === 'all' && m.source === 'manual')
                     .sort((a, b) => new Date(a.date) - new Date(b.date))
                     .pop() || {};
 
                 targetSum.investment = row.spend || 0;
-                targetSum.sales = row.cardsConverted || 0;
+                if (!targetSum.sales) targetSum.sales = row.cardsConverted || 0;
                 const pCpc = row.cpc || 0;
-                targetSum.leads = (targetSum.investment && pCpc) ? Math.round(targetSum.investment / pCpc) : (row.cardsCreated || 0);
+                if (!targetSum.leads) targetSum.leads = (targetSum.investment && pCpc) ? Math.round(targetSum.investment / pCpc) : (row.cardsCreated || 0);
                 weightedCplSum = pCpc;
             }
 
-            // OVERRIDE: Prioritize Explicit Sales Goals (from Forms/LocalStorage) for 'geral'
+            // Average Target CPL (Weighted)
+            weightedCplSum = targetSum.leads > 0 ? targetSum.investment / targetSum.leads : weightedCplSum;
+
+            // OVERRIDE: Prioritize Explicit Sales Goals (from Forms/Supabase) for 'geral'
+            // Fallback: if no current-month goal, use the most recent saved goal
             if (activeTab === 'geral' && data.goals) {
                 const currentMonth = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }).slice(0, 7);
-                const salesGoal = data.goals.find(g => String(g.companyId || g.company_id) === String(company.id) && g.month === currentMonth);
+                const companyGoals = (data.goals || []).filter(g => String(g.companyId || g.company_id) === String(company.id));
+                const salesGoal = companyGoals.find(g => g.month === currentMonth)
+                    || companyGoals.sort((a, b) => (b.month || '').localeCompare(a.month || '')).at(0);
 
                 if (salesGoal) {
-                    // Force the explicit goals set in "Definir Metas"
                     if (salesGoal.deals) targetSum.sales = salesGoal.deals;
                     if (salesGoal.leads) targetSum.leads = salesGoal.leads;
                     if (salesGoal.revenue) targetSum.revenue = salesGoal.revenue;
+                    if (salesGoal.investment) targetSum.investment = salesGoal.investment;
+                    if (salesGoal.cpl || salesGoal.roi) weightedCplSum = salesGoal.cpl || salesGoal.roi;
                 }
             }
 
+            // localStorage fast-path: overrides DB values for instant display after saving goals
+            try {
+                const lsGoals = JSON.parse(localStorage.getItem(`plin_mkt_goals_${company.id}`) || '{}');
+                if (lsGoals.investment) targetSum.investment = lsGoals.investment;
+                if (lsGoals.cpl) weightedCplSum = lsGoals.cpl;
+                if (lsGoals.leads && !targetSum.leads) targetSum.leads = lsGoals.leads;
+            } catch (_) {}
+
         } else {
-            // Specific Product
+            // Specific Product — only manual/goal metrics (source='manual'), not live Meta Ads data
             const row = (data.metrics || [])
-                .filter(m => String(m.companyId || m.company_id) === String(company.id) && m.label === activeScope?.dbLabel)
+                .filter(m => String(m.companyId || m.company_id) === String(company.id) && m.label === activeScope?.dbLabel && m.source === 'manual')
                 .sort((a, b) => new Date(a.date) - new Date(b.date))
                 .pop() || {};
 
@@ -738,22 +757,51 @@ export function DashboardMarketing({ company, data, onRefresh, dateRange, setDat
         transition: { duration: 0.2 }
     };
 
+    const toggleExtraCards = () => {
+        const next = !showExtraCards;
+        setShowExtraCards(next);
+        localStorage.setItem('plin_mkt_extraCards', JSON.stringify(next));
+    };
+    const toggleDetails = () => {
+        const next = !showDetails;
+        setShowDetails(next);
+        localStorage.setItem('plin_mkt_showDetails', JSON.stringify(next));
+    };
+
+    // Badge de saúde calculado: proporcional ao dia do mês
+    const healthBadge = useMemo(() => {
+        if (!targets.revenue || targets.revenue === 0) return null;
+        const now = new Date();
+        const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+        const daysPassed = now.getDate();
+        const proportionalTarget = (targets.revenue / daysInMonth) * daysPassed;
+        const achievement = proportionalTarget > 0 ? (realized.volume / proportionalTarget) * 100 : null;
+        if (achievement === null) return null;
+        if (achievement >= 70) return { label: 'No Ritmo', color: 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' };
+        if (achievement >= 40) return { label: 'Atenção', color: 'bg-amber-500/15 text-amber-400 border border-amber-500/30' };
+        return { label: 'Abaixo', color: 'bg-red-500/15 text-red-400 border border-red-500/30' };
+    }, [targets.revenue, realized.volume]);
+
     return (
         <div className="space-y-8 pb-12 w-full max-w-full overflow-x-hidden">
             {/* 1. Header & Controls */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
                 <div>
-                    <h2 className="text-3xl font-black text-gray-900 dark:text-white tracking-tight">Marketing Performance</h2>
-                    <p className="text-gray-500 dark:text-gray-400">Acompanhamento estratégico de campanhas e conversão</p>
+                    <h2 className="text-3xl font-black text-[var(--text-primary)] tracking-tight">Marketing Performance</h2>
+                    <p className="text-[var(--text-secondary)]">Acompanhamento estratégico de campanhas e conversão</p>
                 </div>
                 <div className="flex items-center gap-3">
-
+                    {healthBadge && (
+                        <span className={cn('text-xs font-bold px-3 py-1.5 rounded-full', healthBadge.color)}>
+                            {healthBadge.label}
+                        </span>
+                    )}
                     <DateRangeFilter value={dateRange} onChange={setDateRange} />
                 </div>
             </div>
 
             {/* 2. Tabs Navigation */}
-            <div className="flex flex-wrap gap-2 p-1 bg-gray-100 dark:bg-white/5 rounded-xl w-full md:w-fit">
+            <div className="flex flex-wrap gap-2 p-1 bg-[var(--surface-raised)] rounded-xl w-full md:w-fit">
                 {TABS.map(tab => (
                     <button
                         key={tab.id}
@@ -761,8 +809,8 @@ export function DashboardMarketing({ company, data, onRefresh, dateRange, setDat
                         className={cn(
                             "px-4 py-2 text-sm font-bold rounded-lg transition-all duration-200",
                             activeTab === tab.id
-                                ? "bg-white dark:bg-[#222] text-gray-900 dark:text-white shadow-sm"
-                                : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                                ? "bg-[var(--surface-raised)] text-[var(--text-primary)] shadow-sm"
+                                : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
                         )}
                     >
                         {tab.label}
@@ -780,423 +828,375 @@ export function DashboardMarketing({ company, data, onRefresh, dateRange, setDat
                     className="space-y-6"
                 >
 
-                    {/* BLOCK 1: PERFORMANCE (ROI Highlight) */}
-                    <div className="bg-slate-900 rounded-2xl md:rounded-3xl p-5 sm:p-6 md:p-8 text-white shadow-2xl relative overflow-hidden">
-                        <div className="absolute top-0 right-0 w-96 h-96 bg-emerald-500/10 rounded-full -mr-32 -mt-32 blur-3xl"></div>
-                        <div className="relative z-10 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-                            <div>
-                                <h3 className="text-lg sm:text-2xl font-bold mb-1">Retorno sobre Investimento</h3>
-                                <p className="text-slate-400 text-sm">{activeTab === 'geral' ? 'Geral' : TABS.find(t => t.id === activeTab)?.label} ROI</p>
-                            </div>
-                            <div className="text-left sm:text-right">
-                                <span className={cn("text-3xl sm:text-4xl md:text-5xl font-black tracking-tighter", roi >= 0 ? "text-emerald-400" : "text-red-400")}>
-                                    {roi > 0 ? '+' : ''}{formatNumber(roi.toFixed(0))}%
-                                </span>
-                            </div>
+                    {/* ═══ ZONA 1: STATUS DO MÊS (Hero) ═══════════════════════════ */}
+                    <div className="bg-[var(--surface)] rounded-2xl border border-[var(--border)] overflow-hidden">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-[var(--border)]">
+                            {/* ROI */}
+                            {(() => {
+                                const isGood = roi >= 0;
+                                const Icon = roi > 5 ? TrendingUp : roi < -5 ? TrendingDown : Minus;
+                                const color = roi > 5 ? 'text-emerald-400' : roi < -5 ? 'text-red-400' : 'text-amber-400';
+                                const bg = roi > 5 ? 'bg-emerald-400/10' : roi < -5 ? 'bg-red-400/10' : 'bg-amber-400/10';
+                                return (
+                                    <div className="p-5 sm:p-7">
+                                        <p className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest mb-2">ROI do Mês</p>
+                                        <div className="flex items-end gap-3">
+                                            <span className={cn("text-4xl font-black tracking-tighter", color)}>
+                                                {roi > 0 ? '+' : ''}{formatNumber(roi.toFixed(0))}%
+                                            </span>
+                                            <span className={cn("inline-flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full mb-1", bg, color)}>
+                                                <Icon className="w-3 h-3" />
+                                                {roi > 5 ? 'Positivo' : roi < -5 ? 'Negativo' : 'Neutro'}
+                                            </span>
+                                        </div>
+                                        <p className="text-xs text-[var(--text-muted)] mt-2">Retorno sobre investimento</p>
+                                    </div>
+                                );
+                            })()}
+
+                            {/* Investimento Realizado */}
+                            {(() => {
+                                const pct = targets.investment > 0 ? (realized.investment / targets.investment) * 100 : null;
+                                const isGood = pct === null || pct >= 70;
+                                const Icon = isGood ? TrendingUp : pct >= 40 ? Minus : TrendingDown;
+                                const color = isGood ? 'text-emerald-400' : pct >= 40 ? 'text-amber-400' : 'text-red-400';
+                                const bg = isGood ? 'bg-emerald-400/10' : pct >= 40 ? 'bg-amber-400/10' : 'bg-red-400/10';
+                                return (
+                                    <div className="p-5 sm:p-7">
+                                        <p className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest mb-2">Investimento Realizado</p>
+                                        <div className="flex items-end gap-3 flex-wrap">
+                                            <span className="text-3xl font-black text-[var(--text-primary)] tracking-tight">
+                                                {formatCurrency(realized.investment)}
+                                            </span>
+                                            {pct !== null && (
+                                                <span className={cn("inline-flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full mb-1", bg, color)}>
+                                                    <Icon className="w-3 h-3" />
+                                                    {pct.toFixed(0)}%
+                                                </span>
+                                            )}
+                                        </div>
+                                        <p className="text-xs text-[var(--text-muted)] mt-2">
+                                            {targets.investment > 0 ? `Meta: ${formatCurrency(targets.investment)}` : 'Meta não definida'}
+                                        </p>
+                                    </div>
+                                );
+                            })()}
+
+                            {/* Volume em Apólices */}
+                            {(() => {
+                                const salesTarget = targets.sales;
+                                const pct = salesTarget > 0 ? (realized.sales / salesTarget) * 100 : null;
+                                const color = !pct || pct >= 70 ? 'text-emerald-400' : pct >= 40 ? 'text-amber-400' : 'text-red-400';
+                                const Icon = !pct || pct >= 70 ? TrendingUp : pct >= 40 ? Minus : TrendingDown;
+                                const bg = !pct || pct >= 70 ? 'bg-emerald-400/10' : pct >= 40 ? 'bg-amber-400/10' : 'bg-red-400/10';
+                                return (
+                                    <div className="p-5 sm:p-7">
+                                        <p className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest mb-2">Volume em Apólices</p>
+                                        <div className="flex items-end gap-3 flex-wrap">
+                                            <span className="text-3xl font-black text-[var(--text-primary)] tracking-tight">
+                                                {formatCurrency(realized.volume)}
+                                            </span>
+                                            <span className={cn("inline-flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full mb-1", bg, color)}>
+                                                <Icon className="w-3 h-3" />
+                                                {realized.sales} vendas
+                                            </span>
+                                        </div>
+                                        <p className="text-xs text-[var(--text-muted)] mt-2">Receita total via Meta Ads</p>
+                                    </div>
+                                );
+                            })()}
                         </div>
                     </div>
 
-                    {/* ADDITIONAL METRICS - Show in Geral tab for all companies */}
+                    {/* ═══ ZONA 2: MÉTRICAS ESSENCIAIS (5 cards) ══════════════════ */}
                     {activeTab === 'geral' && (
-                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-9 gap-3">
-                            {/* Investimento */}
-                            <div className="bg-white dark:bg-[#111] rounded-2xl border border-gray-100 dark:border-white/5 shadow-sm hover:shadow-md transition-all duration-200 hover:-translate-y-0.5 overflow-hidden">
-                                <div className="h-[3px] bg-gradient-to-r from-red-400 to-rose-500" />
-                                <div className="p-4">
-                                    <div className="flex items-center gap-2 mb-3">
-                                        <div className="w-7 h-7 rounded-lg bg-red-50 dark:bg-red-500/10 flex items-center justify-center flex-shrink-0">
-                                            <DollarSign className="w-3.5 h-3.5 text-red-500" />
+                        <div className="space-y-3">
+                            {/* 5 Essential Cards */}
+                            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                                {/* Investimento */}
+                                <div className="bg-[var(--surface)] rounded-2xl border border-[var(--border)] shadow-[var(--shadow-sm)] hover:shadow-[var(--shadow-md)] transition-all duration-200 hover:-translate-y-0.5">
+                                    <div className="p-4">
+                                        <div className="flex items-center gap-2 mb-3">
+                                            <DollarSign className="w-3.5 h-3.5 text-[var(--text-muted)] flex-shrink-0" />
+                                            <p className="text-[10px] font-semibold text-[var(--text-secondary)] uppercase tracking-wide leading-tight">Investimento</p>
                                         </div>
-                                        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide leading-tight">Investimento</p>
+                                        <p className="text-lg font-black text-[var(--text-primary)] truncate">{formatCurrency(realized.investment)}</p>
+                                        <GoalProgress actual={realized.investment} target={targets.investment} format="currency" />
                                     </div>
-                                    <p className="text-lg font-black text-gray-900 dark:text-white truncate" title={formatCurrency(realized.investment)}>
-                                        {formatCurrency(realized.investment)}
-                                    </p>
+                                </div>
+
+                                {/* Leads */}
+                                <div className="bg-[var(--surface)] rounded-2xl border border-[var(--border)] shadow-[var(--shadow-sm)] hover:shadow-[var(--shadow-md)] transition-all duration-200 hover:-translate-y-0.5">
+                                    <div className="p-4">
+                                        <div className="flex items-center gap-2 mb-3">
+                                            <UserPlus className="w-3.5 h-3.5 text-[var(--text-muted)] flex-shrink-0" />
+                                            <p className="text-[10px] font-semibold text-[var(--text-secondary)] uppercase tracking-wide leading-tight">Leads</p>
+                                        </div>
+                                        <p className="text-lg font-black text-[var(--text-primary)] truncate">{formatNumber(realized.leads)}</p>
+                                        <GoalProgress actual={realized.leads} target={targets.leads} format="number" />
+                                    </div>
+                                </div>
+
+                                {/* Custo por Lead (CPL) */}
+                                <div className="bg-[var(--surface)] rounded-2xl border border-[var(--border)] shadow-[var(--shadow-sm)] hover:shadow-[var(--shadow-md)] transition-all duration-200 hover:-translate-y-0.5">
+                                    <div className="p-4">
+                                        <div className="flex items-center gap-2 mb-3">
+                                            <Target className="w-3.5 h-3.5 text-[var(--text-muted)] flex-shrink-0" />
+                                            <p className="text-[10px] font-semibold text-[var(--text-secondary)] uppercase tracking-wide leading-tight">Custo por Lead (CPL)</p>
+                                        </div>
+                                        <p className="text-lg font-black text-[var(--text-primary)] truncate">{formatCurrency(realized.cpl)}</p>
+                                        <GoalProgress actual={realized.cpl} target={targets.cpl} format="currency" inverse />
+                                    </div>
+                                </div>
+
+                                {/* Vendas */}
+                                <div className="bg-[var(--surface)] rounded-2xl border border-[var(--border)] shadow-[var(--shadow-sm)] hover:shadow-[var(--shadow-md)] transition-all duration-200 hover:-translate-y-0.5">
+                                    <div className="p-4">
+                                        <div className="flex items-center gap-2 mb-3">
+                                            <Instagram className="w-3.5 h-3.5 text-[var(--text-muted)] flex-shrink-0" />
+                                            <p className="text-[10px] font-semibold text-[var(--text-secondary)] uppercase tracking-wide leading-tight">Vendas</p>
+                                        </div>
+                                        <p className="text-lg font-black text-[var(--text-primary)] truncate">{realized.sales}</p>
+                                        <p className="text-[10px] text-[var(--text-muted)] mt-1">via Meta Ads</p>
+                                    </div>
+                                </div>
+
+                                {/* Taxa de Conversão */}
+                                <div className="bg-[var(--surface)] rounded-2xl border border-[var(--border)] shadow-[var(--shadow-sm)] hover:shadow-[var(--shadow-md)] transition-all duration-200 hover:-translate-y-0.5">
+                                    <div className="p-4">
+                                        <div className="flex items-center gap-2 mb-3">
+                                            <Activity className="w-3.5 h-3.5 text-[var(--text-muted)] flex-shrink-0" />
+                                            <p className="text-[10px] font-semibold text-[var(--text-secondary)] uppercase tracking-wide leading-tight">Taxa de Conversão</p>
+                                        </div>
+                                        <p className="text-lg font-black text-[var(--text-primary)] truncate">{(realized.conversionRate || 0).toFixed(1)}%</p>
+                                        <p className="text-[10px] text-[var(--text-muted)] mt-1">Lead → Venda</p>
+                                    </div>
                                 </div>
                             </div>
 
-                            {/* Leads Gerados */}
-                            <div className="bg-white dark:bg-[#111] rounded-2xl border border-gray-100 dark:border-white/5 shadow-sm hover:shadow-md transition-all duration-200 hover:-translate-y-0.5 overflow-hidden">
-                                <div className="h-[3px] bg-gradient-to-r from-blue-400 to-blue-600" />
-                                <div className="p-4">
-                                    <div className="flex items-center gap-2 mb-3">
-                                        <div className="w-7 h-7 rounded-lg bg-blue-50 dark:bg-blue-500/10 flex items-center justify-center flex-shrink-0">
-                                            <UserPlus className="w-3.5 h-3.5 text-blue-500" />
+                            {/* Extra Cards (hidden by default) */}
+                            {showExtraCards && (
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                    {/* Leads Orgânicos */}
+                                    <div className="bg-[var(--surface)] rounded-2xl border border-[var(--border)] shadow-[var(--shadow-sm)] p-4">
+                                        <div className="flex items-center gap-2 mb-3">
+                                            <Leaf className="w-3.5 h-3.5 text-[var(--text-muted)] flex-shrink-0" />
+                                            <p className="text-[10px] font-semibold text-[var(--text-secondary)] uppercase tracking-wide leading-tight">Leads Orgânicos</p>
                                         </div>
-                                        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide leading-tight">Leads</p>
-                                    </div>
-                                    <p className="text-lg font-black text-gray-900 dark:text-white truncate" title={formatNumber(realized.leads)}>
-                                        {formatNumber(realized.leads)}
-                                    </p>
-                                </div>
-                            </div>
-
-                            {/* Leads Orgânicos */}
-                            <div className="bg-white dark:bg-[#111] rounded-2xl border border-gray-100 dark:border-white/5 shadow-sm hover:shadow-md transition-all duration-200 hover:-translate-y-0.5 overflow-hidden">
-                                <div className="h-[3px] bg-gradient-to-r from-green-400 to-emerald-500" />
-                                <div className="p-4">
-                                    <div className="flex items-center gap-2 mb-3">
-                                        <div className="w-7 h-7 rounded-lg bg-green-50 dark:bg-green-500/10 flex items-center justify-center flex-shrink-0">
-                                            <Leaf className="w-3.5 h-3.5 text-green-500" />
-                                        </div>
-                                        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide leading-tight">Leads Orgânicos</p>
-                                    </div>
-                                    <p className="text-lg font-black text-gray-900 dark:text-white truncate">
-                                        {(() => {
-                                            const organicLeads = data?.sales?.filter(s => {
+                                        <p className="text-lg font-black text-[var(--text-primary)] truncate">
+                                            {data?.sales?.filter(s => {
                                                 const isCurrentCompany = String(s.companyId || s.company_id) === String(company.id);
                                                 const isInRange = filterByDateRange([s], dateRange, 'createdAt').length > 0;
-                                                const hasOrganicTag = s.labels?.some(label =>
-                                                    label?.toUpperCase().includes('ORGÂNICO IG')
-                                                );
-                                                return isCurrentCompany && isInRange && hasOrganicTag;
-                                            }).length || 0;
-                                            return formatNumber(organicLeads);
-                                        })()}
-                                    </p>
-                                </div>
-                            </div>
+                                                return isCurrentCompany && isInRange && s.labels?.some(l => l?.toUpperCase().includes('ORGÂNICO IG'));
+                                            }).length || 0}
+                                        </p>
+                                    </div>
 
-                            {/* Custo por Lead */}
-                            <div className="bg-white dark:bg-[#111] rounded-2xl border border-gray-100 dark:border-white/5 shadow-sm hover:shadow-md transition-all duration-200 hover:-translate-y-0.5 overflow-hidden">
-                                <div className="h-[3px] bg-gradient-to-r from-emerald-400 to-teal-500" />
-                                <div className="p-4">
-                                    <div className="flex items-center gap-2 mb-3">
-                                        <div className="w-7 h-7 rounded-lg bg-emerald-50 dark:bg-emerald-500/10 flex items-center justify-center flex-shrink-0">
-                                            <Target className="w-3.5 h-3.5 text-emerald-500" />
+                                    {/* Custo de Aquisição (CAC) */}
+                                    <div className="bg-[var(--surface)] rounded-2xl border border-[var(--border)] shadow-[var(--shadow-sm)] p-4">
+                                        <div className="flex items-center gap-2 mb-3">
+                                            <Users className="w-3.5 h-3.5 text-[var(--text-muted)] flex-shrink-0" />
+                                            <p className="text-[10px] font-semibold text-[var(--text-secondary)] uppercase tracking-wide leading-tight">Custo de Aquisição</p>
                                         </div>
-                                        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide leading-tight">CPL</p>
+                                        <p className="text-lg font-black text-[var(--text-primary)] truncate">
+                                            {(() => {
+                                                const metaSales = data?.sales?.filter(s => {
+                                                    const isCurrentCompany = String(s.companyId || s.company_id) === String(company.id);
+                                                    const isInRange = filterByDateRange([s], dateRange, 'wonDate').length > 0;
+                                                    const isWon = s.status === 'won';
+                                                    const hasMetaTag = s.labels?.some(label => label?.toUpperCase().includes('META ADS'));
+                                                    return isCurrentCompany && isInRange && isWon && hasMetaTag;
+                                                }).length || 0;
+                                                return metaSales > 0 ? formatCurrency(realized.investment / metaSales) : formatCurrency(0);
+                                            })()}
+                                        </p>
                                     </div>
-                                    <p className="text-lg font-black text-gray-900 dark:text-white truncate" title={formatCurrency(realized.cpl)}>
-                                        {formatCurrency(realized.cpl)}
-                                    </p>
-                                </div>
-                            </div>
 
-                            {/* CAC */}
-                            <div className="bg-white dark:bg-[#111] rounded-2xl border border-gray-100 dark:border-white/5 shadow-sm hover:shadow-md transition-all duration-200 hover:-translate-y-0.5 overflow-hidden">
-                                <div className="h-[3px] bg-gradient-to-r from-pink-400 to-rose-500" />
-                                <div className="p-4">
-                                    <div className="flex items-center gap-2 mb-3">
-                                        <div className="w-7 h-7 rounded-lg bg-pink-50 dark:bg-pink-500/10 flex items-center justify-center flex-shrink-0">
-                                            <Users className="w-3.5 h-3.5 text-pink-500" />
+                                    {/* Retorno s/ Invest. */}
+                                    <div className="bg-[var(--surface)] rounded-2xl border border-[var(--border)] shadow-[var(--shadow-sm)] p-4">
+                                        <div className="flex items-center gap-2 mb-3">
+                                            <TrendingUp className="w-3.5 h-3.5 text-[var(--text-muted)] flex-shrink-0" />
+                                            <p className="text-[10px] font-semibold text-[var(--text-secondary)] uppercase tracking-wide leading-tight">Retorno s/ Invest.</p>
                                         </div>
-                                        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide leading-tight">CAC</p>
+                                        <p className="text-lg font-black text-[var(--text-primary)] truncate">{(realized.roi || 0).toFixed(1)}x</p>
                                     </div>
-                                    <p className="text-lg font-black text-gray-900 dark:text-white truncate">
-                                        {(() => {
-                                            const metaSales = data?.sales?.filter(s => {
-                                                const isCurrentCompany = String(s.companyId || s.company_id) === String(company.id);
-                                                const isInRange = filterByDateRange([s], dateRange, 'wonDate').length > 0;
-                                                const pName = s.phaseName ? s.phaseName.toLowerCase() : '';
-                                                const isWon = s.status === 'won' ||
-                                                    ['338889923', '338889934', '341604257'].includes(String(s.phaseId)) ||
-                                                    pName.includes('ganho') || pName.includes('fechado') || pName.includes('enviado ao cliente');
-                                                const hasMetaTag = s.labels?.some(label =>
-                                                    label?.toUpperCase().includes('META ADS') || label?.toUpperCase() === 'META ADS'
-                                                ) || [s.utm_source, s.utm_medium, s.utm_campaign].some(val => {
-                                                    const v = (val || '').toLowerCase();
-                                                    return v.includes('meta') || v.includes('facebook') || v.includes('instagram');
-                                                });
-                                                return isCurrentCompany && isInRange && isWon && hasMetaTag;
-                                            }).length || 0;
-                                            return metaSales > 0 ? formatCurrency(realized.investment / metaSales) : formatCurrency(0);
-                                        })()}
-                                    </p>
-                                    <p className="text-[10px] text-pink-400 font-medium mt-1">Custo Aquisição</p>
-                                </div>
-                            </div>
 
-                            {/* Vendas (Meta) */}
-                            <div className="bg-white dark:bg-[#111] rounded-2xl border border-gray-100 dark:border-white/5 shadow-sm hover:shadow-md transition-all duration-200 hover:-translate-y-0.5 overflow-hidden">
-                                <div className="h-[3px] bg-gradient-to-r from-purple-400 to-violet-500" />
-                                <div className="p-4">
-                                    <div className="flex items-center gap-2 mb-3">
-                                        <div className="w-7 h-7 rounded-lg bg-purple-50 dark:bg-purple-500/10 flex items-center justify-center flex-shrink-0">
-                                            <Instagram className="w-3.5 h-3.5 text-purple-500" />
+                                    {/* Perdas */}
+                                    <div className="bg-[var(--surface)] rounded-2xl border border-[var(--border)] shadow-[var(--shadow-sm)] p-4">
+                                        <div className="flex items-center gap-2 mb-3">
+                                            <Ban className="w-3.5 h-3.5 text-[var(--text-muted)] flex-shrink-0" />
+                                            <p className="text-[10px] font-semibold text-[var(--text-secondary)] uppercase tracking-wide leading-tight">Perdas</p>
                                         </div>
-                                        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide leading-tight">Vendas</p>
-                                    </div>
-                                    <p className="text-lg font-black text-gray-900 dark:text-white truncate">
-                                        {data?.sales?.filter(s => {
-                                            const isCurrentCompany = String(s.companyId || s.company_id) === String(company.id);
-                                            const isInRange = filterByDateRange([s], dateRange, 'wonDate').length > 0;
-                                            const pName = s.phaseName ? s.phaseName.toLowerCase() : '';
-                                            const isWon = s.status === 'won' ||
-                                                ['338889923', '338889934', '341604257'].includes(String(s.phaseId)) ||
-                                                pName.includes('ganho') || pName.includes('fechado') || pName.includes('enviado ao cliente');
-                                            const hasMetaTag = s.labels?.some(label =>
-                                                label?.toUpperCase().includes('META ADS') || label?.toUpperCase() === 'META ADS'
-                                            ) || [s.utm_source, s.utm_medium, s.utm_campaign].some(val => {
-                                                const v = (val || '').toLowerCase();
-                                                return v.includes('meta') || v.includes('facebook') || v.includes('instagram');
-                                            });
-                                            return isCurrentCompany && isInRange && isWon && hasMetaTag;
-                                        }).length || 0}
-                                    </p>
-                                </div>
-                            </div>
-
-                            {/* ROI */}
-                            <div className="bg-white dark:bg-[#111] rounded-2xl border border-gray-100 dark:border-white/5 shadow-sm hover:shadow-md transition-all duration-200 hover:-translate-y-0.5 overflow-hidden">
-                                <div className="h-[3px] bg-gradient-to-r from-violet-400 to-indigo-500" />
-                                <div className="p-4">
-                                    <div className="flex items-center gap-2 mb-3">
-                                        <div className="w-7 h-7 rounded-lg bg-violet-50 dark:bg-violet-500/10 flex items-center justify-center flex-shrink-0">
-                                            <TrendingUp className="w-3.5 h-3.5 text-violet-500" />
-                                        </div>
-                                        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide leading-tight">Retorno s/ Invest.</p>
-                                    </div>
-                                    <p className="text-lg font-black text-gray-900 dark:text-white truncate" title={`${(realized.roi || 0).toFixed(1)}x`}>
-                                        {(realized.roi || 0).toFixed(1)}x
-                                    </p>
-                                </div>
-                            </div>
-
-                            {/* Taxa de Conversão */}
-                            <div className="bg-white dark:bg-[#111] rounded-2xl border border-gray-100 dark:border-white/5 shadow-sm hover:shadow-md transition-all duration-200 hover:-translate-y-0.5 overflow-hidden">
-                                <div className="h-[3px] bg-gradient-to-r from-indigo-400 to-blue-500" />
-                                <div className="p-4">
-                                    <div className="flex items-center gap-2 mb-3">
-                                        <div className="w-7 h-7 rounded-lg bg-indigo-50 dark:bg-indigo-500/10 flex items-center justify-center flex-shrink-0">
-                                            <Activity className="w-3.5 h-3.5 text-indigo-500" />
-                                        </div>
-                                        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide leading-tight">Tx. Conversão</p>
-                                    </div>
-                                    <p className="text-lg font-black text-gray-900 dark:text-white truncate" title={`${(realized.conversionRate || 0).toFixed(1)}%`}>
-                                        {(realized.conversionRate || 0).toFixed(1)}%
-                                    </p>
-                                </div>
-                            </div>
-
-                            {/* Leads Perdidos */}
-                            <div className="bg-white dark:bg-[#111] rounded-2xl border border-gray-100 dark:border-white/5 shadow-sm hover:shadow-md transition-all duration-200 hover:-translate-y-0.5 overflow-hidden">
-                                <div className="h-[3px] bg-gradient-to-r from-red-400 to-orange-500" />
-                                <div className="p-4">
-                                    <div className="flex items-center gap-2 mb-3">
-                                        <div className="w-7 h-7 rounded-lg bg-red-50 dark:bg-red-500/10 flex items-center justify-center flex-shrink-0">
-                                            <Ban className="w-3.5 h-3.5 text-red-500" />
-                                        </div>
-                                        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide leading-tight">Perdidos</p>
-                                    </div>
-                                    <p className="text-lg font-black text-red-500">
-                                        {realized.lost}
-                                    </p>
-                                    <p className="text-[10px] text-red-400 font-medium mt-1">
-                                        Churn: {realized.leads > 0 ? ((realized.lost / realized.leads) * 100).toFixed(1) : 0}%
-                                    </p>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Grid wrapper for Funil & Top Criativos - ONLY VISIBLE IN GERAL TAB */}
-                    {activeTab === 'geral' && (
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
-                            {/* Funil de Conversão */}
-                            <div className="bg-white dark:bg-[#111] p-8 rounded-3xl shadow-xl border border-gray-100 dark:border-white/5">
-                                <div className="flex items-center gap-3 mb-6">
-                                    <div className="p-2 bg-purple-50 dark:bg-purple-900/20 rounded-lg text-purple-600">
-                                        <Filter className="w-6 h-6" />
-                                    </div>
-                                    <h3 className="text-xl font-bold text-gray-900 dark:text-white">Funil de Conversão</h3>
-                                </div>
-                                <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">Eficiência de cada etapa do marketing</p>
-
-                                <div className="space-y-4">
-                                    {/* Impressões */}
-                                    <div className="p-4 bg-gray-50 dark:bg-white/5 rounded-xl flex justify-between items-center">
-                                        <span className="text-sm font-medium text-gray-600 dark:text-gray-300">Impressões</span>
-                                        <span className="text-xl font-bold text-gray-900 dark:text-white">{formatNumber(realized.impressions || 0)}</span>
-                                    </div>
-
-                                    {/* Cliques */}
-                                    <div className="p-4 bg-gray-50 dark:bg-white/5 rounded-xl">
-                                        <div className="flex justify-between items-center">
-                                            <span className="text-sm font-medium text-gray-600 dark:text-gray-300">Cliques</span>
-                                            <span className="text-xl font-bold text-gray-900 dark:text-white">{formatNumber(realized.clicks || 0)}</span>
-                                        </div>
-                                        <p className="text-xs text-gray-400 mt-1 text-right">
-                                            CTR: {realized.impressions > 0 ? ((realized.clicks / realized.impressions) * 100).toFixed(2) : 0}%
+                                        <p className="text-lg font-black text-red-500 truncate">{realized.lost}</p>
+                                        <p className="text-[10px] text-red-400 font-medium mt-1">
+                                            {realized.leads > 0 ? ((realized.lost / realized.leads) * 100).toFixed(1) : 0}% dos leads
                                         </p>
                                     </div>
                                 </div>
-                            </div>
+                            )}
 
-                            {/* Top Criativos */}
-                            <div className="bg-white dark:bg-[#111] p-8 rounded-3xl shadow-xl border border-gray-100 dark:border-white/5">
-                                <div className="flex items-center gap-3 mb-6">
-                                    <div className="p-2 bg-pink-50 dark:bg-pink-900/20 rounded-lg text-pink-600">
-                                        <TrendingUp className="w-6 h-6" />
-                                    </div>
-                                    <h3 className="text-xl font-bold text-gray-900 dark:text-white">Top Criativos</h3>
+                            {/* Toggle extra cards */}
+                            <button
+                                onClick={toggleExtraCards}
+                                className="flex items-center gap-1.5 text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
+                            >
+                                {showExtraCards ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                                {showExtraCards ? 'Ocultar indicadores extras' : 'Mostrar todos os indicadores'}
+                            </button>
+                        </div>
+                    )}
+
+                    {/* ═══ ZONA 3: DETALHAMENTO (colapsável) ══════════════════════ */}
+                    {activeTab === 'geral' && (
+                        <div className="rounded-2xl border border-[var(--border)] overflow-hidden">
+                            <button
+                                onClick={toggleDetails}
+                                className="w-full flex items-center justify-between px-5 py-4 bg-[var(--surface)] hover:bg-[var(--surface-raised)] transition-colors"
+                            >
+                                <div className="flex items-center gap-3">
+                                    <Filter className="w-4 h-4 text-[var(--text-muted)]" />
+                                    <span className="text-sm font-semibold text-[var(--text-primary)]">Funil de Conversão & Top Criativos</span>
+                                    <span className="text-[10px] font-medium text-[var(--text-muted)] bg-[var(--surface-raised)] px-2 py-0.5 rounded-full">Detalhamento</span>
                                 </div>
-                                <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">Anúncios que geraram receita</p>
+                                {showDetails ? <ChevronUp className="w-4 h-4 text-[var(--text-muted)]" /> : <ChevronDown className="w-4 h-4 text-[var(--text-muted)]" />}
+                            </button>
 
-                                <div className="flex gap-4 mb-6">
-                                    <button
-                                        onClick={() => setCreativesTab('creatives')}
-                                        className={cn(
-                                            "px-4 py-2 rounded-lg text-sm font-medium transition-colors",
-                                            creativesTab === 'creatives'
-                                                ? "bg-gray-100 dark:bg-white/5 text-gray-700 dark:text-gray-300 border-b-2 border-blue-500"
-                                                : "text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/5"
-                                        )}
-                                    >
-                                        Criativos
-                                    </button>
-                                    <button
-                                        onClick={() => setCreativesTab('campaigns')}
-                                        className={cn(
-                                            "px-4 py-2 rounded-lg text-sm font-medium transition-colors",
-                                            creativesTab === 'campaigns'
-                                                ? "bg-gray-100 dark:bg-white/5 text-gray-700 dark:text-gray-300 border-b-2 border-blue-500"
-                                                : "text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/5"
-                                        )}
-                                    >
-                                        Campanhas
-                                    </button>
-                                </div>
-
-                                {topPerformers.length > 0 ? (
-                                    <div className="space-y-4">
-                                        {topPerformers.map((item, index) => (
-                                            <div key={index} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-white/5 rounded-xl">
-                                                <div className="flex items-center gap-3">
-                                                    <div className="w-8 h-8 flex items-center justify-center bg-white dark:bg-white/10 rounded-full font-bold text-sm text-gray-500">
-                                                        #{index + 1}
-                                                    </div>
-                                                    <div>
-                                                        <p className="font-bold text-gray-900 dark:text-white text-sm line-clamp-1" title={item.name}>
-                                                            {item.name}
-                                                        </p>
-                                                        <p className="text-xs text-gray-400">{item.count} venda{item.count !== 1 ? 's' : ''}</p>
-                                                    </div>
+                            {showDetails && (
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 p-5 bg-[var(--surface)] border-t border-[var(--border)]">
+                                    {/* Funil de Conversão */}
+                                    <div>
+                                        <p className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wide mb-4">Funil de Conversão</p>
+                                        <div className="space-y-3">
+                                            <div className="p-4 bg-[var(--surface-raised)] rounded-xl flex justify-between items-center">
+                                                <span className="text-sm font-medium text-[var(--text-secondary)]">Impressões</span>
+                                                <span className="text-xl font-bold text-[var(--text-primary)]">{formatNumber(realized.impressions || 0)}</span>
+                                            </div>
+                                            <div className="p-4 bg-[var(--surface-raised)] rounded-xl">
+                                                <div className="flex justify-between items-center">
+                                                    <span className="text-sm font-medium text-[var(--text-secondary)]">Cliques</span>
+                                                    <span className="text-xl font-bold text-[var(--text-primary)]">{formatNumber(realized.clicks || 0)}</span>
                                                 </div>
-                                                <p className="font-bold text-emerald-600 text-sm whitespace-nowrap">
-                                                    {formatCurrency(item.revenue)}
+                                                <p className="text-xs text-[var(--text-muted)] mt-1 text-right">
+                                                    Taxa de Clique (CTR): {realized.impressions > 0 ? ((realized.clicks / realized.impressions) * 100).toFixed(2) : 0}%
                                                 </p>
                                             </div>
-                                        ))}
+                                            <div className="p-4 bg-[var(--surface-raised)] rounded-xl flex justify-between items-center">
+                                                <span className="text-sm font-medium text-[var(--text-secondary)]">Leads Gerados</span>
+                                                <span className="text-xl font-bold text-[var(--text-primary)]">{formatNumber(realized.leads || 0)}</span>
+                                            </div>
+                                            <div className="p-4 bg-[var(--surface-raised)] rounded-xl flex justify-between items-center">
+                                                <span className="text-sm font-medium text-emerald-400">Vendas Fechadas</span>
+                                                <span className="text-xl font-bold text-emerald-400">{realized.sales || 0}</span>
+                                            </div>
+                                        </div>
                                     </div>
-                                ) : (
-                                    <div className="mt-6 flex flex-col items-center justify-center h-32 bg-gray-50 dark:bg-white/5 rounded-xl">
-                                        <Instagram className="w-12 h-12 text-gray-300 dark:text-gray-600 mb-2" />
-                                        <p className="text-sm text-gray-400 dark:text-gray-500">
-                                            {creativesTab === 'creatives'
-                                                ? 'Nenhum criativo com vendas no período'
-                                                : 'Nenhuma campanha com vendas no período'}
-                                        </p>
+
+                                    {/* Top Criativos */}
+                                    <div>
+                                        <div className="flex items-center justify-between mb-4">
+                                            <p className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wide">Top Criativos</p>
+                                            <div className="flex gap-2">
+                                                <button
+                                                    onClick={() => setCreativesTab('creatives')}
+                                                    className={cn("px-3 py-1 rounded-lg text-xs font-medium transition-colors", creativesTab === 'creatives' ? "bg-[var(--surface-raised)] text-[var(--text-primary)] border-b-2 border-blue-500" : "text-[var(--text-secondary)] hover:bg-[var(--surface-raised)]")}
+                                                >Criativos</button>
+                                                <button
+                                                    onClick={() => setCreativesTab('campaigns')}
+                                                    className={cn("px-3 py-1 rounded-lg text-xs font-medium transition-colors", creativesTab === 'campaigns' ? "bg-[var(--surface-raised)] text-[var(--text-primary)] border-b-2 border-blue-500" : "text-[var(--text-secondary)] hover:bg-[var(--surface-raised)]")}
+                                                >Campanhas</button>
+                                            </div>
+                                        </div>
+                                        {topPerformers.length > 0 ? (
+                                            <div className="space-y-3">
+                                                {topPerformers.map((item, index) => (
+                                                    <div key={index} className="flex items-center justify-between p-3 bg-[var(--surface-raised)] rounded-xl">
+                                                        <div className="flex items-center gap-3">
+                                                            <div className="w-7 h-7 flex items-center justify-center bg-[var(--surface)] rounded-full font-bold text-xs text-[var(--text-secondary)]">#{index + 1}</div>
+                                                            <div>
+                                                                <p className="font-bold text-[var(--text-primary)] text-sm line-clamp-1" title={item.name}>{item.name}</p>
+                                                                <p className="text-xs text-[var(--text-muted)]">{item.count} venda{item.count !== 1 ? 's' : ''}</p>
+                                                            </div>
+                                                        </div>
+                                                        <p className="font-bold text-emerald-400 text-sm whitespace-nowrap">{formatCurrency(item.revenue)}</p>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        ) : (
+                                            <div className="flex flex-col items-center justify-center h-32 bg-[var(--surface-raised)] rounded-xl">
+                                                <Instagram className="w-10 h-10 text-[var(--text-muted)] mb-2" />
+                                                <p className="text-sm text-[var(--text-secondary)]">Nenhum dado disponível</p>
+                                            </div>
+                                        )}
                                     </div>
-                                )}
-                            </div>
+                                </div>
+                            )}
                         </div>
                     )}
 
-
+                    {/* ═══ ZONA 2B: INVESTIMENTO & EFICIÊNCIA (detalhes operacionais) ═ */}
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
                         {/* BLOCK 2: INVESTIMENTO */}
-                        <div className="bg-white dark:bg-[#111] p-8 rounded-3xl shadow-xl border border-gray-100 dark:border-white/5 relative overflow-hidden">
+                        <div className="bg-[var(--surface)] p-4 sm:p-6 md:p-8 rounded-2xl border border-[var(--border)] relative overflow-hidden">
                             <div className="flex items-center gap-3 mb-6">
-                                <div className="p-2 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-blue-600">
-                                    <DollarSign className="w-6 h-6" />
-                                </div>
-                                <h3 className="text-xl font-bold text-gray-900 dark:text-white">Investimento & Resultados</h3>
+                                <div className="text-[var(--text-muted)]"><DollarSign className="w-6 h-6" /></div>
+                                <h3 className="text-xl font-bold text-[var(--text-primary)]">Investimento & Resultados</h3>
                             </div>
-
-                            <div className="grid grid-cols-2 gap-y-8 gap-x-4">
-                                {/* Meta vs Realizado - Investimento */}
-                                <div className="col-span-2 flex items-center justify-between p-4 bg-gray-50 dark:bg-white/5 rounded-2xl">
+                            <div className="space-y-4">
+                                <div className="flex items-center justify-between p-4 bg-[var(--surface-raised)] rounded-2xl">
                                     <div>
-                                        <p className="text-xs font-bold text-gray-400 uppercase mb-1">Investimento Realizado</p>
-                                        <p className="text-2xl font-black text-gray-900 dark:text-white">{formatCurrency(realized.investment)}</p>
+                                        <p className="text-xs font-bold text-[var(--text-secondary)] uppercase mb-1">Investimento Realizado</p>
+                                        <p className="text-2xl font-black text-[var(--text-primary)]">{formatCurrency(realized.investment)}</p>
                                     </div>
                                     <div className="text-right">
-                                        <p className="text-xs font-bold text-gray-400 uppercase mb-1">Meta</p>
-                                        <p className="text-xl font-bold text-gray-500">{formatCurrency(targets.investment)}</p>
+                                        <p className="text-xs font-bold text-[var(--text-secondary)] uppercase mb-1">Meta</p>
+                                        <p className="text-xl font-bold text-[var(--text-secondary)]">{formatCurrency(targets.investment)}</p>
                                     </div>
-                                    <div className="text-right pl-4 border-l border-gray-200 dark:border-white/10">
-                                        <p className="text-xs font-bold text-gray-400 uppercase mb-1">Atingimento</p>
+                                    <div className="text-right pl-4 border-l border-[var(--border)]">
+                                        <p className="text-xs font-bold text-[var(--text-secondary)] uppercase mb-1">Atingimento</p>
                                         <span className={cn("text-lg font-black", investmentPrc > 100 ? "text-red-500" : "text-emerald-500")}>
                                             {investmentPrc.toFixed(0)}%
                                         </span>
                                     </div>
                                 </div>
-
-                                {/* Leads */}
-                                <div>
-                                    <p className="text-xs font-bold text-gray-400 uppercase mb-1">Leads Gerados</p>
-                                    <p className="text-3xl font-black text-gray-900 dark:text-white">{realized.leads}</p>
-                                    <p className="text-xs text-gray-400 mt-1">Meta: {targets.leads}</p>
-                                </div>
-
-                                {/* Vendas */}
-                                <div>
-                                    <p className="text-xs font-bold text-gray-400 uppercase mb-1">Vendas Fechadas</p>
-                                    <p className="text-3xl font-black text-emerald-600">{realized.sales}</p>
-                                    <p className="text-xs text-gray-400 mt-1">Meta: {targets.sales}</p>
-                                </div>
-
-                                {/* Qualificados */}
-                                <div className="col-span-2 pt-4 border-t border-gray-100 dark:border-white/5">
-                                    <div className="flex justify-between items-center">
-                                        <p className="text-sm font-bold text-gray-600 dark:text-gray-300">Leads Qualificados</p>
-                                        <p className="text-xl font-black text-purple-600 dark:text-purple-400">{realized.qualified}</p>
+                                {/* Leads e Vendas — grid 2 cols */}
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="p-3 bg-[var(--surface-raised)] rounded-xl">
+                                        <p className="text-xs font-bold text-[var(--text-secondary)] uppercase mb-1">Leads — Meta</p>
+                                        <p className="text-xl font-black text-[var(--text-primary)]">{realized.leads} <span className="text-sm font-medium text-[var(--text-muted)]">/ {targets.leads}</span></p>
+                                    </div>
+                                    <div className="p-3 bg-[var(--surface-raised)] rounded-xl">
+                                        <p className="text-xs font-bold text-[var(--text-secondary)] uppercase mb-1">Vendas — Meta</p>
+                                        <p className="text-xl font-black text-emerald-400">{realized.sales} <span className="text-sm font-medium text-[var(--text-muted)]">/ {targets.sales}</span></p>
                                     </div>
                                 </div>
                             </div>
                         </div>
 
                         {/* BLOCK 3: EFICIÊNCIA (CPL) */}
-                        <div className="bg-white dark:bg-[#111] p-8 rounded-3xl shadow-xl border border-gray-100 dark:border-white/5 relative overflow-hidden">
+                        <div className="bg-[var(--surface)] p-4 sm:p-6 md:p-8 rounded-2xl border border-[var(--border)] relative overflow-hidden">
                             <div className="flex items-center gap-3 mb-6">
-                                <div className="p-2 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg text-emerald-600">
-                                    <Target className="w-6 h-6" />
-                                </div>
-                                <h3 className="text-xl font-bold text-gray-900 dark:text-white">Eficiência (CPL)</h3>
+                                <div className="text-[var(--text-muted)]"><Target className="w-6 h-6" /></div>
+                                <h3 className="text-xl font-bold text-[var(--text-primary)]">Eficiência — Custo por Lead (CPL)</h3>
                             </div>
-
                             <div className="grid grid-cols-1 gap-6">
-                                {/* CPL Gauge / Comparison */}
-                                <div className="p-4 bg-gray-50 dark:bg-white/5 rounded-2xl flex justify-between items-center">
+                                <div className="p-4 bg-[var(--surface-raised)] rounded-2xl flex justify-between items-center">
                                     <div>
-                                        <p className="text-xs font-bold text-gray-400 uppercase mb-1">CPL Realizado</p>
-                                        <p className="text-3xl font-black text-gray-900 dark:text-white">{formatCurrency(realized.cpl)}</p>
+                                        <p className="text-xs font-bold text-[var(--text-secondary)] uppercase mb-1">CPL Realizado</p>
+                                        <p className="text-3xl font-black text-[var(--text-primary)]">{formatCurrency(realized.cpl)}</p>
                                     </div>
                                     <div className="text-right">
-                                        <p className="text-xs font-bold text-gray-400 uppercase mb-1">Meta CPL</p>
-                                        <p className="text-xl font-bold text-gray-500">{formatCurrency(targets.cpl)}</p>
+                                        <p className="text-xs font-bold text-[var(--text-secondary)] uppercase mb-1">Meta CPL</p>
+                                        <p className="text-xl font-bold text-[var(--text-secondary)]">{formatCurrency(targets.cpl)}</p>
                                     </div>
                                 </div>
 
                                 {/* Volume Vendas */}
-                                <div className="p-4 bg-emerald-50/50 dark:bg-emerald-900/10 rounded-2xl border border-emerald-100 dark:border-white/5">
+                                <div className="p-4 bg-emerald-500/5 rounded-2xl border border-emerald-500/20">
                                     <p className="text-xs font-bold text-emerald-600/70 uppercase mb-2">
                                         {company?.name?.toLowerCase().includes('apolar') ? 'Volume Total em Contratos' : 'Volume Total em Apólices'}
                                     </p>
-                                    <p className="text-3xl font-black text-emerald-600 dark:text-emerald-400">{formatCurrency(realized.volume)}</p>
+                                    <p className="text-3xl font-black text-emerald-400">{formatCurrency(realized.volume)}</p>
                                     <p className="text-xs text-emerald-600/60 mt-1">Meta: {formatCurrency(targets.revenue)}</p>
-                                </div>
-
-                                {/* Atingimento Text */}
-                                <div className="pt-2">
-                                    <div className="flex justify-between text-sm mb-1">
-                                        <span className="text-gray-500">Atingimento da Meta de Custo</span>
-                                        <span className={cn("font-bold", realized.cpl <= targets.cpl ? "text-emerald-500" : "text-red-500")}>
-                                            {targets.cpl ? ((realized.cpl / targets.cpl) * 100).toFixed(0) : 0}%
-                                        </span>
-                                    </div>
-                                    <div className="w-full h-2 bg-gray-100 dark:bg-white/10 rounded-full overflow-hidden">
-                                        <div
-                                            className={cn("h-full rounded-full", realized.cpl <= targets.cpl ? "bg-emerald-500" : "bg-red-500")}
-                                            style={{ width: `${Math.min(targets.cpl ? (realized.cpl / targets.cpl) * 100 : 0, 100)}%` }}
-                                        ></div>
-                                    </div>
-                                    <p className="text-xs text-gray-400 mt-2">
-                                        {realized.cpl <= targets.cpl ? "Dentro da meta! 🚀" : "Acima da meta (Atenção) ⚠️"}
-                                    </p>
                                 </div>
                             </div>
                         </div>
@@ -1204,7 +1204,7 @@ export function DashboardMarketing({ company, data, onRefresh, dateRange, setDat
                     </div>
 
                     {/* Placeholder for future detailed charts */}
-                    <div className="text-center text-xs text-gray-400 pt-8 opacity-50">
+                    <div className="text-center text-xs text-[var(--text-muted)] pt-8 opacity-50">
                         Dados filtrados para: {TABS.find(t => t.id === activeTab)?.label}
                     </div>
 

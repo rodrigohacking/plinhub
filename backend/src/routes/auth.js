@@ -5,6 +5,7 @@ const FacebookStrategy = require('passport-facebook').Strategy;
 const { encrypt } = require('../utils/encryption');
 const supabase = require('../utils/supabase'); // Changed from prisma
 const metaAdsService = require('../services/metaAds.service');
+const { exchangeForLongLivedToken } = require('../services/metaToken.service');
 
 // Configure Facebook Strategy
 passport.use(new FacebookStrategy({
@@ -53,12 +54,19 @@ router.get('/meta/callback',
     passport.authenticate('facebook', { failureRedirect: '/auth/meta/error' }),
     async (req, res) => {
         try {
-            const { accessToken } = req.user;
+            const { accessToken: shortToken } = req.user;
             const companyId = req.session.companyId;
 
             if (!companyId) {
                 throw new Error('Company ID not found in session');
             }
+
+            // Exchange for long-lived token to avoid frequent re-auth
+            const exchange = await exchangeForLongLivedToken(shortToken);
+            const accessToken = exchange.accessToken || shortToken;
+            const tokenExpiry = exchange.expiresIn
+                ? new Date(Date.now() + exchange.expiresIn * 1000).toISOString()
+                : new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString();
 
             // Get ad accounts
             const adAccounts = await metaAdsService.getAdAccounts(accessToken);
@@ -88,7 +96,7 @@ router.get('/meta/callback',
                 metaAccountName: adAccount.name,
                 metaBusinessId: adAccount.business?.id,
                 metaStatus: adAccount.account_status === 1 ? 'active' : 'restricted',
-                metaTokenExpiry: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000), // 60 days
+                metaTokenExpiry: tokenExpiry,
                 isActive: true,
                 updatedAt: new Date()
             };

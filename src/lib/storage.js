@@ -45,10 +45,16 @@ export async function saveCompanyConfig(companyConfig) {
         let companyResponse;
 
         try {
+            const companyPayload = {
+                name: companyConfig.name,
+                cnpj: companyConfig.cnpj || '',
+                logo: companyConfig.logo || ''
+            };
+
             companyResponse = await fetch(url, {
                 method: fetchMethod,
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: companyConfig.name })
+                body: JSON.stringify(companyPayload)
             });
 
             if (!companyResponse.ok) {
@@ -67,7 +73,7 @@ export async function saveCompanyConfig(companyConfig) {
                             companyResponse = await fetch(url, {
                                 method: 'PUT',
                                 headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ name: companyConfig.name })
+                                body: JSON.stringify(companyPayload)
                             });
                         } else {
                             throw new Error(`Failed to save company (Duplicate): ${errText}`);
@@ -89,14 +95,14 @@ export async function saveCompanyConfig(companyConfig) {
         const company = await companyResponse.json();
         const realId = company.id;
 
-        if (companyConfig.pipefyPipeId || companyConfig.pipefyToken) {
+        // Save Pipefy integration (token comes from backend env — not sent from frontend)
+        if (companyConfig.pipefyPipeId || companyConfig.pipefyOrgId) {
             const pipeRes = await fetch(`/api/integrations/${realId}/pipefy`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     pipefyOrgId: companyConfig.pipefyOrgId,
                     pipefyPipeId: companyConfig.pipefyPipeId,
-                    pipefyToken: companyConfig.pipefyToken,
                     settings: {
                         wonPhase: companyConfig.wonPhase,
                         wonPhaseId: companyConfig.wonPhaseId,
@@ -112,13 +118,13 @@ export async function saveCompanyConfig(companyConfig) {
             if (!pipeRes.ok) console.warn("Pipefy Integration Save Warning:", await pipeRes.text());
         }
 
-        if (companyConfig.metaAdAccountId || companyConfig.metaToken) {
+        // Save Meta integration (token comes from backend env — not sent from frontend)
+        if (companyConfig.metaAdAccountId) {
             const metaRes = await fetch(`/api/integrations/${realId}/meta`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    metaAdAccountId: companyConfig.metaAdAccountId,
-                    metaToken: companyConfig.metaToken
+                    metaAdAccountId: companyConfig.metaAdAccountId
                 })
             });
             if (!metaRes.ok) console.warn("Meta Integration Save Warning:", await metaRes.text());
@@ -339,7 +345,7 @@ export async function getData(range = 'this-month') {
             } else {
                 const fetchedGoals = (goalsData || []).map(g => ({
                     companyId: g.company_id,
-                    month: g.month,
+                    month: `${g.year}-${String(g.month).padStart(2, '0')}`, // Convert integer month → "YYYY-MM"
                     year: g.year,
                     revenue: g.sales_goal || 0,
                     deals: g.sales_count_goal || 0,
@@ -347,6 +353,7 @@ export async function getData(range = 'this-month') {
                     ticket: g.ticket_goal || 0,
                     investment: g.investment_goal || 0,
                     roi: g.roi_goal || 0,
+                    cpl: g.roi_goal || 0, // roi_goal column repurposed for CPL target
                     created_at: g.created_at
                 }));
 

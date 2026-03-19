@@ -54,7 +54,7 @@ router.post('/', async (req, res) => {
         // Use backend supabase client (admin privileges usually)
         const { error } = await supabase
             .from('Metric')
-            .upsert(metric, { onConflict: 'companyId, source, date, label' });
+            .upsert(metric, { onConflict: 'companyId,date,source,label' });
 
         if (error) throw new Error(error.message);
 

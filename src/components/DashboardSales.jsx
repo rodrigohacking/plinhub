@@ -354,25 +354,25 @@ export function DashboardSales({ company, data, dateRange, setDateRange }) {
     return (
         <div className="space-y-8 animate-in fade-in duration-500 pb-12">
             {/* Header with Filter */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-gray-100 pb-0">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-[var(--border)] pb-0">
                 <div>
-                    <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Vendas</h1>
+                    <h1 className="text-2xl font-bold text-[var(--text-primary)]">Vendas</h1>
                     <div className="flex gap-6 text-sm mt-4">
                         <button
                             onClick={() => handleTabChange('geral')}
-                            className={`font-semibold pb-4 px-1 border-b-2 transition-colors ${activeTab === 'geral' ? 'text-[#FD295E] border-[#FD295E]' : 'text-gray-500 dark:text-gray-400 border-transparent hover:text-gray-800 dark:hover:text-gray-200'}`}
+                            className={`font-semibold pb-4 px-1 border-b-2 transition-colors ${activeTab === 'geral' ? 'text-[#FD295E] border-[#FD295E]' : 'text-[var(--text-secondary)] border-transparent hover:text-[var(--text-primary)]'}`}
                         >
                             Geral
                         </button>
                         <button
                             onClick={() => handleTabChange('sdr')}
-                            className={`font-semibold pb-4 px-1 border-b-2 transition-colors ${activeTab === 'sdr' ? 'text-[#FD295E] border-[#FD295E]' : 'text-gray-500 dark:text-gray-400 border-transparent hover:text-gray-800 dark:hover:text-gray-200'}`}
+                            className={`font-semibold pb-4 px-1 border-b-2 transition-colors ${activeTab === 'sdr' ? 'text-[#FD295E] border-[#FD295E]' : 'text-[var(--text-secondary)] border-transparent hover:text-[var(--text-primary)]'}`}
                         >
-                            SDR
+                            Vendedores
                         </button>
                         <button
                             onClick={() => handleTabChange('metas')}
-                            className={`font-semibold pb-4 px-1 border-b-2 transition-colors ${activeTab === 'metas' ? 'text-[#FD295E] border-[#FD295E]' : 'text-gray-500 dark:text-gray-400 border-transparent hover:text-gray-800 dark:hover:text-gray-200'}`}
+                            className={`font-semibold pb-4 px-1 border-b-2 transition-colors ${activeTab === 'metas' ? 'text-[#FD295E] border-[#FD295E]' : 'text-[var(--text-secondary)] border-transparent hover:text-[var(--text-primary)]'}`}
                         >
                             Metas
                         </button>
@@ -421,22 +421,19 @@ export function DashboardSales({ company, data, dateRange, setDateRange }) {
                             const daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
                             return (
-                                <div className="bg-gradient-to-r from-[#FD295E] to-indigo-700 rounded-2xl md:rounded-3xl p-5 sm:p-8 md:p-10 text-white shadow-2xl relative overflow-hidden">
-                                    <div className="absolute top-0 right-0 w-96 h-96 bg-white/10 rounded-full -mr-32 -mt-32 blur-3xl"></div>
-                                    <div className="relative z-10 flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4">
-                                        <div>
-                                            <h2 className="text-2xl sm:text-3xl md:text-4xl font-black mb-2 tracking-tight text-white">Metas de {capitalizedMonth}</h2>
-                                            <p className="text-white/80 text-sm sm:text-base md:text-lg">Acompanhamento em tempo real da performance do time.</p>
+                                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                                    <div>
+                                        <h2 className="text-2xl sm:text-3xl font-black tracking-tight text-[var(--text-primary)]">Metas de {capitalizedMonth}</h2>
+                                        <p className="text-[var(--text-secondary)] text-sm mt-1">Acompanhamento em tempo real da performance do time.</p>
+                                    </div>
+                                    <div className="flex gap-2 sm:gap-3">
+                                        <div className="bg-[var(--surface-raised)] px-4 py-2 rounded-xl border border-[var(--border)]">
+                                            <p className="text-[10px] uppercase font-bold text-[var(--text-muted)] mb-0.5">Dias Restantes</p>
+                                            <p className="text-lg font-black text-[var(--text-primary)]">{daysRemaining}d</p>
                                         </div>
-                                        <div className="flex gap-2 sm:gap-4">
-                                            <div className="bg-white/10 backdrop-blur-md px-3 sm:px-6 py-2 sm:py-3 rounded-xl sm:rounded-2xl border border-white/20">
-                                                <p className="text-xs uppercase font-bold text-white/70 mb-1">Dias Restantes</p>
-                                                <p className="text-lg sm:text-2xl font-black text-white">{daysRemaining}d</p>
-                                            </div>
-                                            <div className="bg-white/10 backdrop-blur-md px-3 sm:px-6 py-2 sm:py-3 rounded-xl sm:rounded-2xl border border-white/20">
-                                                <p className="text-xs uppercase font-bold text-white/70 mb-1">Status Geral</p>
-                                                <p className="text-lg sm:text-2xl font-black text-emerald-300">Na Meta 🚀</p>
-                                            </div>
+                                        <div className="bg-[var(--surface-raised)] px-4 py-2 rounded-xl border border-[var(--border)]">
+                                            <p className="text-[10px] uppercase font-bold text-[var(--text-muted)] mb-0.5">Status Geral</p>
+                                            <p className="text-lg font-black text-[var(--success)]">Na Meta</p>
                                         </div>
                                     </div>
                                 </div>
@@ -446,15 +443,13 @@ export function DashboardSales({ company, data, dateRange, setDateRange }) {
                         {/* Main Goals Grid */}
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-8">
                             {/* Revenue Goal */}
-                            <div className="bg-white dark:bg-[#111] p-5 sm:p-6 md:p-8 rounded-2xl md:rounded-3xl shadow-xl border border-gray-100 dark:border-white/5 relative overflow-hidden group hover:shadow-2xl transition-all duration-300">
+                            <div className="bg-[var(--surface)] p-5 sm:p-6 rounded-xl border border-[var(--border)] transition-colors duration-200">
                                 <div className="flex justify-between items-start mb-6">
                                     <div>
-                                        <h3 className="text-xl font-bold text-gray-900 dark:text-white">Meta de Faturamento</h3>
-                                        <p className="text-gray-500 dark:text-gray-400">Mês Atual</p>
+                                        <h3 className="text-xl font-bold text-[var(--text-primary)]">Meta de Faturamento</h3>
+                                        <p className="text-[var(--text-secondary)]">Mês Atual</p>
                                     </div>
-                                    <div className="p-3 bg-[#FD295E]/10 rounded-xl text-[#FD295E]">
-                                        <Target className="w-6 h-6" />
-                                    </div>
+                                    <Target className="w-5 h-5 text-[var(--text-muted)]" />
                                 </div>
 
                                 <div className="flex flex-col items-center gap-4">
@@ -482,27 +477,25 @@ export function DashboardSales({ company, data, dateRange, setDateRange }) {
                                     </div>
                                     <div className="flex-1 space-y-4">
                                         <div>
-                                            <p className="text-xs font-bold text-gray-400 uppercase">Realizado</p>
-                                            <p className="text-xl font-black text-gray-900 dark:text-white">{formatCurrency(metrics.wonValue)}</p>
+                                            <p className="text-xs font-bold text-[var(--text-muted)] uppercase">Realizado</p>
+                                            <p className="text-xl font-black text-[var(--text-primary)]">{formatCurrency(metrics.wonValue)}</p>
                                         </div>
                                         <div>
-                                            <p className="text-xs font-bold text-gray-400 uppercase">Meta</p>
-                                            <p className="text-xl font-black text-gray-300 dark:text-gray-600">{formatCurrency(metrics.goals.revenue)}</p>
+                                            <p className="text-xs font-bold text-[var(--text-muted)] uppercase">Meta</p>
+                                            <p className="text-xl font-black text-[var(--text-muted)]">{formatCurrency(metrics.goals.revenue)}</p>
                                         </div>
                                     </div>
                                 </div>
                             </div>
 
                             {/* Deals Goal */}
-                            <div className="bg-white dark:bg-[#111] p-5 sm:p-6 md:p-8 rounded-2xl md:rounded-3xl shadow-xl border border-gray-100 dark:border-white/5 relative overflow-hidden group hover:shadow-2xl transition-all duration-300">
+                            <div className="bg-[var(--surface)] p-5 sm:p-6 rounded-xl border border-[var(--border)] transition-colors duration-200">
                                 <div className="flex justify-between items-start mb-6">
                                     <div>
-                                        <h3 className="text-xl font-bold text-gray-900 dark:text-white">Meta de Volume</h3>
-                                        <p className="text-gray-500 dark:text-gray-400">Vendas Fechadas</p>
+                                        <h3 className="text-xl font-bold text-[var(--text-primary)]">Meta de Volume</h3>
+                                        <p className="text-[var(--text-secondary)]">Vendas Fechadas</p>
                                     </div>
-                                    <div className="p-3 bg-emerald-50 rounded-xl text-emerald-600">
-                                        <CircleDollarSign className="w-6 h-6" />
-                                    </div>
+                                    <CircleDollarSign className="w-5 h-5 text-[var(--text-muted)]" />
                                 </div>
 
                                 <div className="flex flex-col items-center gap-4">
@@ -530,27 +523,25 @@ export function DashboardSales({ company, data, dateRange, setDateRange }) {
                                     </div>
                                     <div className="flex-1 space-y-4">
                                         <div>
-                                            <p className="text-xs font-bold text-gray-400 uppercase">Realizado</p>
-                                            <p className="text-xl font-black text-gray-900 dark:text-white">{metrics.wonCount} <span className="text-sm text-gray-400 font-medium">vendas</span></p>
+                                            <p className="text-xs font-bold text-[var(--text-muted)] uppercase">Realizado</p>
+                                            <p className="text-xl font-black text-[var(--text-primary)]">{metrics.wonCount} <span className="text-sm text-[var(--text-muted)] font-medium">vendas</span></p>
                                         </div>
                                         <div>
-                                            <p className="text-xs font-bold text-gray-400 uppercase">Meta</p>
-                                            <p className="text-xl font-black text-gray-300 dark:text-gray-600">{metrics.goals.deals} <span className="text-sm text-gray-200 dark:text-gray-700 font-medium">vendas</span></p>
+                                            <p className="text-xs font-bold text-[var(--text-muted)] uppercase">Meta</p>
+                                            <p className="text-xl font-black text-[var(--text-muted)]">{metrics.goals.deals} <span className="text-sm text-[var(--text-muted)] font-medium">vendas</span></p>
                                         </div>
                                     </div>
                                 </div>
                             </div>
 
                             {/* Leads Goal */}
-                            <div className="bg-white dark:bg-[#111] p-5 sm:p-6 md:p-8 rounded-2xl md:rounded-3xl shadow-xl border border-gray-100 dark:border-white/5 relative overflow-hidden group hover:shadow-2xl transition-all duration-300">
+                            <div className="bg-[var(--surface)] p-5 sm:p-6 rounded-xl border border-[var(--border)] transition-colors duration-200">
                                 <div className="flex justify-between items-start mb-6">
                                     <div>
-                                        <h3 className="text-xl font-bold text-gray-900 dark:text-white">Meta de Leads</h3>
-                                        <p className="text-gray-500 dark:text-gray-400">Marketing</p>
+                                        <h3 className="text-xl font-bold text-[var(--text-primary)]">Meta de Leads</h3>
+                                        <p className="text-[var(--text-secondary)]">Marketing</p>
                                     </div>
-                                    <div className="p-3 bg-purple-50 rounded-xl text-purple-600">
-                                        <Users className="w-6 h-6" />
-                                    </div>
+                                    <Users className="w-5 h-5 text-[var(--text-muted)]" />
                                 </div>
 
                                 <div className="flex flex-col items-center gap-4">
@@ -578,12 +569,12 @@ export function DashboardSales({ company, data, dateRange, setDateRange }) {
                                     </div>
                                     <div className="flex-1 space-y-4">
                                         <div>
-                                            <p className="text-xs font-bold text-gray-400 uppercase">Realizado</p>
-                                            <p className="text-xl font-black text-gray-900 dark:text-white">{metrics.leadsCreatedCount} <span className="text-sm text-gray-400 font-medium">leads</span></p>
+                                            <p className="text-xs font-bold text-[var(--text-muted)] uppercase">Realizado</p>
+                                            <p className="text-xl font-black text-[var(--text-primary)]">{metrics.leadsCreatedCount} <span className="text-sm text-[var(--text-muted)] font-medium">leads</span></p>
                                         </div>
                                         <div>
-                                            <p className="text-xs font-bold text-gray-400 uppercase">Meta</p>
-                                            <p className="text-xl font-black text-gray-300 dark:text-gray-600">{metrics.goals.leads} <span className="text-sm text-gray-200 dark:text-gray-700 font-medium">leads</span></p>
+                                            <p className="text-xs font-bold text-[var(--text-muted)] uppercase">Meta</p>
+                                            <p className="text-xl font-black text-[var(--text-muted)]">{metrics.goals.leads} <span className="text-sm text-[var(--text-muted)] font-medium">leads</span></p>
                                         </div>
                                     </div>
                                 </div>
@@ -591,9 +582,9 @@ export function DashboardSales({ company, data, dateRange, setDateRange }) {
                         </div>
 
                         {/* Team Goals */}
-                        <div className="bg-white dark:bg-[#111] p-4 sm:p-6 md:p-8 rounded-2xl md:rounded-3xl shadow-xl border border-gray-100 dark:border-white/5">
+                        <div className="bg-[var(--surface)] p-4 sm:p-6 md:p-8 rounded-2xl border border-[var(--border)]">
                             <div className="flex justify-between items-center mb-8">
-                                <h3 className="text-xl font-bold text-gray-900 dark:text-white">Performance do Time vs Meta</h3>
+                                <h3 className="text-xl font-bold text-[var(--text-primary)]">Performance do Time vs Meta</h3>
                                 <button onClick={() => handleTabChange('sdr')} className="text-sm font-bold text-[#FD295E] hover:text-[#e11d48]">Ver Detalhes</button>
                             </div>
 
@@ -611,20 +602,20 @@ export function DashboardSales({ company, data, dateRange, setDateRange }) {
                                         <div key={idx} className="group">
                                             <div className="flex justify-between items-end mb-2">
                                                 <div className="flex items-center gap-3">
-                                                    <div className="w-10 h-10 rounded-full bg-gray-100 dark:bg-white/10 flex items-center justify-center font-bold text-gray-600 dark:text-gray-300">
+                                                    <div className="w-10 h-10 rounded-full bg-[var(--surface-raised)] flex items-center justify-center font-bold text-[var(--text-secondary)]">
                                                         {sdr.name?.charAt(0) || '?'}
                                                     </div>
                                                     <div>
-                                                        <p className="font-bold text-gray-900 dark:text-white">{sdr.name}</p>
-                                                        <p className="text-xs text-gray-500 dark:text-gray-400">{formatCurrency(sdr.wonValue)} realizado</p>
+                                                        <p className="font-bold text-[var(--text-primary)]">{sdr.name}</p>
+                                                        <p className="text-xs text-[var(--text-secondary)]">{formatCurrency(sdr.wonValue)} realizado</p>
                                                     </div>
                                                 </div>
                                                 <div className="text-right">
-                                                    <span className="font-black text-gray-900 dark:text-white">{percent.toFixed(0)}%</span>
-                                                    <p className="text-[10px] text-gray-400 font-bold uppercase">meta: {formatCurrency(individualGoal)}</p>
+                                                    <span className="font-black text-[var(--text-primary)]">{percent.toFixed(0)}%</span>
+                                                    <p className="text-[10px] text-[var(--text-muted)] font-bold uppercase">meta: {formatCurrency(individualGoal)}</p>
                                                 </div>
                                             </div>
-                                            <div className="h-3 w-full bg-gray-100 dark:bg-white/5 rounded-full overflow-hidden">
+                                            <div className="h-3 w-full bg-[var(--surface-raised)] rounded-full overflow-hidden">
                                                 <div
                                                     className="h-full bg-[#FD295E] rounded-full shadow-[0_0_10px_rgba(253,41,94,0.4)] transition-all duration-1000 group-hover:bg-[#e11d48]"
                                                     style={{ width: `${visualPercent}%` }}

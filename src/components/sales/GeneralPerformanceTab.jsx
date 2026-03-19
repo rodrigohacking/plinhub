@@ -3,6 +3,8 @@ import { motion } from 'framer-motion';
 import { ResponsiveContainer, BarChart, CartesianGrid, XAxis, YAxis, Tooltip, Bar, PieChart, Pie, Cell, Legend } from 'recharts';
 import { Target, Users, CircleDollarSign, Ban, BarChart as BarChartIcon, ChevronLeft, ChevronRight } from 'lucide-react';
 import { formatCurrency, formatNumber, formatPercent } from '../../lib/utils';
+import { GoalProgress } from '../GoalProgress';
+import { TOOLTIP_STYLE, GRID_PROPS, AXIS_TICK, AXIS_SHARED } from '../../lib/chartTheme';
 
 export const GeneralPerformanceTab = memo(function GeneralPerformanceTab({ metrics, company, tabVariants, filteredDeals, createdDeals, isMobile }) {
     const [filterChannel, setFilterChannel] = useState('all');
@@ -72,46 +74,44 @@ export const GeneralPerformanceTab = memo(function GeneralPerformanceTab({ metri
             exit="exit"
             className="space-y-8"
         >
-            {/* 1. Hero Banner (Premium - Geral) */}
-            <div className="bg-gradient-to-r from-blue-600 to-indigo-900 rounded-2xl md:rounded-3xl p-5 sm:p-8 md:p-10 text-white shadow-2xl relative overflow-hidden">
-                <div className="absolute top-0 right-0 w-96 h-96 bg-white/10 rounded-full -mr-32 -mt-32 blur-3xl"></div>
-                <div className="relative z-10 flex flex-col md:flex-row justify-between items-end gap-4">
-                    <div>
-                        <h2 className="text-2xl sm:text-3xl md:text-4xl font-black mb-2 tracking-tight text-white">Visão Geral</h2>
-                        <p className="text-blue-100 text-sm sm:text-base md:text-lg">Resumo estratégico e métricas principais.</p>
-                    </div>
-                </div>
+            {/* 1. Hero Banner */}
+            <div>
+                <h2 className="text-2xl sm:text-3xl font-black tracking-tight text-[var(--text-primary)]">Visão Geral</h2>
+                <p className="text-[var(--text-secondary)] text-sm mt-1">Resumo estratégico e métricas principais.</p>
             </div>
 
             {/* 2. Premium KPI Grid */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 md:gap-6">
                 {/* Card 1: Entraram */}
-                <div className="bg-card p-4 sm:p-6 md:p-8 rounded-2xl md:rounded-3xl shadow-xl border border-border relative overflow-hidden group hover:shadow-2xl transition-all duration-300">
+                <div className="bg-[var(--surface)] p-4 sm:p-6 rounded-xl border border-[var(--border)] transition-colors duration-200">
                     <div className="flex justify-between items-start mb-3 sm:mb-6">
                         <div>
                             <p className="text-muted-foreground text-xs sm:text-sm font-medium mb-1">Leads Entraram</p>
                             <h3 className="text-2xl sm:text-3xl md:text-4xl font-black text-foreground">{metrics.leadsCreatedCount}</h3>
                         </div>
-                        <div className="p-2 sm:p-3 bg-blue-500/10 rounded-xl sm:rounded-2xl text-blue-600 dark:text-blue-500">
-                            <Target className="w-4 h-4 sm:w-6 sm:h-6" />
-                        </div>
+                        <Target className="w-4 h-4 sm:w-5 sm:h-5 text-[var(--text-muted)] flex-shrink-0" />
                     </div>
-                    <div className="w-full bg-muted h-1 rounded-full overflow-hidden">
-                        <div className="h-full bg-blue-500 w-full"></div>
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-2 sm:mt-3 font-bold uppercase">Oportunidades</p>
+                    {metrics.goals?.leads > 0
+                        ? <GoalProgress actual={metrics.leadsCreatedCount} target={metrics.goals.leads} format="number" />
+                        : (
+                            <>
+                                <div className="w-full bg-muted h-1 rounded-full overflow-hidden">
+                                    <div className="h-full bg-blue-500 w-full"></div>
+                                </div>
+                                <p className="text-xs text-muted-foreground mt-2 sm:mt-3 font-bold uppercase">Oportunidades</p>
+                            </>
+                        )
+                    }
                 </div>
 
                 {/* Card 2: Qualificados */}
-                <div className="bg-card p-4 sm:p-6 md:p-8 rounded-2xl md:rounded-3xl shadow-xl border border-border relative overflow-hidden group hover:shadow-2xl transition-all duration-300">
+                <div className="bg-[var(--surface)] p-4 sm:p-6 rounded-xl border border-[var(--border)] transition-colors duration-200">
                     <div className="flex justify-between items-start mb-3 sm:mb-6">
                         <div>
                             <p className="text-muted-foreground text-xs sm:text-sm font-medium mb-1">Qualificados</p>
-                            <h3 className="text-2xl sm:text-3xl md:text-4xl font-black text-indigo-600 dark:text-indigo-400">{metrics.qualifiedCount}</h3>
+                            <h3 className="text-2xl sm:text-3xl md:text-4xl font-black text-indigo-400">{metrics.qualifiedCount}</h3>
                         </div>
-                        <div className="p-2 sm:p-3 bg-indigo-500/10 rounded-xl sm:rounded-2xl text-indigo-600 dark:text-indigo-500">
-                            <Users className="w-4 h-4 sm:w-6 sm:h-6" />
-                        </div>
+                        <Users className="w-4 h-4 sm:w-5 sm:h-5 text-[var(--text-muted)] flex-shrink-0" />
                     </div>
                     <div className="w-full bg-muted h-1 rounded-full overflow-hidden">
                         <div className="h-full bg-indigo-500 shadow-lg" style={{ width: `${(metrics.qualifiedCount / (metrics.leadsCreatedCount || 1)) * 100}%` }}></div>
@@ -122,33 +122,36 @@ export const GeneralPerformanceTab = memo(function GeneralPerformanceTab({ metri
                 </div>
 
                 {/* Card 3: Vendas */}
-                <div className="bg-card p-4 sm:p-6 md:p-8 rounded-2xl md:rounded-3xl shadow-xl border border-border relative overflow-hidden group hover:shadow-2xl transition-all duration-300">
+                <div className="bg-[var(--surface)] p-4 sm:p-6 rounded-xl border border-[var(--border)] transition-colors duration-200">
                     <div className="flex justify-between items-start mb-3 sm:mb-6">
                         <div>
                             <p className="text-muted-foreground text-xs sm:text-sm font-medium mb-1">Vendas Fechadas</p>
-                            <h3 className="text-2xl sm:text-3xl md:text-4xl font-black text-green-600 dark:text-green-400">{metrics.wonCount}</h3>
+                            <h3 className="text-2xl sm:text-3xl md:text-4xl font-black text-green-400">{metrics.wonCount}</h3>
                         </div>
-                        <div className="p-2 sm:p-3 bg-green-500/10 rounded-xl sm:rounded-2xl text-green-600 dark:text-green-500">
-                            <CircleDollarSign className="w-4 h-4 sm:w-6 sm:h-6" />
-                        </div>
+                        <CircleDollarSign className="w-4 h-4 sm:w-5 sm:h-5 text-[var(--text-muted)] flex-shrink-0" />
                     </div>
-                    <div className="w-full bg-muted h-1 rounded-full overflow-hidden">
-                        <div className="h-full bg-green-500 shadow-lg" style={{ width: `${(metrics.wonCount / (metrics.qualifiedCount || 1)) * 100}%` }}></div>
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-2 sm:mt-3 font-bold uppercase">
-                        {((metrics.wonCount / (metrics.qualifiedCount || 1)) * 100).toFixed(0)}% Fechamento
-                    </p>
+                    {metrics.goals?.deals > 0
+                        ? <GoalProgress actual={metrics.wonCount} target={metrics.goals.deals} format="number" />
+                        : (
+                            <>
+                                <div className="w-full bg-muted h-1 rounded-full overflow-hidden">
+                                    <div className="h-full bg-green-500 shadow-lg" style={{ width: `${(metrics.wonCount / (metrics.qualifiedCount || 1)) * 100}%` }}></div>
+                                </div>
+                                <p className="text-xs text-muted-foreground mt-2 sm:mt-3 font-bold uppercase">
+                                    {((metrics.wonCount / (metrics.qualifiedCount || 1)) * 100).toFixed(0)}% Fechamento
+                                </p>
+                            </>
+                        )
+                    }
                 </div>
                 {/* Card 4: Perdidos */}
-                <div className="bg-card p-4 sm:p-6 md:p-8 rounded-2xl md:rounded-3xl shadow-xl border border-border relative overflow-hidden group hover:shadow-2xl transition-all duration-300">
+                <div className="bg-[var(--surface)] p-4 sm:p-6 rounded-xl border border-[var(--border)] transition-colors duration-200">
                     <div className="flex justify-between items-start mb-3 sm:mb-6">
                         <div>
                             <p className="text-muted-foreground text-xs sm:text-sm font-medium mb-1">Leads Perdidos</p>
-                            <h3 className="text-2xl sm:text-3xl md:text-4xl font-black text-red-500 dark:text-red-400">{metrics.lostCount}</h3>
+                            <h3 className="text-2xl sm:text-3xl md:text-4xl font-black text-red-400">{metrics.lostCount}</h3>
                         </div>
-                        <div className="p-2 sm:p-3 bg-red-500/10 rounded-xl sm:rounded-2xl text-red-500 dark:text-red-500">
-                            <Ban className="w-4 h-4 sm:w-6 sm:h-6" />
-                        </div>
+                        <Ban className="w-4 h-4 sm:w-5 sm:h-5 text-[var(--text-muted)] flex-shrink-0" />
                     </div>
                     <div className="w-full bg-muted h-1 rounded-full overflow-hidden">
                         <div className="h-full bg-red-500 shadow-lg" style={{ width: `${Math.min(metrics.churnRate, 100)}%` }}></div>
@@ -162,26 +165,27 @@ export const GeneralPerformanceTab = memo(function GeneralPerformanceTab({ metri
             {/* 3. Financial Cards (Row 2) */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 md:gap-6">
                 {/* Faturamento */}
-                <div className="bg-card p-4 sm:p-6 md:p-8 rounded-2xl md:rounded-3xl shadow-xl border border-border relative overflow-hidden group hover:shadow-2xl transition-all duration-300">
-                    <div className="flex items-center gap-3 sm:gap-6">
-                        <div className="p-3 sm:p-4 bg-emerald-500/10 rounded-xl sm:rounded-2xl text-emerald-600 dark:text-emerald-400 flex-shrink-0">
-                            <CircleDollarSign className="w-5 h-5 sm:w-8 sm:h-8" />
-                        </div>
-                        <div className="min-w-0">
+                <div className="bg-[var(--surface)] p-4 sm:p-6 rounded-xl border border-[var(--border)] transition-colors duration-200">
+                    <div className="flex items-center gap-3 sm:gap-4">
+                        <CircleDollarSign className="w-5 h-5 sm:w-6 sm:h-6 text-[var(--text-muted)] flex-shrink-0" />
+                        <div className="min-w-0 flex-1">
                             <p className="text-muted-foreground text-xs sm:text-sm font-bold uppercase tracking-wide truncate">
                                 {(company?.name || '').toLowerCase().includes('apolar') ? 'Contratos Fechados' : 'Apólices Fechadas'}
                             </p>
                             <h3 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-black text-foreground mt-1">{formatCurrency(metrics.wonValue)}</h3>
                         </div>
                     </div>
+                    {metrics.goals?.revenue > 0 && (
+                        <div className="mt-4">
+                            <GoalProgress actual={metrics.wonValue} target={metrics.goals.revenue} format="currency" />
+                        </div>
+                    )}
                 </div>
 
                 {/* Ticket Médio */}
-                <div className="bg-card p-4 sm:p-6 md:p-8 rounded-2xl md:rounded-3xl shadow-xl border border-border relative overflow-hidden group hover:shadow-2xl transition-all duration-300">
-                    <div className="flex items-center gap-3 sm:gap-6">
-                        <div className="p-3 sm:p-4 bg-purple-500/10 rounded-xl sm:rounded-2xl text-purple-600 dark:text-purple-400 flex-shrink-0">
-                            <BarChartIcon className="w-5 h-5 sm:w-8 sm:h-8" />
-                        </div>
+                <div className="bg-[var(--surface)] p-4 sm:p-6 rounded-xl border border-[var(--border)] transition-colors duration-200">
+                    <div className="flex items-center gap-3 sm:gap-4">
+                        <BarChartIcon className="w-5 h-5 sm:w-6 sm:h-6 text-[var(--text-muted)] flex-shrink-0" />
                         <div className="min-w-0">
                             <p className="text-muted-foreground text-xs sm:text-sm font-bold uppercase tracking-wide">Ticket Médio</p>
                             <h3 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-black text-foreground mt-1">{formatCurrency(metrics.avgTicket)}</h3>
@@ -192,10 +196,10 @@ export const GeneralPerformanceTab = memo(function GeneralPerformanceTab({ metri
 
             {/* Section 3: Charts */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4 md:gap-6">
-                <div className="bg-card p-4 sm:p-6 rounded-2xl md:rounded-3xl border border-border shadow-xl h-[320px] sm:h-[380px] md:h-[400px]">
+                <div className="bg-[var(--surface)] p-4 sm:p-6 rounded-xl border border-[var(--border)] h-[320px] sm:h-[380px] md:h-[400px]">
                     <div className="mb-6">
                         <h3 className="text-xl font-bold text-foreground">Motivos de Perda</h3>
-                        <p className="text-sm text-muted-foreground font-medium">Análise de churn por motivo</p>
+                        <p className="text-sm text-muted-foreground font-medium">Análise de perdas por motivo</p>
                     </div>
                     <ResponsiveContainer width="100%" height={260}>
                         {filteredDeals.filter(d => d.status === 'lost').length > 0 ? (
@@ -207,14 +211,17 @@ export const GeneralPerformanceTab = memo(function GeneralPerformanceTab({ metri
                                 });
                                 return Object.keys(counts).map(k => ({ name: k, value: counts[k] })).sort((a, b) => b.value - a.value);
                             })()} layout="vertical" margin={{ left: 10, right: 30 }}>
-                                <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#e2e8f0" opacity={0.3} />
+                                <defs>
+                                    <linearGradient id="gradLossH" x1="0" y1="0" x2="1" y2="0">
+                                        <stop offset="0%" stopColor="#b91c1c" stopOpacity={1} />
+                                        <stop offset="100%" stopColor="#ef4444" stopOpacity={1} />
+                                    </linearGradient>
+                                </defs>
+                                <CartesianGrid {...GRID_PROPS} horizontal={true} vertical={false} />
                                 <XAxis type="number" hide />
-                                <YAxis dataKey="name" type="category" width={100} axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 11 }} />
-                                <Tooltip
-                                    contentStyle={{ borderRadius: '12px', border: '1px solid var(--border)', backgroundColor: 'var(--card)', color: 'var(--foreground)', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                                    cursor={{ fill: 'var(--muted)' }}
-                                />
-                                <Bar dataKey="value" fill="#ef4444" radius={[0, 4, 4, 0]} barSize={24} />
+                                <YAxis dataKey="name" type="category" width={100} {...AXIS_SHARED} tick={{ ...AXIS_TICK, fontSize: 11 }} />
+                                <Tooltip {...TOOLTIP_STYLE} formatter={(value) => [value, 'Perdas']} />
+                                <Bar dataKey="value" fill="url(#gradLossH)" radius={[0, 4, 4, 0]} barSize={24} isAnimationActive={true} animationDuration={600} animationEasing="ease-out" />
                             </BarChart>
                         ) : (
                             <div className="flex h-full items-center justify-center text-muted-foreground text-sm">
@@ -227,7 +234,7 @@ export const GeneralPerformanceTab = memo(function GeneralPerformanceTab({ metri
                 {/* Origem dos Leads - Conditional Display */}
                 {(company?.name || '').toLowerCase().includes('apolar') || !(String(company?.pipefyPipeId) === '306438109' || (company?.name || '').toLowerCase().includes('andar')) ? (
                     // TABLE FORMAT (Apolar and other non-insurance companies)
-                    <div className="bg-card p-4 sm:p-6 rounded-2xl md:rounded-3xl border border-border shadow-xl h-[320px] sm:h-[380px] md:h-[400px] flex flex-col">
+                    <div className="bg-[var(--surface)] p-4 sm:p-6 rounded-xl border border-[var(--border)] h-[320px] sm:h-[380px] md:h-[400px] flex flex-col">
                         <div className="mb-6">
                             <h3 className="text-xl font-bold text-foreground">Origem dos Leads</h3>
                             <p className="text-sm text-muted-foreground font-medium">Distribuição por canal de aquisição</p>
@@ -307,7 +314,7 @@ export const GeneralPerformanceTab = memo(function GeneralPerformanceTab({ metri
                                                         </td>
                                                         <td className="py-3 px-4 text-right">
                                                             <span className={`inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-bold ${channel.conversion > 0
-                                                                ? 'bg-green-500/20 text-green-600 dark:text-green-400'
+                                                                ? 'bg-green-500/20 text-green-400'
                                                                 : 'bg-muted text-muted-foreground'
                                                                 }`}>
                                                                 {formatPercent(channel.conversion)}
@@ -323,40 +330,53 @@ export const GeneralPerformanceTab = memo(function GeneralPerformanceTab({ metri
                         </div>
                     </div>
                 ) : (
-                    // PIE CHART (Andar Seguros)
-                    <div className="bg-card p-4 sm:p-6 rounded-2xl md:rounded-3xl border border-border shadow-xl h-[320px] sm:h-[380px] md:h-[400px]">
+                    // PIE CHART (Andar Seguros) - rosca refinada com label central
+                    <div className="bg-[var(--surface)] p-4 sm:p-6 rounded-xl border border-[var(--border)] h-[320px] sm:h-[380px] md:h-[400px]">
                         <div className="mb-6">
                             <h3 className="text-xl font-bold text-foreground">Origem das Vendas</h3>
                             <p className="text-sm text-muted-foreground font-medium">Distribuição por canal de aquisição</p>
                         </div>
                         <ResponsiveContainer width="100%" height={260}>
                             <PieChart>
-                                <Pie
-                                    data={(() => {
-                                        const counts = {};
-                                        metrics.wonDeals.forEach(d => {
-                                            const ch = d.channel || 'Desconhecido';
-                                            counts[ch] = (counts[ch] || 0) + 1;
-                                        });
-
-                                        let data = Object.keys(counts).map(k => ({ name: k, value: counts[k] })).sort((a, b) => b.value - a.value);
-
-                                        if (data.length > 5) {
-                                            const top5 = data.slice(0, 5);
-                                            const others = data.slice(5).reduce((acc, curr) => acc + curr.value, 0);
-                                            if (others > 0) top5.push({ name: 'Outros', value: others });
-                                            return top5;
-                                        }
-                                        return data;
-                                    })()}
-                                    cx="50%" cy="50%" innerRadius={60} outerRadius={90} paddingAngle={5} dataKey="value"
-                                >
-                                    {[...Array(6)].map((_, index) => (
-                                        <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
-                                    ))}
-                                </Pie>
-                                <Tooltip contentStyle={{ borderRadius: '12px', border: '1px solid var(--border)', backgroundColor: 'var(--card)', color: 'var(--foreground)', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-                                <Legend verticalAlign={isMobile ? 'bottom' : 'middle'} align={isMobile ? 'center' : 'right'} layout={isMobile ? 'horizontal' : 'vertical'} wrapperStyle={{ fontSize: '12px', paddingTop: isMobile ? '20px' : '0', color: 'var(--foreground)' }} />
+                                {(() => {
+                                    const counts = {};
+                                    metrics.wonDeals.forEach(d => {
+                                        const ch = d.channel || 'Desconhecido';
+                                        counts[ch] = (counts[ch] || 0) + 1;
+                                    });
+                                    let pieData = Object.keys(counts).map(k => ({ name: k, value: counts[k] })).sort((a, b) => b.value - a.value);
+                                    if (pieData.length > 5) {
+                                        const top5 = pieData.slice(0, 5);
+                                        const others = pieData.slice(5).reduce((acc, curr) => acc + curr.value, 0);
+                                        if (others > 0) top5.push({ name: 'Outros', value: others });
+                                        pieData = top5;
+                                    }
+                                    const total = pieData.reduce((s, d) => s + d.value, 0);
+                                    return (
+                                        <>
+                                            <Pie
+                                                data={pieData}
+                                                cx="35%"
+                                                cy="50%"
+                                                innerRadius={60}
+                                                outerRadius={90}
+                                                paddingAngle={3}
+                                                dataKey="value"
+                                                isAnimationActive={true}
+                                                animationDuration={600}
+                                                animationEasing="ease-out"
+                                            >
+                                                {pieData.map((_, index) => (
+                                                    <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                                                ))}
+                                            </Pie>
+                                            <text x="35%" y="46%" textAnchor="middle" dominantBaseline="middle" fill="#fafafa" fontSize={22} fontWeight={700}>{total}</text>
+                                            <text x="35%" y="57%" textAnchor="middle" dominantBaseline="middle" fill="#71717a" fontSize={11}>vendas</text>
+                                        </>
+                                    );
+                                })()}
+                                <Tooltip {...TOOLTIP_STYLE} formatter={(value, name) => [value, name]} />
+                                <Legend verticalAlign={isMobile ? 'bottom' : 'middle'} align={isMobile ? 'center' : 'right'} layout={isMobile ? 'horizontal' : 'vertical'} iconSize={8} iconType="circle" wrapperStyle={{ fontSize: '12px', paddingTop: isMobile ? '20px' : '0', color: '#71717a' }} />
                             </PieChart>
                         </ResponsiveContainer>
                     </div>
@@ -389,8 +409,8 @@ export const GeneralPerformanceTab = memo(function GeneralPerformanceTab({ metri
                                             <td className="px-3 py-3 text-right text-green-600 font-bold">{stat.won}</td>
                                             <td className="px-3 py-3 text-right text-foreground font-medium">{formatCurrency(stat.avgTicket)}</td>
                                             <td className="px-3 py-3 text-right">
-                                                <span className={`px-2 py-1 rounded-full text-xs font-bold ${stat.conversion >= 10 ? 'bg-green-500/20 text-green-600 dark:text-green-400' :
-                                                    stat.conversion >= 5 ? 'bg-yellow-500/20 text-yellow-600 dark:text-yellow-400' : 'bg-muted text-muted-foreground'
+                                                <span className={`px-2 py-1 rounded-full text-xs font-bold ${stat.conversion >= 10 ? 'bg-green-500/20 text-green-400' :
+                                                    stat.conversion >= 5 ? 'bg-yellow-500/20 text-yellow-400' : 'bg-muted text-muted-foreground'
                                                     }`}>
                                                     {stat.conversion.toFixed(1)}%
                                                 </span>
@@ -405,7 +425,7 @@ export const GeneralPerformanceTab = memo(function GeneralPerformanceTab({ metri
             )}
 
             {/* Section 4: Últimas Vendas ("Recent Sales" Table) */}
-            <div className="bg-card rounded-2xl md:rounded-3xl border border-border shadow-xl overflow-hidden">
+            <div className="bg-[var(--surface)] rounded-xl border border-[var(--border)] overflow-hidden">
                 <div className="p-4 sm:p-6 md:p-8 border-b border-border flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                     <div>
                         <h3 className="text-xl font-bold text-foreground">Histórico de Vendas</h3>
@@ -421,7 +441,7 @@ export const GeneralPerformanceTab = memo(function GeneralPerformanceTab({ metri
                                 setFilterChannel(e.target.value);
                                 setCurrentPage(1);
                             }}
-                            className="bg-muted/50 border border-border text-foreground text-sm rounded-lg focus:ring-primary focus:border-primary block p-2.5 outline-none transition-colors"
+                            className="bg-[var(--surface-raised)] border border-[var(--border)] text-[var(--text-primary)] text-sm rounded-lg focus:ring-1 focus:ring-[var(--brand)] focus:border-[var(--brand)] block p-2.5 outline-none transition-colors [color-scheme:dark]"
                         >
                             <option value="all">Todos os Canais</option>
                             {Array.from(new Set(metrics.wonDeals?.map(d => d.channel || 'Desconhecido') || [])).map(ch => (
@@ -437,7 +457,7 @@ export const GeneralPerformanceTab = memo(function GeneralPerformanceTab({ metri
                                     setFilterInsuranceType(e.target.value);
                                     setCurrentPage(1);
                                 }}
-                                className="bg-muted/50 border border-border text-foreground text-sm rounded-lg focus:ring-primary focus:border-primary block p-2.5 outline-none transition-colors"
+                                className="bg-[var(--surface-raised)] border border-[var(--border)] text-[var(--text-primary)] text-sm rounded-lg focus:ring-1 focus:ring-[var(--brand)] focus:border-[var(--brand)] block p-2.5 outline-none transition-colors [color-scheme:dark]"
                             >
                                 <option value="all">Todos os Seguros</option>
                                 {Array.from(new Set(metrics.wonDeals?.map(d => normalizeProduct(d.product || d.insuranceType)) || [])).filter(t => t !== 'Não Identificado').sort().map(type => (
@@ -450,7 +470,7 @@ export const GeneralPerformanceTab = memo(function GeneralPerformanceTab({ metri
                         <select
                             value={sortOption}
                             onChange={(e) => setSortOption(e.target.value)}
-                            className="bg-muted/50 border border-border text-foreground text-sm rounded-lg focus:ring-primary focus:border-primary block p-2.5 outline-none transition-colors"
+                            className="bg-[var(--surface-raised)] border border-[var(--border)] text-[var(--text-primary)] text-sm rounded-lg focus:ring-1 focus:ring-[var(--brand)] focus:border-[var(--brand)] block p-2.5 outline-none transition-colors [color-scheme:dark]"
                         >
                             <option value="date-desc">Mais Recentes</option>
                             <option value="date-asc">Mais Antigas</option>
@@ -519,7 +539,12 @@ export const GeneralPerformanceTab = memo(function GeneralPerformanceTab({ metri
                                         {currentData.map((deal) => (
                                             <tr key={deal.id} className="hover:bg-muted/30 transition-colors">
                                                 <td className="px-6 py-4 text-muted-foreground">
-                                                    {new Date(deal.won_date || deal.date || deal.createdAt).toLocaleDateString('pt-BR')}
+                                                    {(() => {
+                                                        const raw = deal.won_date || deal.date || deal.createdAt || '';
+                                                        const datePart = String(raw).split('T')[0];
+                                                        const p = datePart.split('-');
+                                                        return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : raw;
+                                                    })()}
                                                 </td>
                                                 <td className="px-6 py-4 font-medium text-foreground">
                                                     {deal.client || deal.title}
@@ -541,7 +566,7 @@ export const GeneralPerformanceTab = memo(function GeneralPerformanceTab({ metri
                                                     {formatCurrency(deal.amount)}
                                                 </td>
                                                 <td className="px-6 py-4">
-                                                    <span className="px-2 py-1 rounded-full text-xs font-bold uppercase bg-green-500/20 text-green-600 dark:text-green-400">
+                                                    <span className="px-2 py-1 rounded-full text-xs font-bold uppercase bg-green-500/20 text-green-400">
                                                         Vendido
                                                     </span>
                                                 </td>

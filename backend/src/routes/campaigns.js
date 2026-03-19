@@ -60,7 +60,7 @@ router.get('/:companyId', async (req, res) => {
         try {
             const { data: integration } = await supabase
                 .from('Integration')
-                .select('metaAdAccountId, metaAccessToken, metaStatus')
+                .select('id, metaAdAccountId, metaAccessToken, metaStatus, metaTokenExpiry')
                 .eq('companyId', effectiveId)
                 .eq('type', 'meta_ads')
                 .eq('isActive', true)
@@ -68,7 +68,7 @@ router.get('/:companyId', async (req, res) => {
 
             if (integration && integration.metaAccessToken) {
                 const { fetchLiveMetaCampaigns } = require('../utils/metaProxy');
-                const liveCampaigns = await fetchLiveMetaCampaigns(integration.metaAdAccountId, integration.metaAccessToken, startDateStr, endDateStr);
+                const liveCampaigns = await fetchLiveMetaCampaigns(integration, startDateStr, endDateStr);
                 if (liveCampaigns && liveCampaigns.length > 0) {
                     console.log(`[Campaigns API] Serving ${liveCampaigns.length} LIVE campaigns with daily insights for ${effectiveId}`);
                     // Map company_id to keep compatibility with UI

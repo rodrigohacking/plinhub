@@ -7,7 +7,7 @@
 
 @layer base {
   html {
-    background-color: #e8edf5;
+    background-color: #09090b; /* zinc-950 — dark fixo */
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
   }
   body {
@@ -19,51 +19,51 @@
   }
 }
 
-/* ── Design Tokens ─────────────────────────────────────── */
+/* ── Design Tokens (Dark fixo — zinc palette) ──────────── */
 :root {
   /* Page & Surface */
-  --bg-page:          #e8edf5;   /* soft blue-gray outer */
-  --surface:          #ffffff;   /* cards, panels */
-  --surface-raised:   #f8fafc;   /* slightly elevated surfaces */
-  --surface-hover:    #f1f5f9;
+  --bg-page:          #09090b;   /* zinc-950 */
+  --surface:          #18181b;   /* zinc-900 */
+  --surface-raised:   #27272a;   /* zinc-800 */
+  --surface-hover:    #3f3f46;   /* zinc-700 */
 
   /* Sidebar */
-  --sidebar-bg:       #ffffff;
-  --sidebar-border:   rgba(0,0,0,0.05);
+  --sidebar-bg:       #09090b;   /* zinc-950 */
+  --sidebar-border:   rgba(255,255,255,0.07);
 
   /* Text */
-  --text-primary:     #0f172a;
-  --text-secondary:   #64748b;
-  --text-muted:       #94a3b8;
-  --text-inverse:     #ffffff;
+  --text-primary:     #fafafa;   /* zinc-50 */
+  --text-secondary:   #a1a1aa;   /* zinc-400 */
+  --text-muted:       #71717a;   /* zinc-500 */
+  --text-inverse:     #09090b;
 
-  /* Brand — clean blue accent */
-  --brand:            #3b82f6;   /* blue-500 */
-  --brand-light:      #eff6ff;   /* blue-50 */
-  --brand-dark:       #1d4ed8;   /* blue-700 */
+  /* Brand — PLIN pink accent */
+  --brand:            #e11d48;   /* pink-600 */
+  --brand-light:      rgba(225,29,72,0.15);
+  --brand-dark:       #be123c;   /* pink-700 */
 
   /* Semantic */
-  --success:          #22c55e;
-  --success-light:    #f0fdf4;
-  --danger:           #ef4444;
-  --danger-light:     #fef2f2;
-  --warning:          #f59e0b;
-  --warning-light:    #fffbeb;
+  --success:          #4ade80;   /* green-400 */
+  --success-light:    rgba(74,222,128,0.12);
+  --danger:           #f87171;   /* red-400 */
+  --danger-light:     rgba(248,113,113,0.12);
+  --warning:          #fb923c;   /* orange-400 */
+  --warning-light:    rgba(251,146,60,0.12);
 
   /* Borders & Shadows */
-  --border:           #e2e8f0;
-  --border-strong:    #cbd5e1;
-  --shadow-sm:        0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
-  --shadow-md:        0 4px 16px rgba(0,0,0,0.07), 0 1px 4px rgba(0,0,0,0.04);
-  --shadow-lg:        0 8px 32px rgba(0,0,0,0.1), 0 2px 8px rgba(0,0,0,0.05);
+  --border:           #27272a;   /* zinc-800 */
+  --border-strong:    #3f3f46;   /* zinc-700 */
+  --shadow-sm:        0 1px 3px rgba(0,0,0,0.4);
+  --shadow-md:        0 4px 16px rgba(0,0,0,0.5);
+  --shadow-lg:        0 8px 32px rgba(0,0,0,0.6);
 
   /* Shape */
-  --radius-sm:        0.5rem;    /* 8px */
-  --radius:           0.75rem;   /* 12px */
-  --radius-lg:        1rem;      /* 16px */
-  --radius-xl:        1.25rem;   /* 20px */
+  --radius-sm:        0.5rem;
+  --radius:           0.75rem;
+  --radius-lg:        1rem;
+  --radius-xl:        1.25rem;
 
-  /* Legacy Tailwind/shadcn compat vars */
+  /* shadcn/ui compat vars */
   --background:       var(--bg-page);
   --foreground:       var(--text-primary);
   --card:             var(--surface);
@@ -77,59 +77,53 @@
   --muted:            var(--surface-raised);
   --muted-foreground: var(--text-secondary);
   --accent:           var(--brand-light);
-  --accent-foreground: var(--brand-dark);
+  --accent-foreground: var(--brand);
   --destructive:      var(--danger);
   --destructive-foreground: #ffffff;
-  --border:           #e2e8f0;
-  --input:            #e2e8f0;
+  --border:           #27272a;
+  --input:            #27272a;
   --ring:             var(--brand);
-  --radius:           0.75rem;
 
-  /* Charts */
-  --chart-1: #3b82f6;
-  --chart-2: #22c55e;
-  --chart-3: #f59e0b;
-  --chart-4: #a855f7;
-  --chart-5: #ef4444;
+  /* Chart colors — Tailwind -400 scale, legível em fundo escuro */
+  --chart-1: #60a5fa;  /* blue-400 */
+  --chart-2: #4ade80;  /* green-400 */
+  --chart-3: #fb923c;  /* orange-400 */
+  --chart-4: #c084fc;  /* purple-400 */
+  --chart-5: #f87171;  /* red-400 */
+  --chart-6: #34d399;  /* emerald-400 */
+  --chart-7: #a78bfa;  /* violet-400 */
+  --chart-8: #f472b6;  /* pink-400 */
 }
 
-/* ── Dark Mode ─────────────────────────────────────────── */
+/* Dark override — garante que .dark nunca ative um tema diferente */
 .dark {
-  --bg-page:         #0f172a;
-  --surface:         #1e293b;
-  --surface-raised:  #273348;
-  --surface-hover:   #334155;
-  --sidebar-bg:      #1e293b;
-  --sidebar-border:  rgba(255,255,255,0.06);
-
-  --text-primary:    #f1f5f9;
-  --text-secondary:  #94a3b8;
-  --text-muted:      #64748b;
-
-  --border:          #334155;
-  --border-strong:   #475569;
-  --shadow-sm:       0 1px 3px rgba(0,0,0,0.3);
-  --shadow-md:       0 4px 16px rgba(0,0,0,0.4);
-
-  /* Tailwind/shadcn compat */
-  --background:      var(--bg-page);
-  --foreground:      var(--text-primary);
-  --card:            var(--surface);
-  --card-foreground: var(--text-primary);
-  --popover:         var(--surface);
-  --popover-foreground: var(--text-primary);
-  --secondary:       var(--surface-raised);
-  --secondary-foreground: var(--text-primary);
-  --muted:           var(--surface-raised);
-  --muted-foreground: var(--text-secondary);
-  --accent:          rgba(59,130,246,0.15);
-  --border:          #334155;
-  --input:           #334155;
+  --bg-page:          #09090b;
+  --surface:          #18181b;
+  --surface-raised:   #27272a;
+  --surface-hover:    #3f3f46;
+  --sidebar-bg:       #09090b;
+  --sidebar-border:   rgba(255,255,255,0.07);
+  --text-primary:     #fafafa;
+  --text-secondary:   #a1a1aa;
+  --text-muted:       #71717a;
+  --brand:            #e11d48;
+  --brand-light:      rgba(225,29,72,0.15);
+  --border:           #27272a;
+  --border-strong:    #3f3f46;
+  --background:       #09090b;
+  --foreground:       #fafafa;
+  --card:             #18181b;
+  --card-foreground:  #fafafa;
+  --popover:          #18181b;
+  --popover-foreground: #fafafa;
+  --muted:            #27272a;
+  --muted-foreground: #a1a1aa;
+  --accent:           rgba(225,29,72,0.15);
+  --border:           #27272a;
+  --input:            #27272a;
 }
 
 /* ── Utility Classes ───────────────────────────────────── */
-
-/* Clean card surface */
 .card {
   background: var(--surface);
   border-radius: var(--radius-lg);
@@ -141,15 +135,13 @@
   box-shadow: var(--shadow-md);
 }
 
-/* Section titles */
 .section-title {
-  font-size: 1.125rem; 
+  font-size: 1.125rem;
   font-weight: 600;
   color: var(--text-primary);
   letter-spacing: -0.01em;
 }
 
-/* Subtle stat badge */
 .stat-badge-up {
   display: inline-flex;
   align-items: center;
@@ -193,7 +185,6 @@
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
 
-/* ── Page background override for Dashboard ───────────── */
 .bg-plin-premium {
   background-color: var(--bg-page);
   min-height: 100vh;

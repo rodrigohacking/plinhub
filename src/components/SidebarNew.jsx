@@ -1,245 +1,240 @@
-import React, { useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
     BarChart3, Megaphone, Settings, Target,
-    Sun, Moon, Building2, LogOut, ChevronRight
+    Building2, LogOut
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { useAuth } from "../contexts/AuthContext";
 
+/* ── Constants ──────────────────────────────────────────────── */
+const W_COLLAPSED  = 56;   // px — icon-only strip
+const W_EXPANDED   = 220;  // px — icons + labels
+const OPEN_DELAY   = 100;  // ms before expanding (avoids accidental open)
+const CLOSE_DELAY  = 300;  // ms before collapsing (avoids flicker when crossing icons)
+const LABEL_DELAY  = 150;  // ms after sidebar starts expanding before labels fade in
+
+/* ── Main Component ─────────────────────────────────────────── */
 export function SidebarNew({ currentView, onNavigate, company }) {
-    const [collapsed, setCollapsed] = useState(true);
-    const { signOut, user } = useAuth();
+    const [expanded, setExpanded]     = useState(false);
+    const [showLabels, setShowLabels] = useState(false);
+    const { signOut, user }           = useAuth();
 
-    const [isDark, setIsDark] = React.useState(() => {
-        if (typeof window !== 'undefined') {
-            return localStorage.getItem('theme') === 'dark' ||
-                (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches);
-        }
-        return false;
-    });
+    const openTimer   = useRef(null);
+    const closeTimer  = useRef(null);
+    const labelTimer  = useRef(null);
 
-    React.useEffect(() => {
-        const root = window.document.documentElement;
-        if (isDark) {
-            root.classList.add('dark');
-            localStorage.setItem('theme', 'dark');
-        } else {
-            root.classList.remove('dark');
-            localStorage.setItem('theme', 'light');
-        }
-    }, [isDark]);
+    // Cleanup on unmount
+    useEffect(() => () => {
+        clearTimeout(openTimer.current);
+        clearTimeout(closeTimer.current);
+        clearTimeout(labelTimer.current);
+    }, []);
+
+    const handleMouseEnter = useCallback(() => {
+        clearTimeout(closeTimer.current);
+        clearTimeout(labelTimer.current);
+        openTimer.current = setTimeout(() => {
+            setExpanded(true);
+            // labels appear 150ms AFTER width animation begins (~200ms total)
+            labelTimer.current = setTimeout(() => setShowLabels(true), LABEL_DELAY);
+        }, OPEN_DELAY);
+    }, []);
+
+    const handleMouseLeave = useCallback(() => {
+        clearTimeout(openTimer.current);
+        clearTimeout(labelTimer.current);
+        setShowLabels(false); // hide labels immediately on leave intent
+        closeTimer.current = setTimeout(() => setExpanded(false), CLOSE_DELAY);
+    }, []);
 
     if (!company) return null;
 
-    const handleNav = (view) => {
-        onNavigate(view);
-        if (typeof window !== 'undefined' && window.innerWidth < 768) {
-            setCollapsed(true);
-        }
-    };
+    const userName   = user?.user_metadata?.name || user?.name || "Usuário";
+    const userPhoto  = user?.user_metadata?.photoUrl || user?.photoUrl;
+    const userInitial = userName[0]?.toUpperCase() || "U";
+
+    const companyInitials = company.name
+        ?.split(" ").slice(0, 2).map(w => w[0]).join("").toUpperCase() || "ORG";
 
     const navItems = [
-        { label: "Vendas", view: "sales", icon: BarChart3 },
-        { label: "Marketing", view: "marketing", icon: Megaphone },
-        { label: "Metas", view: "set-goals", icon: Target },
+        { label: "Vendas",     view: "sales",     icon: BarChart3  },
+        { label: "Marketing",  view: "marketing", icon: Megaphone  },
+        { label: "Metas",      view: "set-goals", icon: Target     },
     ];
 
     const bottomItems = [
-        { label: "Configurações", view: "settings", icon: Settings },
+        { label: "Configurações", view: "settings", icon: Settings  },
+        { label: "Trocar Empresa",view: "home",     icon: Building2 },
+        { label: "Sair",          view: null,        icon: LogOut,   danger: true, onClick: signOut },
     ];
 
-    const userName = user?.user_metadata?.name || user?.name || "Usuário";
-    const userPhoto = user?.user_metadata?.photoUrl || user?.photoUrl;
-    const userInitial = userName[0]?.toUpperCase() || 'U';
-
     return (
-        <>
-            {/* Mobile overlay */}
-            {!collapsed && (
-                <div
-                    className="fixed inset-0 z-30 bg-black/20 backdrop-blur-sm md:hidden"
-                    onClick={() => setCollapsed(true)}
-                />
+        <aside
+            onMouseEnter={handleMouseEnter}
+            onMouseLeave={handleMouseLeave}
+            style={{
+                width: expanded ? W_EXPANDED : W_COLLAPSED,
+                transition: `width 200ms ease-in-out`,
+                willChange: "width",
+            }}
+            className={cn(
+                "fixed left-0 top-0 h-[100dvh] z-50",
+                "flex flex-col overflow-hidden",
+                "bg-[var(--sidebar-bg)] border-r border-[var(--sidebar-border)]",
+                "shadow-xl"
             )}
-
-            <motion.aside
-                animate={{ width: collapsed ? 64 : 220 }}
-                transition={{ duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
-                className={cn(
-                    "flex flex-col flex-shrink-0 overflow-hidden z-40",
-                    "bg-[var(--sidebar-bg)] border-r border-[var(--sidebar-border)]",
-                    "h-[100dvh] sticky top-0",
-                    "shadow-[1px_0_0_0_rgba(0,0,0,0.04)]"
-                )}
-                style={{ willChange: 'width' }}
-            >
-                {/* ── Logo & Toggle ────────────────────── */}
-                <div className="flex items-center justify-between px-3 py-4 border-b border-[var(--border)] min-h-[60px]">
-                    <div className="flex items-center gap-2.5 overflow-hidden">
-                        {company.logo ? (
-                            <img
-                                src={company.logo}
-                                alt={company.name}
-                                className="h-8 w-8 rounded-lg object-cover flex-shrink-0 shadow-sm"
-                            />
-                        ) : (
-                            <div className="h-8 w-8 rounded-lg bg-[var(--brand)] flex items-center justify-center flex-shrink-0">
-                                <span className="text-white text-xs font-bold">
-                                    {company.name?.[0]?.toUpperCase()}
-                                </span>
-                            </div>
-                        )}
-                        <AnimatePresence>
-                            {!collapsed && (
-                                <motion.span
-                                    initial={{ opacity: 0, x: -6 }}
-                                    animate={{ opacity: 1, x: 0 }}
-                                    exit={{ opacity: 0, x: -6 }}
-                                    transition={{ duration: 0.18 }}
-                                    className="text-sm font-semibold text-[var(--text-primary)] whitespace-nowrap truncate max-w-[128px]"
-                                >
-                                    {company.name}
-                                </motion.span>
-                            )}
-                        </AnimatePresence>
+        >
+            {/* ── Logo ───────────────────────────────────── */}
+            <div className="flex items-center min-h-[60px] border-b border-[var(--border)] px-[14px] gap-3 overflow-hidden flex-shrink-0">
+                {company.logo ? (
+                    <img
+                        src={company.logo}
+                        alt={company.name}
+                        className="h-7 w-7 rounded-lg object-cover flex-shrink-0"
+                    />
+                ) : (
+                    <div className="h-7 w-7 rounded-lg bg-zinc-800 flex items-center justify-center flex-shrink-0">
+                        <span className="text-zinc-400 text-[10px] font-bold leading-none">
+                            {companyInitials}
+                        </span>
                     </div>
+                )}
 
-                    <button
-                        onClick={() => setCollapsed(!collapsed)}
-                        className="flex-shrink-0 p-1 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-hover)] transition-colors"
-                    >
-                        <motion.div animate={{ rotate: collapsed ? 0 : 180 }} transition={{ duration: 0.25 }}>
-                            <ChevronRight className="w-4 h-4" />
-                        </motion.div>
-                    </button>
-                </div>
+                <span
+                    className="text-sm font-semibold text-[var(--text-primary)] whitespace-nowrap truncate min-w-0"
+                    style={{
+                        opacity: showLabels ? 1 : 0,
+                        transition: "opacity 150ms ease-in-out",
+                        pointerEvents: "none",
+                    }}
+                >
+                    {company.name}
+                </span>
+            </div>
 
-                {/* ── Main Nav ─────────────────────────── */}
-                <nav className="flex-1 overflow-y-auto overflow-x-hidden py-4 px-2 flex flex-col gap-1">
-                    {navItems.map(({ label, view, icon: Icon }) => {
-                        const active = currentView === view;
-                        return (
-                            <NavItem
-                                key={view}
-                                label={label}
-                                icon={Icon}
-                                active={active}
-                                collapsed={collapsed}
-                                onClick={() => handleNav(view)}
-                            />
-                        );
-                    })}
-                </nav>
+            {/* ── Main Nav ───────────────────────────────── */}
+            <nav className="flex-1 overflow-y-auto overflow-x-hidden py-3 px-2 flex flex-col gap-0.5">
+                {navItems.map(({ label, view, icon: Icon }) => (
+                    <NavItem
+                        key={view}
+                        label={label}
+                        icon={Icon}
+                        active={currentView === view}
+                        showLabel={showLabels}
+                        onClick={() => onNavigate(view)}
+                    />
+                ))}
+            </nav>
 
-                {/* ── Bottom Section ────────────────────── */}
-                <div className="px-2 py-3 border-t border-[var(--border)] flex flex-col gap-1">
-                    {bottomItems.map(({ label, view, icon: Icon }) => (
-                        <NavItem
-                            key={view}
-                            label={label}
-                            icon={Icon}
-                            active={currentView === view}
-                            collapsed={collapsed}
-                            onClick={() => handleNav(view)}
+            {/* ── Bottom Section ─────────────────────────── */}
+            <div className="px-2 py-3 border-t border-[var(--border)] flex flex-col gap-0.5">
+                {bottomItems.map(({ label, view, icon: Icon, danger, onClick }) => (
+                    <NavItem
+                        key={label}
+                        label={label}
+                        icon={Icon}
+                        active={currentView === view}
+                        showLabel={showLabels}
+                        danger={danger}
+                        onClick={onClick ?? (() => onNavigate(view))}
+                    />
+                ))}
+
+                {/* ── User Avatar ────────────────────────── */}
+                <button
+                    onClick={() => onNavigate("profile")}
+                    className="flex items-center gap-3 w-full mt-1 px-2 py-2 rounded-lg hover:bg-[var(--surface-raised)] transition-colors text-left overflow-hidden"
+                >
+                    {userPhoto ? (
+                        <img
+                            src={userPhoto}
+                            alt={userName}
+                            className="h-6 w-6 rounded-full object-cover flex-shrink-0 ring-2 ring-[var(--border)]"
                         />
-                    ))}
-
-                    <NavItem
-                        label={isDark ? "Modo Claro" : "Modo Escuro"}
-                        icon={isDark ? Sun : Moon}
-                        active={false}
-                        collapsed={collapsed}
-                        onClick={() => setIsDark(!isDark)}
-                    />
-
-                    <NavItem
-                        label="Trocar Empresa"
-                        icon={Building2}
-                        active={false}
-                        collapsed={collapsed}
-                        onClick={() => onNavigate('home')}
-                    />
-
-                    <NavItem
-                        label="Sair"
-                        icon={LogOut}
-                        active={false}
-                        collapsed={collapsed}
-                        onClick={() => signOut()}
-                        danger
-                    />
-
-                    {/* ── User Avatar ────────────────── */}
-                    <button
-                        onClick={() => onNavigate('profile')}
-                        className={cn(
-                            "flex items-center gap-2.5 w-full mt-1 px-2 py-2 rounded-lg",
-                            "hover:bg-[var(--surface-hover)] transition-colors text-left"
-                        )}
+                    ) : (
+                        <div className="h-6 w-6 rounded-full bg-[var(--brand)] flex items-center justify-center flex-shrink-0">
+                            <span className="text-white text-[10px] font-bold">{userInitial}</span>
+                        </div>
+                    )}
+                    <span
+                        className="text-xs font-medium text-[var(--text-secondary)] truncate whitespace-nowrap"
+                        style={{
+                            opacity: showLabels ? 1 : 0,
+                            transition: "opacity 150ms ease-in-out",
+                            pointerEvents: "none",
+                        }}
                     >
-                        {userPhoto ? (
-                            <img src={userPhoto} alt={userName} className="h-7 w-7 rounded-full object-cover flex-shrink-0 ring-2 ring-[var(--border)]" />
-                        ) : (
-                            <div className="h-7 w-7 rounded-full bg-[var(--brand)] flex items-center justify-center flex-shrink-0 ring-2 ring-[var(--brand-light)]">
-                                <span className="text-white text-xs font-bold">{userInitial}</span>
-                            </div>
-                        )}
-                        <AnimatePresence>
-                            {!collapsed && (
-                                <motion.span
-                                    initial={{ opacity: 0, x: -6 }}
-                                    animate={{ opacity: 1, x: 0 }}
-                                    exit={{ opacity: 0, x: -6 }}
-                                    transition={{ duration: 0.18 }}
-                                    className="text-xs font-medium text-[var(--text-secondary)] truncate whitespace-nowrap"
-                                >
-                                    {userName}
-                                </motion.span>
-                            )}
-                        </AnimatePresence>
-                    </button>
-                </div>
-            </motion.aside>
-        </>
+                        {userName}
+                    </span>
+                </button>
+            </div>
+        </aside>
     );
 }
 
-function NavItem({ label, icon: Icon, active, collapsed, onClick, danger = false }) {
+/* ── NavItem ─────────────────────────────────────────────────── */
+function NavItem({ label, icon: Icon, active, showLabel, onClick, danger = false }) {
     return (
-        <button
-            onClick={onClick}
-            title={collapsed ? label : undefined}
-            className={cn(
-                "relative flex items-center gap-2.5 w-full px-2 py-2 rounded-lg text-sm font-medium transition-all duration-150",
-                active
-                    ? "bg-[var(--brand-light)] text-[var(--brand)]"
-                    : danger
-                        ? "text-[var(--danger)] hover:bg-[var(--danger-light)]"
-                        : "text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]"
-            )}
-        >
-            {active && (
-                <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 bg-[var(--brand)] rounded-r-full" />
-            )}
-            <Icon className={cn(
-                "flex-shrink-0 w-[18px] h-[18px]",
-                active ? "text-[var(--brand)]" : danger ? "text-[var(--danger)]" : "text-[var(--text-secondary)]"
-            )} />
-            <AnimatePresence>
-                {!collapsed && (
-                    <motion.span
-                        initial={{ opacity: 0, x: -6 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        exit={{ opacity: 0, x: -6 }}
-                        transition={{ duration: 0.18 }}
-                        className="whitespace-nowrap overflow-hidden"
-                    >
-                        {label}
-                    </motion.span>
+        <div className="relative group/nav">
+            <button
+                onClick={onClick}
+                className={cn(
+                    "relative flex items-center gap-3 w-full px-2 py-2.5 rounded-lg text-sm font-medium",
+                    "transition-colors duration-150 overflow-hidden",
+                    active
+                        ? "bg-[var(--surface-raised)] text-[var(--brand)]"
+                        : danger
+                            ? "text-[var(--danger)] hover:bg-[var(--danger-light)]"
+                            : "text-[var(--text-secondary)] hover:bg-[var(--surface-raised)] hover:text-[var(--text-primary)]"
                 )}
-            </AnimatePresence>
-        </button>
+            >
+                {/* Active indicator */}
+                {active && (
+                    <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 bg-[var(--brand)] rounded-r-full" />
+                )}
+
+                {/* Icon */}
+                <Icon
+                    className={cn(
+                        "flex-shrink-0 w-[18px] h-[18px]",
+                        active
+                            ? "text-[var(--brand)]"
+                            : danger
+                                ? "text-[var(--danger)]"
+                                : "text-[var(--text-secondary)] group-hover/nav:text-[var(--text-primary)]"
+                    )}
+                />
+
+                {/* Label — fades in after sidebar expands */}
+                <span
+                    className="whitespace-nowrap truncate"
+                    style={{
+                        opacity: showLabel ? 1 : 0,
+                        transition: "opacity 150ms ease-in-out",
+                        pointerEvents: "none",
+                    }}
+                >
+                    {label}
+                </span>
+            </button>
+
+            {/* Tooltip — only visible when collapsed (labels hidden) */}
+            {!showLabel && (
+                <div
+                    className={cn(
+                        "pointer-events-none absolute left-full top-1/2 -translate-y-1/2 ml-2 z-[9999]",
+                        "px-2.5 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap",
+                        "bg-zinc-800 text-zinc-100 border border-zinc-700 shadow-lg",
+                        "opacity-0 group-hover/nav:opacity-100",
+                        "transition-opacity duration-150 delay-75"
+                    )}
+                >
+                    {label}
+                    {/* Arrow */}
+                    <span className="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent border-r-zinc-800" />
+                </div>
+            )}
+        </div>
     );
 }
 

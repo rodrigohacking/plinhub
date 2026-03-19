@@ -9,13 +9,13 @@ export function KPICard({
     trend,
     trendValue,
     trendLabel = 'vs mês anterior',
-    iconColor = "text-blue-500",
-    iconBg = "bg-blue-50",
+    iconColor = "text-[var(--text-muted)]",
+    iconBg = "",
     className,
 }) {
     return (
         <div className={cn(
-            "bg-white dark:bg-[var(--surface)] rounded-2xl border border-[var(--border)]",
+            "bg-[var(--surface)] rounded-2xl border border-[var(--border)]",
             "shadow-[var(--shadow-sm)] hover:shadow-[var(--shadow-md)]",
             "p-5 flex flex-col gap-4 transition-all duration-200 hover:-translate-y-[2px]",
             className
@@ -23,9 +23,7 @@ export function KPICard({
             {/* Header */}
             <div className="flex items-start justify-between">
                 <div className="flex items-center gap-2">
-                    <div className={cn("p-2 rounded-xl", iconBg)}>
-                        {Icon && <Icon className={cn("w-4 h-4", iconColor)} />}
-                    </div>
+                    {Icon && <Icon className={cn("w-4 h-4", iconColor)} />}
                 </div>
                 <Info className="w-3.5 h-3.5 text-[var(--text-muted)]" />
             </div>
@@ -44,10 +42,10 @@ export function KPICard({
                     <span className={cn(
                         "inline-flex items-center gap-0.5 text-xs font-semibold px-1.5 py-0.5 rounded-full",
                         trend === 'up'
-                            ? "bg-green-50 text-green-600"
+                            ? "bg-[var(--success-light)] text-[var(--success)]"
                             : trend === 'down'
-                                ? "bg-red-50 text-red-500"
-                                : "bg-slate-100 text-slate-500"
+                                ? "bg-[var(--danger-light)] text-[var(--danger)]"
+                                : "bg-[var(--surface-raised)] text-[var(--text-muted)]"
                     )}>
                         {trend === 'up' && <TrendingUp className="w-3 h-3" />}
                         {trend === 'down' && <TrendingDown className="w-3 h-3" />}

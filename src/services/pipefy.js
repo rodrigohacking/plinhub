@@ -545,7 +545,7 @@ export async function fetchPipefyDeals(orgId, pipeId, token, userConfig = {}, se
  * Fetch Pipe Structure (Phases and Fields) for Configuration Dropdowns
  */
 export async function getPipeDetails(pipeId, token) {
-  if (!token || !pipeId) throw new Error('Token e Pipe ID são obrigatórios.');
+  if (!pipeId) throw new Error('Pipe ID é obrigatório.');
 
   const query = `
     {

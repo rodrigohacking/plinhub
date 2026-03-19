@@ -346,22 +346,22 @@ async function handlePipefySyncRequest(req, res) {
             });
         }
 
-        if (!integration.pipefyToken || !integration.pipefyPipeId) {
+        if (!integration.pipefyPipeId) {
             return res.status(400).json({
                 success: false,
-                error: 'Pipefy token or pipe ID not configured.'
+                error: 'Pipefy pipe ID not configured.'
             });
         }
 
-        // Decrypt token (decrypt function handles plain text safely)
-        let token;
-        try {
-            token = decrypt(integration.pipefyToken);
-        } catch (e) {
-            return res.status(400).json({
-                success: false,
-                error: 'Failed to decrypt Pipefy token.'
-            });
+        // Decrypt DB token if present — used only as last-resort fallback.
+        // OAuth2 service account (pipefyToken.service) handles auth automatically.
+        let token = null;
+        if (integration.pipefyToken) {
+            try {
+                token = decrypt(integration.pipefyToken);
+            } catch (e) {
+                console.warn('[PipefySync] Could not decrypt DB token, will rely on OAuth2/env fallback.');
+            }
         }
 
         // Parse settings (phase mapping, value field, etc.)

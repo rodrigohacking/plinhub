@@ -4,6 +4,7 @@ const supabase = require('../utils/supabase'); // Changed from prisma
 const { encrypt, decrypt } = require('../utils/encryption');
 const pipefyService = require('../services/pipefy.service');
 const metaAdsService = require('../services/metaAds.service');
+const { ensureValidMetaToken, exchangeForLongLivedToken } = require('../services/metaToken.service');
 
 /**
  * Get all integrations for a company
@@ -56,14 +57,19 @@ router.post('/:companyId/pipefy', async (req, res) => {
             .eq('type', 'pipefy')
             .single();
 
+        // Use token from body; if absent, fall back to env PIPEFY_TOKEN
+        const resolvedToken = pipefyToken || process.env.PIPEFY_TOKEN;
+        const encryptedToken = (resolvedToken && (resolvedToken.includes(':') || resolvedToken.startsWith('U2Fsd')))
+            ? resolvedToken
+            : encrypt(resolvedToken);
+
         const payload = {
             companyId: companyId,
-            type: 'pipefy', // Unique key comb
+            type: 'pipefy',
             pipefyOrgId,
             pipefyPipeId,
-            // Prevent double encryption: Check if it looks like CryptoJS 'U2Fsd' or old format ':'
-            pipefyToken: (pipefyToken && (pipefyToken.includes(':') || pipefyToken.startsWith('U2Fsd'))) ? pipefyToken : encrypt(pipefyToken),
-            settings: settings || {}, // Save settings (phases, fields)
+            pipefyToken: encryptedToken,
+            settings: settings || {},
             isActive: true,
             updatedAt: new Date()
         };
@@ -97,6 +103,14 @@ router.post('/:companyId/meta', async (req, res) => {
         const { companyId } = req.params;
         const { metaAdAccountId, metaToken } = req.body;
 
+        // Use token from body; if absent, fall back to env META_ADS_TOKEN
+        const resolvedMetaToken = metaToken || process.env.META_ADS_TOKEN;
+        const exchange = resolvedMetaToken ? await exchangeForLongLivedToken(resolvedMetaToken) : null;
+        const finalToken = exchange?.accessToken || resolvedMetaToken;
+        const tokenExpiry = exchange?.expiresIn
+            ? new Date(Date.now() + exchange.expiresIn * 1000).toISOString()
+            : null;
+
         const { data: existing } = await supabase
             .from('Integration')
             .select('id')
@@ -108,7 +122,8 @@ router.post('/:companyId/meta', async (req, res) => {
             companyId: companyId,
             type: 'meta_ads',
             metaAdAccountId,
-            metaAccessToken: (metaToken && metaToken.startsWith('U2Fsd')) ? metaToken : encrypt(metaToken),
+            metaAccessToken: (finalToken && finalToken.startsWith('U2Fsd')) ? finalToken : encrypt(finalToken),
+            metaTokenExpiry: tokenExpiry,
             isActive: true,
             updatedAt: new Date()
         };
@@ -137,7 +152,21 @@ router.post('/:companyId/meta', async (req, res) => {
  */
 router.post('/:companyId/pipefy/test', async (req, res) => {
     try {
-        const { pipefyToken } = req.body;
+        const { companyId } = req.params;
+        let { pipefyToken } = req.body;
+
+        // If no token in body, fetch from DB; if still missing, fall back to env
+        if (!pipefyToken) {
+            const { data: integration } = await supabase
+                .from('Integration')
+                .select('pipefyToken')
+                .eq('companyId', companyId)
+                .eq('type', 'pipefy')
+                .single();
+            pipefyToken = integration?.pipefyToken
+                ? decrypt(integration.pipefyToken)
+                : process.env.PIPEFY_TOKEN;
+        }
 
         const result = await pipefyService.testConnection(pipefyToken);
         res.json(result);
@@ -156,16 +185,21 @@ router.post('/:companyId/meta/test', async (req, res) => {
 
         const { data: integration, error } = await supabase
             .from('Integration')
-            .select('metaAccessToken')
+            .select('id, metaAccessToken, metaTokenExpiry')
             .eq('companyId', companyId)
             .eq('type', 'meta_ads')
             .single();
 
+        let accessToken;
         if (error || !integration || !integration.metaAccessToken) {
-            return res.status(404).json({ error: 'Meta Ads integration not found' });
+            // Fall back to env token
+            accessToken = process.env.META_ADS_TOKEN;
+            if (!accessToken) return res.status(404).json({ error: 'Meta Ads token não configurado' });
+        } else {
+            const tokenResult = await ensureValidMetaToken(integration);
+            accessToken = tokenResult.accessToken;
         }
 
-        const accessToken = decrypt(integration.metaAccessToken);
         const result = await metaAdsService.testConnection(accessToken);
 
         res.json(result);
@@ -217,10 +251,10 @@ router.get('/:companyId/pipefy/deals', async (req, res) => {
             .eq('isActive', true)
             .single();
 
-        if (intError || !integration || !integration.pipefyToken) {
+        if (intError || !integration || !integration.pipefyPipeId) {
             return res.status(404).json({
                 success: false,
-                error: 'Integração Pipefy não encontrada ou sem token.',
+                error: 'Integração Pipefy não encontrada ou sem Pipe ID configurado.',
                 deals: []
             });
         }
@@ -231,8 +265,9 @@ router.get('/:companyId/pipefy/deals', async (req, res) => {
             .eq('id', companyId)
             .single();
 
-        // 2. Decrypt token
-        const token = decrypt(integration.pipefyToken);
+        // 2. Resolve token — OAuth2 is primary (pipefyToken.service handles it automatically);
+        //    DB token used only as last-resort fallback via makeRequest's fallbackToken param.
+        const token = integration.pipefyToken ? decrypt(integration.pipefyToken) : null;
         const pipeId = integration.pipefyPipeId;
 
         console.log(`[PipefyDeals] Fetching for ${company?.name || companyId} | Pipe: ${pipeId}`);

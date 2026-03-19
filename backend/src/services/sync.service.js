@@ -2,6 +2,7 @@ const supabase = require('../utils/supabase'); // Changed from prisma
 const { decrypt } = require('../utils/encryption');
 const metaAdsService = require('./metaAds.service');
 const pipefyService = require('./pipefy.service');
+const { ensureValidMetaToken } = require('./metaToken.service');
 
 class SyncService {
     /**
@@ -58,9 +59,9 @@ class SyncService {
                 }
             }
 
-            // Sync Pipefy
+            // Sync Pipefy — token resolvido via OAuth2/env pelo pipefyToken.service
             const pipefyIntegration = integrations.find(i => i.type === 'pipefy');
-            if (pipefyIntegration && pipefyIntegration.pipefyToken) {
+            if (pipefyIntegration && pipefyIntegration.pipefyPipeId) {
                 try {
                     results.pipefy = await this.syncPipefy(companyId, pipefyIntegration);
                 } catch (error) {
@@ -83,7 +84,7 @@ class SyncService {
      * Sync Meta Ads metrics
      */
     async syncMetaAds(companyId, integration) {
-        const accessToken = decrypt(integration.metaAccessToken);
+        const { accessToken } = await ensureValidMetaToken(integration);
         const adAccountId = integration.metaAdAccountId;
 
         // Get company name for campaign filtering
@@ -234,7 +235,15 @@ class SyncService {
      * Sync Pipefy metrics
      */
     async syncPipefy(companyId, integration, daysToSync = 180) {
-        const token = decrypt(integration.pipefyToken);
+        // Resolve token do banco como fallback — o pipefyToken.service prioriza OAuth2 automaticamente
+        let token = null;
+        try {
+            token = integration.pipefyToken ? decrypt(integration.pipefyToken) : null;
+        } catch (e) {
+            token = integration.pipefyToken;
+        }
+        // Nota: getValidPipefyToken() é chamado internamente pelo pipefy.service via makeRequest()
+        // O token aqui serve apenas como último fallback caso OAuth2 e PIPEFY_TOKEN do env não estejam configurados
         const pipeId = integration.pipefyPipeId;
 
         // Get dynamic range (Default to 180 days for full sync, or less for incremental)

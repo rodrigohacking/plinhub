@@ -1,7 +1,8 @@
 import React, { memo } from 'react';
 import { motion } from 'framer-motion';
-import { ResponsiveContainer, BarChart, CartesianGrid, XAxis, YAxis, Tooltip, Bar, Legend } from 'recharts';
-import { Users, CircleDollarSign, Clock, Percent } from 'lucide-react';
+import { ResponsiveContainer, BarChart, CartesianGrid, XAxis, YAxis, Tooltip, Bar, Legend, Cell } from 'recharts';
+import { TOOLTIP_STYLE, GRID_PROPS, AXIS_TICK, AXIS_SHARED, barRadius, MAX_BAR_SIZE, BAR_BG } from '../../lib/chartTheme';
+import { Users, CircleDollarSign, Clock, Percent, Ban } from 'lucide-react';
 import { formatCurrency, formatPercent } from '../../lib/utils';
 
 export const SDRPerformanceTab = memo(function SDRPerformanceTab({ metrics, sdrStats, company, tabVariants }) {
@@ -16,20 +17,15 @@ export const SDRPerformanceTab = memo(function SDRPerformanceTab({ metrics, sdrS
             exit="exit"
             className="space-y-8"
         >
-            {/* 1. Hero Banner (SDR Theme - Violet/Dark) */}
-            <div className="bg-gradient-to-r from-violet-600 to-fuchsia-900 rounded-2xl md:rounded-3xl p-5 sm:p-8 md:p-10 text-white shadow-2xl relative overflow-hidden">
-                <div className="absolute top-0 right-0 w-96 h-96 bg-white/10 rounded-full -mr-32 -mt-32 blur-3xl"></div>
-                <div className="relative z-10 flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4">
-                    <div>
-                        <h2 className="text-2xl sm:text-3xl md:text-4xl font-black mb-2 tracking-tight text-white">Performance do Time</h2>
-                        <p className="text-violet-100 text-sm sm:text-base md:text-lg">Análise detalhada de produtividade e conversão.</p>
-                    </div>
-                    <div className="flex gap-3 sm:gap-4">
-                        <div className="bg-white/10 backdrop-blur-md px-4 sm:px-6 py-2 sm:py-3 rounded-xl sm:rounded-2xl border border-white/20">
-                            <p className="text-xs uppercase font-bold text-violet-200 mb-1">SDRs Ativos</p>
-                            <p className="text-xl sm:text-2xl font-black text-white">{sdrStats.length}</p>
-                        </div>
-                    </div>
+            {/* 1. Hero Banner */}
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <div>
+                    <h2 className="text-2xl sm:text-3xl font-black tracking-tight text-[var(--text-primary)]">Vendedores — Performance</h2>
+                    <p className="text-[var(--text-secondary)] text-sm mt-1">Análise detalhada de produtividade e conversão.</p>
+                </div>
+                <div className="bg-[var(--surface-raised)] px-4 py-2 rounded-xl border border-[var(--border)]">
+                    <p className="text-[10px] uppercase font-bold text-[var(--text-muted)] mb-0.5">Vendedores Ativos</p>
+                    <p className="text-lg font-black text-[var(--text-primary)]">{sdrStats.length}</p>
                 </div>
             </div>
 
@@ -52,18 +48,18 @@ export const SDRPerformanceTab = memo(function SDRPerformanceTab({ metrics, sdrS
                         let barColor = "bg-primary";
 
                         if (index === 0) {
-                            rankColor = "bg-yellow-100 text-yellow-700 border-yellow-200 shadow-yellow-100 dark:bg-yellow-900/40 dark:text-yellow-400";
-                            cardStyle = "border-yellow-200 bg-yellow-50/50 dark:border-yellow-900/50 dark:bg-yellow-900/10";
+                            rankColor = "bg-yellow-500/20 text-yellow-400 border-yellow-500/30";
+                            cardStyle = "border-yellow-500/20 bg-yellow-500/5";
                             barColor = "bg-yellow-500";
                         }
                         if (index === 1) {
-                            rankColor = "bg-slate-200 text-slate-700 border-slate-300 dark:bg-slate-800 dark:text-slate-300";
-                            cardStyle = "border-slate-200 bg-slate-50/50 dark:border-slate-800 dark:bg-slate-900/30";
+                            rankColor = "bg-[var(--surface-raised)] text-[var(--text-secondary)] border-[var(--border)]";
+                            cardStyle = "border-[var(--border)] bg-[var(--surface-raised)]";
                             barColor = "bg-slate-500";
                         }
                         if (index === 2) {
-                            rankColor = "bg-orange-100 text-orange-800 border-orange-200 dark:bg-orange-900/40 dark:text-orange-400";
-                            cardStyle = "border-orange-200 bg-orange-50/50 dark:border-orange-900/50 dark:bg-orange-900/10";
+                            rankColor = "bg-orange-500/20 text-orange-400 border-orange-500/30";
+                            cardStyle = "border-orange-500/20 bg-orange-500/5";
                             barColor = "bg-orange-500";
                         }
 
@@ -146,7 +142,7 @@ export const SDRPerformanceTab = memo(function SDRPerformanceTab({ metrics, sdrS
                     <div className="flex justify-between items-start mb-3 sm:mb-6">
                         <div>
                             <p className="text-muted-foreground text-xs sm:text-sm font-medium mb-1">Vendas Fechadas</p>
-                            <h3 className="text-2xl sm:text-3xl md:text-4xl font-black text-green-600 dark:text-green-400">{metrics.wonCount}</h3>
+                            <h3 className="text-2xl sm:text-3xl md:text-4xl font-black text-green-400">{metrics.wonCount}</h3>
                         </div>
                         <div className="p-2 sm:p-3 bg-green-500/10 rounded-xl sm:rounded-2xl text-green-600">
                             <CircleDollarSign className="w-4 h-4 sm:w-6 sm:h-6" />
@@ -163,7 +159,9 @@ export const SDRPerformanceTab = memo(function SDRPerformanceTab({ metrics, sdrS
                     <div className="flex justify-between items-start mb-3 sm:mb-6">
                         <div>
                             <p className="text-muted-foreground text-xs sm:text-sm font-medium mb-1">Tempo Médio</p>
-                            <h3 className="text-2xl sm:text-3xl md:text-4xl font-black text-orange-500 dark:text-orange-400">{metrics.avgClosingTime?.toFixed(1) || 0} <span className="text-sm sm:text-lg text-muted-foreground font-medium">dias</span></h3>
+                            <h3 className="text-2xl sm:text-3xl md:text-4xl font-black text-orange-400">
+                                {metrics.avgClosingTime ? <>{metrics.avgClosingTime.toFixed(1)} <span className="text-sm sm:text-lg text-muted-foreground font-medium">dias</span></> : '–'}
+                            </h3>
                         </div>
                         <div className="p-2 sm:p-3 bg-orange-500/10 rounded-xl sm:rounded-2xl text-orange-500">
                             <Clock className="w-4 h-4 sm:w-6 sm:h-6" />
@@ -180,7 +178,7 @@ export const SDRPerformanceTab = memo(function SDRPerformanceTab({ metrics, sdrS
                     <div className="flex justify-between items-start mb-3 sm:mb-6">
                         <div>
                             <p className="text-muted-foreground text-xs sm:text-sm font-medium mb-1">Conversão Global</p>
-                            <h3 className="text-2xl sm:text-3xl md:text-4xl font-black text-purple-600 dark:text-purple-400">{formatPercent(metrics.conversionRate)}</h3>
+                            <h3 className="text-2xl sm:text-3xl md:text-4xl font-black text-purple-400">{formatPercent(metrics.conversionRate)}</h3>
                         </div>
                         <div className="p-2 sm:p-3 bg-purple-500/10 rounded-xl sm:rounded-2xl text-purple-600">
                             <Percent className="w-4 h-4 sm:w-6 sm:h-6" />
@@ -196,7 +194,7 @@ export const SDRPerformanceTab = memo(function SDRPerformanceTab({ metrics, sdrS
             {/* 3. Section: Performance Individual */}
             <div className="bg-card p-4 sm:p-6 md:p-8 rounded-2xl md:rounded-3xl shadow-xl border border-border">
                 <div className="mb-5 sm:mb-8">
-                    <h3 className="text-xl font-bold text-foreground">Performance Individual dos SDR's</h3>
+                    <h3 className="text-xl font-bold text-foreground">Performance Individual dos Vendedores</h3>
                     <p className="text-sm text-muted-foreground font-medium">Análise detalhada por representante</p>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-8 h-auto md:h-[350px]">
@@ -205,23 +203,17 @@ export const SDRPerformanceTab = memo(function SDRPerformanceTab({ metrics, sdrS
                         <h3 className="text-xs font-bold uppercase text-muted-foreground mb-6">Taxa de Conversão</h3>
                         <ResponsiveContainer width="100%" height="85%">
                             <BarChart data={[...sdrStats].sort((a, b) => b.conversion - a.conversion)} margin={{ bottom: 20 }}>
-                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" opacity={0.3} />
-                                <XAxis
-                                    dataKey="name"
-                                    axisLine={false}
-                                    tickLine={false}
-                                    fontSize={10}
-                                    tick={{ fill: '#64748b', angle: -20, textAnchor: 'end' }}
-                                    interval={0}
-                                    height={40}
-                                />
+                                <defs>
+                                    <linearGradient id="gradConversion" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="0%" stopColor="#8b5cf6" stopOpacity={1} />
+                                        <stop offset="100%" stopColor="#5b21b6" stopOpacity={1} />
+                                    </linearGradient>
+                                </defs>
+                                <CartesianGrid {...GRID_PROPS} />
+                                <XAxis dataKey="name" {...AXIS_SHARED} fontSize={10} tick={{ ...AXIS_TICK, angle: -20, textAnchor: 'end' }} interval={0} height={40} />
                                 <YAxis hide />
-                                <Tooltip
-                                    formatter={(value) => [`${value.toFixed(1)}%`, 'Conversão']}
-                                    cursor={{ fill: 'var(--muted)' }}
-                                    contentStyle={{ borderRadius: '12px', border: '1px solid var(--border)', backgroundColor: 'var(--card)', color: 'var(--foreground)', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                                />
-                                <Bar dataKey="conversion" fill="#8b5cf6" radius={[6, 6, 0, 0]} barSize={32} />
+                                <Tooltip {...TOOLTIP_STYLE} formatter={(value) => [`${value.toFixed(1)}%`, 'Taxa de Conversão']} />
+                                <Bar dataKey="conversion" fill="url(#gradConversion)" radius={barRadius} maxBarSize={MAX_BAR_SIZE} background={BAR_BG} isAnimationActive={true} animationDuration={600} animationEasing="ease-out" />
                             </BarChart>
                         </ResponsiveContainer>
                     </div>
@@ -231,15 +223,17 @@ export const SDRPerformanceTab = memo(function SDRPerformanceTab({ metrics, sdrS
                         <h3 className="text-xs font-bold uppercase text-muted-foreground mb-6">Tempo Médio (Dias)</h3>
                         <ResponsiveContainer width="100%" height="85%">
                             <BarChart data={[...sdrStats].sort((a, b) => a.avgTime - b.avgTime)} layout="vertical" margin={{ left: 10 }}>
-                                <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#e2e8f0" opacity={0.3} />
+                                <defs>
+                                    <linearGradient id="gradTime" x1="0" y1="0" x2="1" y2="0">
+                                        <stop offset="0%" stopColor="#b45309" stopOpacity={1} />
+                                        <stop offset="100%" stopColor="#f59e0b" stopOpacity={1} />
+                                    </linearGradient>
+                                </defs>
+                                <CartesianGrid {...GRID_PROPS} horizontal={true} vertical={false} />
                                 <XAxis type="number" hide />
-                                <YAxis dataKey="name" type="category" width={80} axisLine={false} tickLine={false} fontSize={10} tick={{ fill: '#64748b' }} />
-                                <Tooltip
-                                    cursor={{ fill: 'var(--muted)' }}
-                                    formatter={(value) => [`${value.toFixed(1)} dias`, 'Tempo Médio']}
-                                    contentStyle={{ borderRadius: '12px', border: '1px solid var(--border)', backgroundColor: 'var(--card)', color: 'var(--foreground)', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                                />
-                                <Bar dataKey="avgTime" fill="#f59e0b" radius={[0, 6, 6, 0]} barSize={24} />
+                                <YAxis dataKey="name" type="category" width={80} {...AXIS_SHARED} fontSize={10} tick={AXIS_TICK} />
+                                <Tooltip {...TOOLTIP_STYLE} formatter={(value) => [`${value.toFixed(1)} dias`, 'Tempo Médio']} />
+                                <Bar dataKey="avgTime" fill="url(#gradTime)" radius={[0, 4, 4, 0]} maxBarSize={28} isAnimationActive={true} animationDuration={600} animationEasing="ease-out" />
                             </BarChart>
                         </ResponsiveContainer>
                     </div>
@@ -249,23 +243,17 @@ export const SDRPerformanceTab = memo(function SDRPerformanceTab({ metrics, sdrS
                         <h3 className="text-xs font-bold uppercase text-muted-foreground mb-6">Valor de Vendas</h3>
                         <ResponsiveContainer width="100%" height="85%">
                             <BarChart data={sdrStats} margin={{ bottom: 20 }}>
-                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" opacity={0.3} />
-                                <XAxis
-                                    dataKey="name"
-                                    axisLine={false}
-                                    tickLine={false}
-                                    fontSize={10}
-                                    tick={{ fill: '#64748b', angle: -20, textAnchor: 'end' }}
-                                    interval={0}
-                                    height={40}
-                                />
+                                <defs>
+                                    <linearGradient id="gradSales" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="0%" stopColor="#10b981" stopOpacity={1} />
+                                        <stop offset="100%" stopColor="#065f46" stopOpacity={1} />
+                                    </linearGradient>
+                                </defs>
+                                <CartesianGrid {...GRID_PROPS} />
+                                <XAxis dataKey="name" {...AXIS_SHARED} fontSize={10} tick={{ ...AXIS_TICK, angle: -20, textAnchor: 'end' }} interval={0} height={40} />
                                 <YAxis hide />
-                                <Tooltip
-                                    formatter={(value) => [formatCurrency(value), 'Vendas']}
-                                    cursor={{ fill: 'var(--muted)' }}
-                                    contentStyle={{ borderRadius: '12px', border: '1px solid var(--border)', backgroundColor: 'var(--card)', color: 'var(--foreground)', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                                />
-                                <Bar dataKey="wonValue" fill="#10b981" radius={[6, 6, 0, 0]} barSize={32} />
+                                <Tooltip {...TOOLTIP_STYLE} formatter={(value) => [formatCurrency(value), 'Valor de Vendas']} />
+                                <Bar dataKey="wonValue" fill="url(#gradSales)" radius={barRadius} maxBarSize={MAX_BAR_SIZE} background={BAR_BG} isAnimationActive={true} animationDuration={600} animationEasing="ease-out" />
                             </BarChart>
                         </ResponsiveContainer>
                     </div>
@@ -302,12 +290,15 @@ export const SDRPerformanceTab = memo(function SDRPerformanceTab({ metrics, sdrS
                             <div className="relative w-32 h-32 flex items-center justify-center">
                                 {/* Gauge Background */}
                                 <div className="absolute inset-0 rounded-full border-[12px] border-muted"></div>
-                                {/* Gauge Value (Static simplified visual for now) */}
-                                <svg className="absolute inset-0 w-full h-full -rotate-90">
+                                {/* Gauge Value com glow sutil */}
+                                <svg
+                                    className="absolute inset-0 w-full h-full -rotate-90"
+                                    style={{ filter: gauge.val > 0 ? `drop-shadow(0 0 8px ${gauge.color}66)` : 'none' }}
+                                >
                                     <circle
                                         cx="64"
                                         cy="64"
-                                        r="52" // 64 - 12
+                                        r="52"
                                         fill="transparent"
                                         stroke={gauge.color}
                                         strokeWidth="12"
@@ -318,6 +309,7 @@ export const SDRPerformanceTab = memo(function SDRPerformanceTab({ metrics, sdrS
                                 </svg>
                                 <span className="text-3xl font-black text-foreground z-10">{gauge.val.toFixed(0)}%</span>
                             </div>
+                            <p className="text-[11px] text-[#71717a] mt-3 text-center font-medium">conversão na etapa</p>
                         </div>
                     ))}
                 </div>
@@ -327,39 +319,58 @@ export const SDRPerformanceTab = memo(function SDRPerformanceTab({ metrics, sdrS
             <div className="bg-card p-4 sm:p-6 md:p-8 rounded-2xl md:rounded-3xl shadow-xl border border-border h-[350px] sm:h-[400px] md:h-[450px] flex flex-col">
                 <div className="mb-6">
                     <h3 className="text-xl font-bold text-foreground">Motivos de Perda (Detalhado)</h3>
-                    <p className="text-sm text-muted-foreground font-medium">Principais razões de churn</p>
+                    <p className="text-sm text-muted-foreground font-medium">Principais razões de perdas</p>
                 </div>
-                <div className="flex-1 w-full">
+                {(() => {
+                    const hasAnyReasons = sdrStats.some(s => Object.keys(s.lostReasons || {}).length > 0);
+                    if (!hasAnyReasons) {
+                        return (
+                            <div className="flex-1 flex flex-col items-center justify-center gap-3 text-muted-foreground">
+                                <Ban className="w-12 h-12 opacity-20" />
+                                <p className="text-sm font-medium">Nenhum motivo de perda registrado no período</p>
+                            </div>
+                        );
+                    }
+                    return null;
+                })()}
+                <div className={`flex-1 w-full ${sdrStats.some(s => Object.keys(s.lostReasons || {}).length > 0) ? '' : 'hidden'}`}>
                     <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={sdrStats}>
-                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" opacity={0.3} />
-                            <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b' }} />
-                            <YAxis tick={{ fill: '#64748b' }} />
-                            <Tooltip
-                                contentStyle={{ borderRadius: '12px', border: '1px solid var(--border)', backgroundColor: 'var(--card)', color: 'var(--foreground)', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                                cursor={{ fill: 'var(--muted)' }}
-                            />
-                            <Legend wrapperStyle={{ paddingTop: '20px', fontSize: '11px', color: 'var(--foreground)' }} />
-                            {(() => {
-                                const allReasons = new Set();
-                                sdrStats.forEach(s => {
-                                    Object.keys(s.lostReasons || {}).forEach(r => allReasons.add(r));
-                                });
-                                const reasonsList = Array.from(allReasons);
-                                const REASON_COLORS = ['#ef4444', '#f59e0b', '#3b82f6', '#8b5cf6', '#ec4899', '#6366f1'];
+                        {(() => {
+                            const allReasons = new Set();
+                            sdrStats.forEach(s => {
+                                Object.keys(s.lostReasons || {}).forEach(r => allReasons.add(r));
+                            });
+                            const reasonsList = Array.from(allReasons);
+                            const REASON_COLORS = ['#ef4444', '#f59e0b', '#3b82f6', '#8b5cf6', '#ec4899', '#6366f1'];
 
-                                return reasonsList.map((reason, idx) => (
-                                    <Bar
-                                        key={reason}
-                                        dataKey={`lostReasons.${reason}`}
-                                        name={reason}
-                                        stackId="a"
-                                        fill={REASON_COLORS[idx % REASON_COLORS.length]}
-                                        radius={idx === reasonsList.length - 1 ? [4, 4, 0, 0] : [0, 0, 0, 0]}
-                                    />
-                                ));
-                            })()}
-                        </BarChart>
+                            // Flatten nested lostReasons into top-level keys for Recharts
+                            const flatData = sdrStats.map(s => ({
+                                name: s.name,
+                                ...Object.fromEntries(
+                                    reasonsList.map(r => [r, (s.lostReasons || {})[r] || 0])
+                                )
+                            }));
+
+                            return (
+                                <BarChart data={flatData}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="#27272a" strokeOpacity={0.6} vertical={false} />
+                                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={AXIS_TICK} />
+                                    <YAxis tick={AXIS_TICK} />
+                                    <Tooltip {...TOOLTIP_STYLE} />
+                                    <Legend wrapperStyle={{ paddingTop: '20px', fontSize: '11px', color: '#71717a' }} />
+                                    {reasonsList.map((reason, idx) => (
+                                        <Bar
+                                            key={reason}
+                                            dataKey={reason}
+                                            name={reason}
+                                            stackId="a"
+                                            fill={REASON_COLORS[idx % REASON_COLORS.length]}
+                                            radius={idx === reasonsList.length - 1 ? [4, 4, 0, 0] : [0, 0, 0, 0]}
+                                        />
+                                    ))}
+                                </BarChart>
+                            );
+                        })()}
                     </ResponsiveContainer>
                 </div>
             </div>

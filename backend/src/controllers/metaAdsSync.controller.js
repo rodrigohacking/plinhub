@@ -17,7 +17,7 @@
 
 const metaAdsService = require('../services/metaAds.service');
 const supabase = require('../utils/supabase');
-const { decrypt } = require('../utils/encryption');
+const { ensureValidMetaToken } = require('../services/metaToken.service');
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -152,7 +152,7 @@ async function handleSyncRequest(req, res) {
         // Resolve the integration for this company
         const { data: integration, error: intError } = await supabase
             .from('Integration')
-            .select('metaAdAccountId, metaAccessToken, metaStatus')
+            .select('id, metaAdAccountId, metaAccessToken, metaStatus, metaTokenExpiry')
             .eq('companyId', companyId)
             .eq('type', 'meta_ads')
             .eq('isActive', true)
@@ -186,7 +186,7 @@ async function handleSyncRequest(req, res) {
             .eq('id', companyId)
             .single();
 
-        const accessToken = decrypt(integration.metaAccessToken);
+        const { accessToken } = await ensureValidMetaToken(integration);
 
         const result = await syncDailyMetrics(
             companyId,
@@ -239,7 +239,7 @@ async function handleSyncRequest(req, res) {
 async function runCronSync(companyId, integration, daysToSync = 7) {
     const startTime = Date.now();
     try {
-        const accessToken = decrypt(integration.metaAccessToken);
+        const { accessToken } = await ensureValidMetaToken(integration);
 
         const { data: company } = await supabase
             .from('Company')

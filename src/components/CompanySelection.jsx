@@ -177,7 +177,8 @@ export function CompanySelection({ data, onSelect }) {
       });
 
       if (!response.ok) {
-        throw new Error("Falha ao excluir no servidor");
+        const errBody = await response.json().catch(() => ({}));
+        throw new Error(errBody.error || "Falha ao excluir no servidor");
       }
 
       setCompanies((prev) =>
@@ -187,7 +188,7 @@ export function CompanySelection({ data, onSelect }) {
       deleteCompanyConfig(companyId);
     } catch (err) {
       console.error("Erro na exclusão:", err);
-      toast.error("Erro ao excluir empresa.");
+      toast.error(`Erro ao excluir: ${err.message}`);
     } finally {
       setCompanyToDelete(null);
     }
