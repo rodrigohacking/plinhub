@@ -20,7 +20,7 @@ export const SDRPerformanceTab = memo(function SDRPerformanceTab({ metrics, sdrS
             {/* 1. Hero Banner */}
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                 <div>
-                    <h2 className="text-2xl sm:text-3xl font-black tracking-tight text-[var(--text-primary)]">Vendedores — Performance</h2>
+                    <h2 className="text-2xl sm:text-3xl font-black tracking-tight text-[var(--text-primary)]">Performance</h2>
                     <p className="text-[var(--text-secondary)] text-sm mt-1">Análise detalhada de produtividade e conversão.</p>
                 </div>
                 <div className="bg-[var(--surface-raised)] px-4 py-2 rounded-xl border border-[var(--border)]">
@@ -32,7 +32,7 @@ export const SDRPerformanceTab = memo(function SDRPerformanceTab({ metrics, sdrS
             {/* 1.5 Competitive Ranking */}
             <div className="bg-card p-4 sm:p-6 md:p-8 rounded-2xl md:rounded-3xl shadow-xl border border-border">
                 <h3 className="text-xl font-bold text-foreground mb-6 flex items-center gap-2">
-                    🏆 Ranking de Vendedores
+                    Ranking de Vendedores
                 </h3>
                 <div className="space-y-4">
                     {sdrStats.sort((a, b) => b.wonValue - a.wonValue).map((sdr, index) => {

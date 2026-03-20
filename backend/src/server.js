@@ -70,6 +70,7 @@ app.use('/api/sales', salesRoutes);
 app.use('/api/companies', companyRoutes);
 app.use('/api/webhooks', webhookRoutes);
 app.use('/api/invites', require('./routes/invite'));
+app.use('/api/meta', require('./routes/meta'));
 // Removed duplicate goalsRoutes usage
 
 // Health check

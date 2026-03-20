@@ -6,6 +6,7 @@ import {
 } from 'recharts';
 import { DollarSign, UserPlus, Target, MousePointer, TrendingUp, TrendingDown, Minus, Filter, Instagram, Globe, Search, Users, Ban, CircleDollarSign, PieChart as PieChartIcon, Leaf, RefreshCw, Activity, ChevronDown, ChevronUp } from 'lucide-react';
 import { toast } from 'sonner';
+import { CreativeGallery } from './marketing/CreativeGallery';
 import { KPICard } from './KPICard';
 import { GoalProgress } from './GoalProgress';
 import { formatCurrency, formatNumber, formatPercent, cn } from '../lib/utils';
@@ -161,7 +162,13 @@ export function DashboardMarketing({ company, data, onRefresh, dateRange, setDat
 
     // Determine if company sells insurance products
     const isAndar = company?.name?.toLowerCase().includes('andar');
-    const isInsuranceCompany = isAndar || company?.name?.toLowerCase().includes('apolar');
+    const isApolar = company?.name?.toLowerCase().includes('apolar');
+    const isInsuranceCompany = isAndar || isApolar;
+
+    // Terminologia contextual: Apolar usa 'Contratos', demais usam 'Apólices'
+    const labelVolume = isApolar ? 'Volume em Contratos' : 'Volume em Apólices';
+    const labelVenda  = isApolar ? 'contrato' : 'venda';
+    const labelVendas = isApolar ? 'contratos' : 'vendas';
 
     // Tabs Configuration - conditional based on company type
     // Product Definitions (Master List for Auto-Detection)
@@ -854,35 +861,39 @@ export function DashboardMarketing({ company, data, onRefresh, dateRange, setDat
                                 );
                             })()}
 
-                            {/* Investimento Realizado */}
+                            {/* Ritmo da Meta */}
                             {(() => {
                                 const pct = targets.investment > 0 ? (realized.investment / targets.investment) * 100 : null;
-                                const isGood = pct === null || pct >= 70;
-                                const Icon = isGood ? TrendingUp : pct >= 40 ? Minus : TrendingDown;
-                                const color = isGood ? 'text-emerald-400' : pct >= 40 ? 'text-amber-400' : 'text-red-400';
-                                const bg = isGood ? 'bg-emerald-400/10' : pct >= 40 ? 'bg-amber-400/10' : 'bg-red-400/10';
+                                // Projeção de fechamento: (realizado / dias passados) * dias no mês
+                                const now = new Date();
+                                const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+                                const daysPassed = now.getDate();
+                                const projectedInvestment = daysPassed > 0 ? (realized.investment / daysPassed) * daysInMonth : realized.investment;
+                                const Icon = !pct ? Minus : pct >= 70 ? TrendingUp : pct >= 40 ? Minus : TrendingDown;
+                                const color = !pct ? 'text-amber-400' : pct >= 70 ? 'text-emerald-400' : pct >= 40 ? 'text-amber-400' : 'text-red-400';
+                                const bg = !pct ? 'bg-amber-400/10' : pct >= 70 ? 'bg-emerald-400/10' : pct >= 40 ? 'bg-amber-400/10' : 'bg-red-400/10';
                                 return (
                                     <div className="p-5 sm:p-7">
-                                        <p className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest mb-2">Investimento Realizado</p>
+                                        <p className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest mb-2">Ritmo da Meta</p>
                                         <div className="flex items-end gap-3 flex-wrap">
-                                            <span className="text-3xl font-black text-[var(--text-primary)] tracking-tight">
-                                                {formatCurrency(realized.investment)}
+                                            <span className={cn("text-3xl font-black tracking-tight", color)}>
+                                                {pct !== null ? `${pct.toFixed(0)}%` : '–'}
                                             </span>
-                                            {pct !== null && (
-                                                <span className={cn("inline-flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full mb-1", bg, color)}>
-                                                    <Icon className="w-3 h-3" />
-                                                    {pct.toFixed(0)}%
-                                                </span>
-                                            )}
+                                            <span className={cn("inline-flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full mb-1", bg, color)}>
+                                                <Icon className="w-3 h-3" />
+                                                {pct !== null ? 'atingido' : 'sem meta'}
+                                            </span>
                                         </div>
                                         <p className="text-xs text-[var(--text-muted)] mt-2">
-                                            {targets.investment > 0 ? `Meta: ${formatCurrency(targets.investment)}` : 'Meta não definida'}
+                                            {realized.investment > 0 && targets.investment > 0
+                                                ? `Projeção: ${formatCurrency(projectedInvestment)} ao fim do mês`
+                                                : targets.investment > 0 ? `Meta: ${formatCurrency(targets.investment)}` : 'Meta não definida'}
                                         </p>
                                     </div>
                                 );
                             })()}
 
-                            {/* Volume em Apólices */}
+                            {/* Volume em Apólices / Contratos */}
                             {(() => {
                                 const salesTarget = targets.sales;
                                 const pct = salesTarget > 0 ? (realized.sales / salesTarget) * 100 : null;
@@ -891,14 +902,14 @@ export function DashboardMarketing({ company, data, onRefresh, dateRange, setDat
                                 const bg = !pct || pct >= 70 ? 'bg-emerald-400/10' : pct >= 40 ? 'bg-amber-400/10' : 'bg-red-400/10';
                                 return (
                                     <div className="p-5 sm:p-7">
-                                        <p className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest mb-2">Volume em Apólices</p>
+                                        <p className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest mb-2">{labelVolume}</p>
                                         <div className="flex items-end gap-3 flex-wrap">
                                             <span className="text-3xl font-black text-[var(--text-primary)] tracking-tight">
                                                 {formatCurrency(realized.volume)}
                                             </span>
                                             <span className={cn("inline-flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full mb-1", bg, color)}>
                                                 <Icon className="w-3 h-3" />
-                                                {realized.sales} vendas
+                                                {realized.sales} {labelVendas}
                                             </span>
                                         </div>
                                         <p className="text-xs text-[var(--text-muted)] mt-2">Receita total via Meta Ads</p>
@@ -908,59 +919,11 @@ export function DashboardMarketing({ company, data, onRefresh, dateRange, setDat
                         </div>
                     </div>
 
-                    {/* ═══ ZONA 2: MÉTRICAS ESSENCIAIS (5 cards) ══════════════════ */}
+                    {/* ═══ ZONA 2: MÉTRICAS ESSENCIAIS (3 cards únicos) ═══════════ */}
                     {activeTab === 'geral' && (
                         <div className="space-y-3">
-                            {/* 5 Essential Cards */}
-                            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-                                {/* Investimento */}
-                                <div className="bg-[var(--surface)] rounded-2xl border border-[var(--border)] shadow-[var(--shadow-sm)] hover:shadow-[var(--shadow-md)] transition-all duration-200 hover:-translate-y-0.5">
-                                    <div className="p-4">
-                                        <div className="flex items-center gap-2 mb-3">
-                                            <DollarSign className="w-3.5 h-3.5 text-[var(--text-muted)] flex-shrink-0" />
-                                            <p className="text-[10px] font-semibold text-[var(--text-secondary)] uppercase tracking-wide leading-tight">Investimento</p>
-                                        </div>
-                                        <p className="text-lg font-black text-[var(--text-primary)] truncate">{formatCurrency(realized.investment)}</p>
-                                        <GoalProgress actual={realized.investment} target={targets.investment} format="currency" />
-                                    </div>
-                                </div>
-
-                                {/* Leads */}
-                                <div className="bg-[var(--surface)] rounded-2xl border border-[var(--border)] shadow-[var(--shadow-sm)] hover:shadow-[var(--shadow-md)] transition-all duration-200 hover:-translate-y-0.5">
-                                    <div className="p-4">
-                                        <div className="flex items-center gap-2 mb-3">
-                                            <UserPlus className="w-3.5 h-3.5 text-[var(--text-muted)] flex-shrink-0" />
-                                            <p className="text-[10px] font-semibold text-[var(--text-secondary)] uppercase tracking-wide leading-tight">Leads</p>
-                                        </div>
-                                        <p className="text-lg font-black text-[var(--text-primary)] truncate">{formatNumber(realized.leads)}</p>
-                                        <GoalProgress actual={realized.leads} target={targets.leads} format="number" />
-                                    </div>
-                                </div>
-
-                                {/* Custo por Lead (CPL) */}
-                                <div className="bg-[var(--surface)] rounded-2xl border border-[var(--border)] shadow-[var(--shadow-sm)] hover:shadow-[var(--shadow-md)] transition-all duration-200 hover:-translate-y-0.5">
-                                    <div className="p-4">
-                                        <div className="flex items-center gap-2 mb-3">
-                                            <Target className="w-3.5 h-3.5 text-[var(--text-muted)] flex-shrink-0" />
-                                            <p className="text-[10px] font-semibold text-[var(--text-secondary)] uppercase tracking-wide leading-tight">Custo por Lead (CPL)</p>
-                                        </div>
-                                        <p className="text-lg font-black text-[var(--text-primary)] truncate">{formatCurrency(realized.cpl)}</p>
-                                        <GoalProgress actual={realized.cpl} target={targets.cpl} format="currency" inverse />
-                                    </div>
-                                </div>
-
-                                {/* Vendas */}
-                                <div className="bg-[var(--surface)] rounded-2xl border border-[var(--border)] shadow-[var(--shadow-sm)] hover:shadow-[var(--shadow-md)] transition-all duration-200 hover:-translate-y-0.5">
-                                    <div className="p-4">
-                                        <div className="flex items-center gap-2 mb-3">
-                                            <Instagram className="w-3.5 h-3.5 text-[var(--text-muted)] flex-shrink-0" />
-                                            <p className="text-[10px] font-semibold text-[var(--text-secondary)] uppercase tracking-wide leading-tight">Vendas</p>
-                                        </div>
-                                        <p className="text-lg font-black text-[var(--text-primary)] truncate">{realized.sales}</p>
-                                        <p className="text-[10px] text-[var(--text-muted)] mt-1">via Meta Ads</p>
-                                    </div>
-                                </div>
-
+                            {/* 3 Mini-cards únicos — sem duplicação com hero ou cards de detalhe */}
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                                 {/* Taxa de Conversão */}
                                 <div className="bg-[var(--surface)] rounded-2xl border border-[var(--border)] shadow-[var(--shadow-sm)] hover:shadow-[var(--shadow-md)] transition-all duration-200 hover:-translate-y-0.5">
                                     <div className="p-4">
@@ -968,11 +931,71 @@ export function DashboardMarketing({ company, data, onRefresh, dateRange, setDat
                                             <Activity className="w-3.5 h-3.5 text-[var(--text-muted)] flex-shrink-0" />
                                             <p className="text-[10px] font-semibold text-[var(--text-secondary)] uppercase tracking-wide leading-tight">Taxa de Conversão</p>
                                         </div>
-                                        <p className="text-lg font-black text-[var(--text-primary)] truncate">{(realized.conversionRate || 0).toFixed(1)}%</p>
-                                        <p className="text-[10px] text-[var(--text-muted)] mt-1">Lead → Venda</p>
+                                        {realized.leads === 0 ? (
+                                            <p className="text-sm text-[var(--text-muted)] font-medium mt-1">Sem dados no período</p>
+                                        ) : (
+                                            <>
+                                                <p className="text-lg font-black text-[var(--text-primary)] truncate">{(realized.conversionRate || 0).toFixed(1)}%</p>
+                                                <p className="text-[10px] text-[var(--text-muted)] mt-1">Lead → Venda</p>
+                                            </>
+                                        )}
                                     </div>
                                 </div>
+
+                                {/* ROI (%) */}
+                                {(() => {
+                                    const roiColor = roi > 5 ? 'text-emerald-400' : roi < -5 ? 'text-red-400' : 'text-amber-400';
+                                    const roiLabel = roi > 5 ? 'Positivo' : roi < -5 ? 'Negativo' : 'Neutro';
+                                    const roiStatusColor = roi > 5 ? 'text-emerald-400' : roi < -5 ? 'text-red-400' : 'text-amber-400';
+                                    return (
+                                        <div className="bg-[var(--surface)] rounded-2xl border border-[var(--border)] shadow-[var(--shadow-sm)] hover:shadow-[var(--shadow-md)] transition-all duration-200 hover:-translate-y-0.5">
+                                            <div className="p-4">
+                                                <div className="flex items-center gap-2 mb-3">
+                                                    <TrendingUp className="w-3.5 h-3.5 text-[var(--text-muted)] flex-shrink-0" />
+                                                    <p className="text-[10px] font-semibold text-[var(--text-secondary)] uppercase tracking-wide leading-tight">ROI</p>
+                                                </div>
+                                                <p className={cn("text-lg font-black truncate", roiColor)}>
+                                                    {roi > 0 ? '+' : ''}{roi.toFixed(0)}%
+                                                </p>
+                                                <p className={cn("text-[10px] font-medium mt-1", roiStatusColor)}>{roiLabel}</p>
+                                            </div>
+                                        </div>
+                                    );
+                                })()}
+
+                                {/* Meta CPL */}
+                                {(() => {
+                                    const cplOk = targets.cpl > 0 && realized.cpl > 0;
+                                    const cplStatus = !cplOk ? null : realized.cpl <= targets.cpl ? 'na-meta' : realized.cpl <= targets.cpl * 1.3 ? 'atencao' : 'acima';
+                                    const statusColor = cplStatus === 'na-meta' ? 'text-emerald-400' : cplStatus === 'atencao' ? 'text-amber-400' : cplStatus === 'acima' ? 'text-red-400' : 'text-[var(--text-muted)]';
+                                    const statusLabel = cplStatus === 'na-meta' ? 'Na Meta' : cplStatus === 'atencao' ? 'Atenção' : cplStatus === 'acima' ? 'Acima' : '–';
+                                    return (
+                                        <div className="bg-[var(--surface)] rounded-2xl border border-[var(--border)] shadow-[var(--shadow-sm)] hover:shadow-[var(--shadow-md)] transition-all duration-200 hover:-translate-y-0.5">
+                                            <div className="p-4">
+                                                <div className="flex items-center gap-2 mb-3">
+                                                    <Target className="w-3.5 h-3.5 text-[var(--text-muted)] flex-shrink-0" />
+                                                    <p className="text-[10px] font-semibold text-[var(--text-secondary)] uppercase tracking-wide leading-tight">Meta CPL</p>
+                                                </div>
+                                                <p className="text-lg font-black text-[var(--text-primary)] truncate">
+                                                    {targets.cpl > 0 ? formatCurrency(targets.cpl) : '–'}
+                                                </p>
+                                                {cplStatus && (
+                                                    <p className={cn("text-[10px] font-bold mt-1", statusColor)}>{statusLabel}</p>
+                                                )}
+                                            </div>
+                                        </div>
+                                    );
+                                })()}
                             </div>
+
+                            {/* Toggle extra cards */}
+                            <button
+                                onClick={toggleExtraCards}
+                                className="flex items-center gap-1.5 text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
+                            >
+                                {showExtraCards ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                                {showExtraCards ? 'Ocultar indicadores extras' : 'Mostrar todos os indicadores'}
+                            </button>
 
                             {/* Extra Cards (hidden by default) */}
                             {showExtraCards && (
@@ -1034,15 +1057,6 @@ export function DashboardMarketing({ company, data, onRefresh, dateRange, setDat
                                     </div>
                                 </div>
                             )}
-
-                            {/* Toggle extra cards */}
-                            <button
-                                onClick={toggleExtraCards}
-                                className="flex items-center gap-1.5 text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
-                            >
-                                {showExtraCards ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                                {showExtraCards ? 'Ocultar indicadores extras' : 'Mostrar todos os indicadores'}
-                            </button>
                         </div>
                     )}
 
@@ -1062,71 +1076,41 @@ export function DashboardMarketing({ company, data, onRefresh, dateRange, setDat
                             </button>
 
                             {showDetails && (
-                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 p-5 bg-[var(--surface)] border-t border-[var(--border)]">
+                                <div className="flex flex-col gap-6 p-5 bg-[var(--surface)] border-t border-[var(--border)]">
                                     {/* Funil de Conversão */}
                                     <div>
                                         <p className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wide mb-4">Funil de Conversão</p>
-                                        <div className="space-y-3">
-                                            <div className="p-4 bg-[var(--surface-raised)] rounded-xl flex justify-between items-center">
-                                                <span className="text-sm font-medium text-[var(--text-secondary)]">Impressões</span>
-                                                <span className="text-xl font-bold text-[var(--text-primary)]">{formatNumber(realized.impressions || 0)}</span>
+                                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                            <div className="p-4 bg-[var(--surface-raised)] rounded-xl">
+                                                <p className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">Impressões</p>
+                                                <p className="text-xl font-bold text-[var(--text-primary)]">{formatNumber(realized.impressions || 0)}</p>
                                             </div>
                                             <div className="p-4 bg-[var(--surface-raised)] rounded-xl">
-                                                <div className="flex justify-between items-center">
-                                                    <span className="text-sm font-medium text-[var(--text-secondary)]">Cliques</span>
-                                                    <span className="text-xl font-bold text-[var(--text-primary)]">{formatNumber(realized.clicks || 0)}</span>
-                                                </div>
-                                                <p className="text-xs text-[var(--text-muted)] mt-1 text-right">
-                                                    Taxa de Clique (CTR): {realized.impressions > 0 ? ((realized.clicks / realized.impressions) * 100).toFixed(2) : 0}%
+                                                <p className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">Cliques</p>
+                                                <p className="text-xl font-bold text-[var(--text-primary)]">{formatNumber(realized.clicks || 0)}</p>
+                                                <p className="text-[10px] text-[var(--text-muted)] mt-1">
+                                                    CTR {realized.impressions > 0 ? ((realized.clicks / realized.impressions) * 100).toFixed(2) : 0}%
                                                 </p>
                                             </div>
-                                            <div className="p-4 bg-[var(--surface-raised)] rounded-xl flex justify-between items-center">
-                                                <span className="text-sm font-medium text-[var(--text-secondary)]">Leads Gerados</span>
-                                                <span className="text-xl font-bold text-[var(--text-primary)]">{formatNumber(realized.leads || 0)}</span>
+                                            <div className="p-4 bg-[var(--surface-raised)] rounded-xl">
+                                                <p className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">Leads</p>
+                                                <p className="text-xl font-bold text-[var(--text-primary)]">{formatNumber(realized.leads || 0)}</p>
                                             </div>
-                                            <div className="p-4 bg-[var(--surface-raised)] rounded-xl flex justify-between items-center">
-                                                <span className="text-sm font-medium text-emerald-400">Vendas Fechadas</span>
-                                                <span className="text-xl font-bold text-emerald-400">{realized.sales || 0}</span>
+                                            <div className="p-4 bg-[var(--surface-raised)] rounded-xl">
+                                                <p className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider mb-1">{labelVendas.charAt(0).toUpperCase() + labelVendas.slice(1)}</p>
+                                                <p className="text-xl font-bold text-emerald-400">{realized.sales || 0}</p>
                                             </div>
                                         </div>
                                     </div>
 
-                                    {/* Top Criativos */}
+                                    {/* Galeria de Criativos */}
                                     <div>
-                                        <div className="flex items-center justify-between mb-4">
-                                            <p className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wide">Top Criativos</p>
-                                            <div className="flex gap-2">
-                                                <button
-                                                    onClick={() => setCreativesTab('creatives')}
-                                                    className={cn("px-3 py-1 rounded-lg text-xs font-medium transition-colors", creativesTab === 'creatives' ? "bg-[var(--surface-raised)] text-[var(--text-primary)] border-b-2 border-blue-500" : "text-[var(--text-secondary)] hover:bg-[var(--surface-raised)]")}
-                                                >Criativos</button>
-                                                <button
-                                                    onClick={() => setCreativesTab('campaigns')}
-                                                    className={cn("px-3 py-1 rounded-lg text-xs font-medium transition-colors", creativesTab === 'campaigns' ? "bg-[var(--surface-raised)] text-[var(--text-primary)] border-b-2 border-blue-500" : "text-[var(--text-secondary)] hover:bg-[var(--surface-raised)]")}
-                                                >Campanhas</button>
-                                            </div>
-                                        </div>
-                                        {topPerformers.length > 0 ? (
-                                            <div className="space-y-3">
-                                                {topPerformers.map((item, index) => (
-                                                    <div key={index} className="flex items-center justify-between p-3 bg-[var(--surface-raised)] rounded-xl">
-                                                        <div className="flex items-center gap-3">
-                                                            <div className="w-7 h-7 flex items-center justify-center bg-[var(--surface)] rounded-full font-bold text-xs text-[var(--text-secondary)]">#{index + 1}</div>
-                                                            <div>
-                                                                <p className="font-bold text-[var(--text-primary)] text-sm line-clamp-1" title={item.name}>{item.name}</p>
-                                                                <p className="text-xs text-[var(--text-muted)]">{item.count} venda{item.count !== 1 ? 's' : ''}</p>
-                                                            </div>
-                                                        </div>
-                                                        <p className="font-bold text-emerald-400 text-sm whitespace-nowrap">{formatCurrency(item.revenue)}</p>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        ) : (
-                                            <div className="flex flex-col items-center justify-center h-32 bg-[var(--surface-raised)] rounded-xl">
-                                                <Instagram className="w-10 h-10 text-[var(--text-muted)] mb-2" />
-                                                <p className="text-sm text-[var(--text-secondary)]">Nenhum dado disponível</p>
-                                            </div>
-                                        )}
+                                        <p className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wide mb-4">Galeria de Criativos</p>
+                                        <CreativeGallery
+                                            companyId={company.id}
+                                            dateRange={dateRange}
+                                            cplTarget={targets.cpl || 0}
+                                        />
                                     </div>
                                 </div>
                             )}
@@ -1135,68 +1119,137 @@ export function DashboardMarketing({ company, data, onRefresh, dateRange, setDat
 
                     {/* ═══ ZONA 2B: INVESTIMENTO & EFICIÊNCIA (detalhes operacionais) ═ */}
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                        {/* BLOCK 2: INVESTIMENTO */}
+                        {/* BLOCK 2: INVESTIMENTO & RESULTADOS — grid 2x2 com todas as métricas operacionais */}
                         <div className="bg-[var(--surface)] p-4 sm:p-6 md:p-8 rounded-2xl border border-[var(--border)] relative overflow-hidden">
-                            <div className="flex items-center gap-3 mb-6">
-                                <div className="text-[var(--text-muted)]"><DollarSign className="w-6 h-6" /></div>
-                                <h3 className="text-xl font-bold text-[var(--text-primary)]">Investimento & Resultados</h3>
+                            <div className="flex items-center gap-2 mb-6">
+                                <DollarSign className="w-4 h-4 text-[var(--text-muted)]" />
+                                <h3 className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-widest">Investimento & Resultados</h3>
                             </div>
-                            <div className="space-y-4">
-                                <div className="flex items-center justify-between p-4 bg-[var(--surface-raised)] rounded-2xl">
-                                    <div>
-                                        <p className="text-xs font-bold text-[var(--text-secondary)] uppercase mb-1">Investimento Realizado</p>
-                                        <p className="text-2xl font-black text-[var(--text-primary)]">{formatCurrency(realized.investment)}</p>
-                                    </div>
-                                    <div className="text-right">
-                                        <p className="text-xs font-bold text-[var(--text-secondary)] uppercase mb-1">Meta</p>
-                                        <p className="text-xl font-bold text-[var(--text-secondary)]">{formatCurrency(targets.investment)}</p>
-                                    </div>
-                                    <div className="text-right pl-4 border-l border-[var(--border)]">
-                                        <p className="text-xs font-bold text-[var(--text-secondary)] uppercase mb-1">Atingimento</p>
-                                        <span className={cn("text-lg font-black", investmentPrc > 100 ? "text-red-500" : "text-emerald-500")}>
-                                            {investmentPrc.toFixed(0)}%
-                                        </span>
-                                    </div>
-                                </div>
-                                {/* Leads e Vendas — grid 2 cols */}
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div className="p-3 bg-[var(--surface-raised)] rounded-xl">
-                                        <p className="text-xs font-bold text-[var(--text-secondary)] uppercase mb-1">Leads — Meta</p>
-                                        <p className="text-xl font-black text-[var(--text-primary)]">{realized.leads} <span className="text-sm font-medium text-[var(--text-muted)]">/ {targets.leads}</span></p>
-                                    </div>
-                                    <div className="p-3 bg-[var(--surface-raised)] rounded-xl">
-                                        <p className="text-xs font-bold text-[var(--text-secondary)] uppercase mb-1">Vendas — Meta</p>
-                                        <p className="text-xl font-black text-emerald-400">{realized.sales} <span className="text-sm font-medium text-[var(--text-muted)]">/ {targets.sales}</span></p>
-                                    </div>
-                                </div>
+                            <div className="grid grid-cols-2 gap-4">
+                                {/* Investimento */}
+                                {(() => {
+                                    const pct = targets.investment > 0 ? (realized.investment / targets.investment) * 100 : null;
+                                    const statusColor = pct === null ? 'text-[var(--text-muted)]' : pct <= 100 ? 'text-emerald-400' : 'text-red-400';
+                                    const statusLabel = pct === null ? null : pct > 100 ? 'Acima da meta' : pct >= 70 ? 'No Ritmo' : pct >= 40 ? 'Atenção' : 'Abaixo';
+                                    return (
+                                        <div className="p-4 bg-[var(--surface-raised)] rounded-2xl col-span-2">
+                                            <div className="flex items-start justify-between">
+                                                <div>
+                                                    <p className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">Investimento</p>
+                                                    <p className="text-3xl font-black text-[var(--text-primary)]">{formatCurrency(realized.investment)}</p>
+                                                    {statusLabel && <p className={cn("text-[10px] font-bold mt-1", statusColor)}>{statusLabel}</p>}
+                                                </div>
+                                                <div className="text-right">
+                                                    <p className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">Meta</p>
+                                                    <p className="text-lg font-bold text-[var(--text-secondary)]">{targets.investment > 0 ? formatCurrency(targets.investment) : '–'}</p>
+                                                    {pct !== null && (
+                                                        <span className={cn("text-xl font-black", pct > 100 ? 'text-red-500' : 'text-emerald-500')}>
+                                                            {pct.toFixed(0)}%
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })()}
+
+                                {/* Leads */}
+                                {(() => {
+                                    const pct = targets.leads > 0 ? (realized.leads / targets.leads) * 100 : null;
+                                    const statusColor = pct === null ? 'text-[var(--text-muted)]' : pct >= 70 ? 'text-emerald-400' : pct >= 40 ? 'text-amber-400' : 'text-red-400';
+                                    const statusLabel = pct === null ? null : pct >= 70 ? 'No Ritmo' : pct >= 40 ? 'Atenção' : 'Abaixo';
+                                    return (
+                                        <div className="p-4 bg-[var(--surface-raised)] rounded-xl">
+                                            <p className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">Leads</p>
+                                            {targets.leads > 0 ? (
+                                                <p className="text-2xl font-black text-[var(--text-primary)]">
+                                                    {realized.leads} <span className="text-sm font-medium text-[var(--text-muted)]">/ {targets.leads}</span>
+                                                </p>
+                                            ) : (
+                                                <p className="text-2xl font-black text-[var(--text-primary)]">{realized.leads}</p>
+                                            )}
+                                            {statusLabel && <p className={cn("text-[10px] font-bold mt-1", statusColor)}>{statusLabel}</p>}
+                                        </div>
+                                    );
+                                })()}
+
+                                {/* Vendas */}
+                                {(() => {
+                                    const pct = targets.sales > 0 ? (realized.sales / targets.sales) * 100 : null;
+                                    const statusColor = pct === null ? 'text-[var(--text-muted)]' : pct >= 70 ? 'text-emerald-400' : pct >= 40 ? 'text-amber-400' : 'text-red-400';
+                                    const statusLabel = pct === null ? null : pct >= 70 ? 'No Ritmo' : pct >= 40 ? 'Atenção' : 'Abaixo';
+                                    return (
+                                        <div className="p-4 bg-[var(--surface-raised)] rounded-xl">
+                                            <p className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">{labelVendas.charAt(0).toUpperCase() + labelVendas.slice(1)}</p>
+                                            {targets.sales > 0 ? (
+                                                <p className="text-2xl font-black text-emerald-400">
+                                                    {realized.sales} <span className="text-sm font-medium text-[var(--text-muted)]">/ {targets.sales}</span>
+                                                </p>
+                                            ) : realized.sales === 0 ? (
+                                                <p className="text-2xl font-black text-[var(--text-muted)]">0</p>
+                                            ) : (
+                                                <p className="text-2xl font-black text-emerald-400">{realized.sales}</p>
+                                            )}
+                                            {statusLabel && <p className={cn("text-[10px] font-bold mt-1", statusColor)}>{statusLabel}</p>}
+                                        </div>
+                                    );
+                                })()}
+
+                                {/* CPL Realizado */}
+                                {(() => {
+                                    const cplOk = targets.cpl > 0 && realized.cpl > 0;
+                                    const statusColor = !cplOk ? 'text-[var(--text-muted)]' : realized.cpl <= targets.cpl ? 'text-emerald-400' : realized.cpl <= targets.cpl * 1.3 ? 'text-amber-400' : 'text-red-400';
+                                    const statusLabel = !cplOk ? null : realized.cpl <= targets.cpl ? 'Na Meta' : realized.cpl <= targets.cpl * 1.3 ? 'Atenção' : 'Acima';
+                                    return (
+                                        <div className="p-4 bg-[var(--surface-raised)] rounded-xl col-span-2">
+                                            <div className="flex justify-between items-start">
+                                                <div>
+                                                    <p className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">CPL Realizado</p>
+                                                    <p className="text-2xl font-black text-[var(--text-primary)]">
+                                                        {realized.leads > 0 ? formatCurrency(realized.cpl) : <span className="text-[var(--text-muted)] text-xl font-medium">–</span>}
+                                                    </p>
+                                                    {statusLabel && <p className={cn("text-[10px] font-bold mt-1", statusColor)}>{statusLabel}</p>}
+                                                </div>
+                                                {targets.cpl > 0 && (
+                                                    <div className="text-right">
+                                                        <p className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">Meta CPL</p>
+                                                        <p className="text-lg font-bold text-[var(--text-secondary)]">{formatCurrency(targets.cpl)}</p>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    );
+                                })()}
                             </div>
                         </div>
 
                         {/* BLOCK 3: EFICIÊNCIA (CPL) */}
                         <div className="bg-[var(--surface)] p-4 sm:p-6 md:p-8 rounded-2xl border border-[var(--border)] relative overflow-hidden">
-                            <div className="flex items-center gap-3 mb-6">
-                                <div className="text-[var(--text-muted)]"><Target className="w-6 h-6" /></div>
-                                <h3 className="text-xl font-bold text-[var(--text-primary)]">Eficiência — Custo por Lead (CPL)</h3>
+                            <div className="flex items-center gap-2 mb-6">
+                                <Target className="w-4 h-4 text-[var(--text-muted)]" />
+                                <h3 className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-widest">Eficiência CPL</h3>
                             </div>
                             <div className="grid grid-cols-1 gap-6">
                                 <div className="p-4 bg-[var(--surface-raised)] rounded-2xl flex justify-between items-center">
                                     <div>
-                                        <p className="text-xs font-bold text-[var(--text-secondary)] uppercase mb-1">CPL Realizado</p>
-                                        <p className="text-3xl font-black text-[var(--text-primary)]">{formatCurrency(realized.cpl)}</p>
+                                        <p className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">CPL Realizado</p>
+                                        <p className="text-3xl font-black text-[var(--text-primary)]">
+                                            {realized.leads > 0 ? formatCurrency(realized.cpl) : <span className="text-xl font-medium text-[var(--text-muted)]">–</span>}
+                                        </p>
                                     </div>
                                     <div className="text-right">
-                                        <p className="text-xs font-bold text-[var(--text-secondary)] uppercase mb-1">Meta CPL</p>
-                                        <p className="text-xl font-bold text-[var(--text-secondary)]">{formatCurrency(targets.cpl)}</p>
+                                        <p className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">Meta CPL</p>
+                                        <p className="text-lg font-bold text-[var(--text-secondary)]">{targets.cpl > 0 ? formatCurrency(targets.cpl) : '–'}</p>
                                     </div>
                                 </div>
 
-                                {/* Volume Vendas */}
-                                <div className="p-4 bg-emerald-500/5 rounded-2xl border border-emerald-500/20">
-                                    <p className="text-xs font-bold text-emerald-600/70 uppercase mb-2">
-                                        {company?.name?.toLowerCase().includes('apolar') ? 'Volume Total em Contratos' : 'Volume Total em Apólices'}
+                                {/* CAC — informação única, não exibida nos demais cards */}
+                                <div className="p-4 bg-[var(--surface-raised)] rounded-2xl">
+                                    <p className="text-[10px] font-bold text-[var(--text-secondary)] uppercase tracking-wider mb-1">Custo de Aquisição (CAC)</p>
+                                    <p className="text-3xl font-black text-[var(--text-primary)]">
+                                        {realized.cac > 0 ? formatCurrency(realized.cac) : <span className="text-[var(--text-muted)] text-xl font-medium">Sem {labelVendas}</span>}
                                     </p>
-                                    <p className="text-3xl font-black text-emerald-400">{formatCurrency(realized.volume)}</p>
-                                    <p className="text-xs text-emerald-600/60 mt-1">Meta: {formatCurrency(targets.revenue)}</p>
+                                    <p className="text-[10px] text-[var(--text-muted)] mt-1">Investimento ÷ {labelVendas.charAt(0).toUpperCase() + labelVendas.slice(1)}</p>
                                 </div>
                             </div>
                         </div>

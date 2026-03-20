@@ -29,7 +29,7 @@ export function Layout({ children, currentView, onViewChange, company }) {
             {/* Main content — fixed left margin = collapsed sidebar width */}
             <main
                 className="flex-1 overflow-y-auto overflow-x-hidden min-w-0"
-                style={{ marginLeft: isMobile ? 0 : SIDEBAR_COLLAPSED_W }}
+                style={{ marginLeft: SIDEBAR_COLLAPSED_W }}
             >
                 <div className="max-w-[1440px] mx-auto min-h-full p-4 md:p-6">
                     {isMobile ? (

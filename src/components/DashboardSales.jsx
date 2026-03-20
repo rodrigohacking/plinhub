@@ -324,6 +324,14 @@ export function DashboardSales({ company, data, dateRange, setDateRange }) {
             map[d.seller].insuranceBreakdown[type].won++;
         });
 
+        // 4. Pass: Count Lost Reasons (from relevantDeals filtered for LOST)
+        relevantDeals.filter(d => d.status === 'lost').forEach(d => {
+            if (!d.seller) return;
+            initSeller(d.seller);
+            const reason = d.lossReason || d.loss_reason || 'Sem motivo';
+            map[d.seller].lostReasons[reason] = (map[d.seller].lostReasons[reason] || 0) + 1;
+        });
+
         return Object.values(map)
             .filter(s => s.name !== 'Rodrigo Lopes') // Exclude specific non-seller users
             .map(s => ({
@@ -332,7 +340,7 @@ export function DashboardSales({ company, data, dateRange, setDateRange }) {
                 avgTime: s.won ? s.daysSum / s.won : 0
             })).sort((a, b) => b.wonValue - a.wonValue);
 
-    }, [createdDeals, wonDeals]);
+    }, [createdDeals, wonDeals, relevantDeals]);
 
     // Common Colors
     const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];

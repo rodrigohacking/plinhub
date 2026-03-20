@@ -336,24 +336,24 @@ export const GeneralPerformanceTab = memo(function GeneralPerformanceTab({ metri
                             <h3 className="text-xl font-bold text-foreground">Origem das Vendas</h3>
                             <p className="text-sm text-muted-foreground font-medium">Distribuição por canal de aquisição</p>
                         </div>
-                        <ResponsiveContainer width="100%" height={260}>
-                            <PieChart>
-                                {(() => {
-                                    const counts = {};
-                                    metrics.wonDeals.forEach(d => {
-                                        const ch = d.channel || 'Desconhecido';
-                                        counts[ch] = (counts[ch] || 0) + 1;
-                                    });
-                                    let pieData = Object.keys(counts).map(k => ({ name: k, value: counts[k] })).sort((a, b) => b.value - a.value);
-                                    if (pieData.length > 5) {
-                                        const top5 = pieData.slice(0, 5);
-                                        const others = pieData.slice(5).reduce((acc, curr) => acc + curr.value, 0);
-                                        if (others > 0) top5.push({ name: 'Outros', value: others });
-                                        pieData = top5;
-                                    }
-                                    const total = pieData.reduce((s, d) => s + d.value, 0);
-                                    return (
-                                        <>
+                        {(() => {
+                            const counts = {};
+                            metrics.wonDeals.forEach(d => {
+                                const ch = d.channel || 'Desconhecido';
+                                counts[ch] = (counts[ch] || 0) + 1;
+                            });
+                            let pieData = Object.keys(counts).map(k => ({ name: k, value: counts[k] })).sort((a, b) => b.value - a.value);
+                            if (pieData.length > 5) {
+                                const top5 = pieData.slice(0, 5);
+                                const others = pieData.slice(5).reduce((acc, curr) => acc + curr.value, 0);
+                                if (others > 0) top5.push({ name: 'Outros', value: others });
+                                pieData = top5;
+                            }
+                            const total = pieData.reduce((s, d) => s + d.value, 0);
+                            return (
+                                <div className="relative">
+                                    <ResponsiveContainer width="100%" height={260}>
+                                        <PieChart>
                                             <Pie
                                                 data={pieData}
                                                 cx="35%"
@@ -370,15 +370,23 @@ export const GeneralPerformanceTab = memo(function GeneralPerformanceTab({ metri
                                                     <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
                                                 ))}
                                             </Pie>
-                                            <text x="35%" y="46%" textAnchor="middle" dominantBaseline="middle" fill="#fafafa" fontSize={22} fontWeight={700}>{total}</text>
-                                            <text x="35%" y="57%" textAnchor="middle" dominantBaseline="middle" fill="#71717a" fontSize={11}>vendas</text>
-                                        </>
-                                    );
-                                })()}
-                                <Tooltip {...TOOLTIP_STYLE} formatter={(value, name) => [value, name]} />
-                                <Legend verticalAlign={isMobile ? 'bottom' : 'middle'} align={isMobile ? 'center' : 'right'} layout={isMobile ? 'horizontal' : 'vertical'} iconSize={8} iconType="circle" wrapperStyle={{ fontSize: '12px', paddingTop: isMobile ? '20px' : '0', color: '#71717a' }} />
-                            </PieChart>
-                        </ResponsiveContainer>
+                                            <Tooltip {...TOOLTIP_STYLE} formatter={(value, name) => [value, name]} />
+                                            <Legend verticalAlign={isMobile ? 'bottom' : 'middle'} align={isMobile ? 'center' : 'right'} layout={isMobile ? 'horizontal' : 'vertical'} iconSize={8} iconType="circle" wrapperStyle={{ fontSize: '12px', paddingTop: isMobile ? '20px' : '0', color: '#71717a' }} />
+                                        </PieChart>
+                                    </ResponsiveContainer>
+                                    {/* Center label overlay — avoids SVG clipping issues */}
+                                    <div
+                                        className="absolute pointer-events-none"
+                                        style={{ top: '50%', left: '35%', transform: 'translate(-50%, -50%)' }}
+                                    >
+                                        <div className="text-center leading-tight">
+                                            <div className="text-[22px] font-bold text-white">{total}</div>
+                                            <div className="text-[11px] text-zinc-500">vendas</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })()}
                     </div>
                 )}
             </div>
